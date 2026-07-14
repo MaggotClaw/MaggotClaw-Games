@@ -39,7 +39,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     const appWindow = getCurrentWindow();
     void appWindow.setAlwaysOnTop(true);
     void appWindow.setDecorations(false);
-    void appWindow.setResizable(true).then(() => appWindow.setSize(new LogicalSize(310, 82))).then(() => appWindow.setResizable(false));
+    void appWindow.setResizable(true).then(() => appWindow.setSize(new LogicalSize(544, 74))).then(() => appWindow.setResizable(false));
     return () => {
       void appWindow.setAlwaysOnTop(false);
       void appWindow.setDecorations(true);
@@ -296,18 +296,16 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
   const busy = state === "sending" || state === "waiting";
   const current = segments[segmentIndex];
 
-  const stateLabel = listening ? heardWords.current ? `${secondsRemaining.toFixed(1)}s` : "Listening" : busy ? "Waiting" : reading ? current?.kind === "skipped" ? "Box skipped" : `Reading ${segmentIndex + 1}/${segments.length}` : targetReady ? "Ready" : "No Codex";
-  return <main className={`voice-floater ${listening ? "is-listening" : ""} ${reading ? "is-reading" : ""}`} title={status}>
-    <button className="drag-handle" aria-label="Move voice bar" title="Drag to move" onPointerDown={() => { if ("__TAURI_INTERNALS__" in window) void getCurrentWindow().startDragging(); }}>⠿</button>
-    <button className="icon-control" aria-label="Targets" title="Targets" onClick={leaveCompanion}>⌂</button>
-    <button className="icon-control main-mic" aria-label={reading ? playing ? "Pause reading" : "Continue reading" : "Start talking"} title={reading ? playing ? "Pause" : "Continue" : "Talk"} disabled={busy || (!reading && (!targetReady || listening))} onClick={reading ? pauseOrContinue : startTalking}>{reading ? playing ? "Ⅱ" : "▶" : listening ? "●" : "🎙"}</button>
+  return <main className={`voice-floater ${listening ? "is-listening" : ""} ${reading ? "is-reading" : ""}`} title={status} onPointerDown={(event) => { if (!(event.target as HTMLElement).closest("button") && "__TAURI_INTERNALS__" in window) void getCurrentWindow().startDragging(); }}>
+    <button className="icon-control main-mic" aria-label="Start talking" title="Talk" disabled={busy || !targetReady || listening} onClick={startTalking}>●</button>
     <button className="icon-control" aria-label={`Add ${settings.addSeconds} seconds`} title={`Add ${settings.addSeconds} seconds`} disabled={!listening} onClick={addTime}>＋</button>
-    <button className="icon-control" aria-label="Send now or next part" title={listening ? "Send now" : "Next part"} disabled={!listening && !reading} onClick={listening ? finishAndSend : () => movePart(1)}>{listening ? "➤" : "≫"}</button>
-    <button className="icon-control" aria-label="Repeat or read skipped box" title={lastSkipped && reading ? "Read skipped box" : "Repeat"} disabled={!reading} onClick={lastSkipped && reading ? readSkippedBox : () => speakAt(segmentIndex)}>↻</button>
-    <button className="icon-control" aria-label="Skip reply" title="Skip reply" disabled={!reading} onClick={skipReply}>≫|</button>
+    <span className="voice-wave" aria-label={listening ? "Voice detected" : "Voice waveform"}>{[1,2,3,4,5,6,7].map((bar) => <i key={bar} />)}</span>
+    <span className="countdown-display">{secondsRemaining.toFixed(1)}s</span>
+    <button className="icon-control send-control" aria-label="Send now" title="Send now" disabled={!listening} onClick={finishAndSend}>➤</button>
+    <button className="icon-control" aria-label={playing ? "Pause reading" : "Continue reading"} title={playing ? "Pause" : "Play"} disabled={!reading} onClick={pauseOrContinue}>{playing ? "Ⅱ" : "▶"}</button>
+    <button className="icon-control" aria-label="Skip reply" title="Skip reply" disabled={!reading} onClick={skipReply}>≫</button>
     <button className="icon-control stop-control" aria-label="Stop everything" title="Stop everything" disabled={state === "idle"} onClick={stopEverything}>■</button>
     <button className="icon-control" aria-label="Settings" title="Settings" onClick={onSettings}>⚙</button>
-    <span className="floater-state">{stateLabel}</span>
   </main>;
 }
 
