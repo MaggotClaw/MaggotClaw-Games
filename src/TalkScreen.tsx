@@ -39,7 +39,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     const appWindow = getCurrentWindow();
     void appWindow.setAlwaysOnTop(true);
     void appWindow.setDecorations(false);
-    void appWindow.setResizable(true).then(() => appWindow.setSize(new LogicalSize(230, 72))).then(() => appWindow.setResizable(false));
+    void appWindow.setResizable(true).then(() => appWindow.setSize(new LogicalSize(310, 82))).then(() => appWindow.setResizable(false));
     return () => {
       void appWindow.setAlwaysOnTop(false);
       void appWindow.setDecorations(true);

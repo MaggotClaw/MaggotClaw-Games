@@ -145,7 +145,7 @@ kbd { padding: 2px 7px; color: #2b241d; background: #fffaf0; border: 1px solid #
 .stable-controls .add-time-button { color: #24160b; background: #e1b45e; border-color: #9d6c2c; }
 .stable-controls .cancel-control { color: #fff5ef; background: #71362e; border-color: #9b5147; }
 .stable-controls button:disabled { cursor: not-allowed; filter: grayscale(.75); opacity: .35; }
-.voice-floater { width: 100vw; height: 100vh; display: grid; grid-template-columns: repeat(9, 1fr); grid-template-rows: 43px 19px; gap: 1px; padding: 4px 5px; overflow: hidden; color: #f5eee2; background: #17130feF; border: 1px solid #70553b; border-radius: 18px; box-shadow: 0 6px 20px #0008; }
+.voice-floater { width: 100vw; height: 100vh; display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); grid-template-rows: 50px 22px; gap: 1px; padding: 4px 10px; overflow: hidden; color: #f5eee2; background: #17130feF; border: 1px solid #70553b; border-radius: 20px; box-shadow: 0 6px 20px #0008; }
 .voice-floater button { width: 22px; height: 22px; align-self: center; justify-self: center; padding: 0; color: #eee5d8; background: #2a231d; border: 1px solid #5d4a39; border-radius: 50%; font: 700 10px/1 Arial, sans-serif; }
 .voice-floater button:disabled { opacity: .22; }
 .voice-floater .drag-handle { cursor: move; color: #a9957d; background: transparent; border-color: transparent; font-size: 14px; }
