@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "reader-window",
+  "description": "Minimum permissions for the main reader window.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
