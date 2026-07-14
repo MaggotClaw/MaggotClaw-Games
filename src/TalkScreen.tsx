@@ -43,10 +43,15 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     localStorage.setItem("long-rot-companion-active", "true");
     if (!("__TAURI_INTERNALS__" in window)) return;
     const appWindow = getCurrentWindow();
-    void appWindow.setAlwaysOnTop(true);
-    void appWindow.setDecorations(false);
-    void appWindow.setShadow(false);
-    void appWindow.unmaximize().then(() => appWindow.setResizable(true)).then(() => appWindow.setSize(new LogicalSize(550, 80))).then(() => appWindow.setResizable(false));
+    void (async () => {
+      await appWindow.unmaximize();
+      await appWindow.setResizable(true);
+      await appWindow.setDecorations(false);
+      await appWindow.setShadow(false);
+      await appWindow.setSize(new LogicalSize(550, 80));
+      await appWindow.setResizable(false);
+      await appWindow.setAlwaysOnTop(true);
+    })().catch((error) => setStatus(`The compact voice bar could not finish opening: ${message(error)}`));
     return () => {
       void appWindow.setAlwaysOnTop(false);
       void appWindow.setDecorations(true);
