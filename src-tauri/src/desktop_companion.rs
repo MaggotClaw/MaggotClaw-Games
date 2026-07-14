@@ -4,6 +4,8 @@ use uiautomation::{
     core::{UIAutomation, UIElement},
     types::ControlType,
 };
+use windows::Win32::Foundation::HWND;
+use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
 #[derive(Serialize)]
 pub struct CodexTargetStatus {
@@ -11,6 +13,19 @@ pub struct CodexTargetStatus {
     pub ready: bool,
     pub label: String,
     pub detail: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexResponseState {
+    pub busy: bool,
+    pub has_completed_response: bool,
+}
+
+fn automation() -> Result<UIAutomation, String> {
+    UIAutomation::new()
+        .or_else(|_| UIAutomation::new_direct())
+        .map_err(|_| "Windows accessibility could not start.".to_string())
 }
 
 fn codex_window(automation: &UIAutomation) -> Result<UIElement, String> {
@@ -54,12 +69,10 @@ fn codex_composer(automation: &UIAutomation, window: UIElement) -> Result<UIElem
 
 #[tauri::command]
 pub fn codex_target_status() -> CodexTargetStatus {
-    let result = UIAutomation::new()
-        .map_err(|_| "Windows accessibility could not start.".to_string())
-        .and_then(|automation| {
-            let window = codex_window(&automation)?;
-            codex_composer(&automation, window).map(|_| ())
-        });
+    let result = automation().and_then(|automation| {
+        let window = codex_window(&automation)?;
+        codex_composer(&automation, window).map(|_| ())
+    });
     match result {
         Ok(()) => CodexTargetStatus {
             found: true,
@@ -82,8 +95,7 @@ pub fn insert_codex_draft(draft: String) -> Result<(), String> {
     if draft.is_empty() {
         return Err("Say or type something first.".to_string());
     }
-    let automation =
-        UIAutomation::new().map_err(|_| "Windows accessibility could not start.".to_string())?;
+    let automation = automation()?;
     let window = codex_window(&automation)?;
     let composer = codex_composer(&automation, window)?;
     composer
@@ -95,9 +107,68 @@ pub fn insert_codex_draft(draft: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn clear_codex_draft() -> Result<(), String> {
+    let automation = automation()?;
+    let window = codex_window(&automation)?;
+    let composer = codex_composer(&automation, window)?;
+    composer
+        .send_keys("{ctrl}a{backspace}", 0)
+        .map_err(|_| "The unsent Codex message could not be cleared.".to_string())
+}
+
+#[tauri::command]
+pub fn send_codex_message(draft: String) -> Result<(), String> {
+    insert_codex_draft(draft)?;
+    let automation = automation()?;
+    let window = codex_window(&automation)?;
+    let composer = codex_composer(&automation, window)?;
+    composer
+        .send_keys("{enter}", 0)
+        .map_err(|_| "The draft is in Codex, but Windows could not press Send.".to_string())
+}
+
+#[tauri::command]
+pub fn codex_response_state() -> Result<CodexResponseState, String> {
+    let automation = automation()?;
+    let window = codex_window(&automation)?;
+    let busy = automation
+        .create_matcher()
+        .from(window.clone())
+        .control_type(ControlType::Button)
+        .match_name("Stop")
+        .depth(40)
+        .timeout(0)
+        .find_first()
+        .is_ok();
+    let has_completed_response = automation
+        .create_matcher()
+        .from(window)
+        .control_type(ControlType::Button)
+        .match_name("Copy")
+        .depth(40)
+        .timeout(0)
+        .find_first()
+        .is_ok();
+    Ok(CodexResponseState {
+        busy,
+        has_completed_response,
+    })
+}
+
+#[tauri::command]
+pub fn codex_is_foreground() -> Result<bool, String> {
+    let automation = automation()?;
+    let window = codex_window(&automation)?;
+    let target: HWND = window
+        .get_native_window_handle()
+        .map_err(|_| "Codex's Windows handle is unavailable.".to_string())?
+        .into();
+    Ok(unsafe { GetForegroundWindow() } == target)
+}
+
+#[tauri::command]
 pub fn copy_latest_codex_response() -> Result<String, String> {
-    let automation =
-        UIAutomation::new().map_err(|_| "Windows accessibility could not start.".to_string())?;
+    let automation = automation()?;
     let window = codex_window(&automation)?;
     let copy_buttons = automation
         .create_matcher()

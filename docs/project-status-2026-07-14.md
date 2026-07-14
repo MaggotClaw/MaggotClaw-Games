@@ -4,8 +4,8 @@
 
 - Voice application repository: `C:\Users\QinOt\the-long-rot-voice`
 - MCP repository: `C:\Users\QinOt\the-long-rot-mcp`
-- Installed application: `C:\Users\QinOt\AppData\Local\The Long Rot Reader\the-long-rot-voice.exe`
-- Installed development version: `0.2.0`
+- Installed application name: `MaggotClaw Games Reader`
+- Installed development version: `0.4.0`
 - Latest local source commit before this documentation update: `f649524`
 - No remote was created for the voice application and nothing was pushed.
 - The MCP repository was inspected read-only and remained unchanged.
@@ -194,3 +194,64 @@ Verification completed for this slice:
 - Windows accessibility inspection confirmed the Codex document, ProseMirror composer, Dictate control, and response Copy controls.
 
 Automatic Send remains intentionally disabled until the user has checked the inserted draft in Codex.
+
+## Automatic Codex voice loop — version 0.4.0
+
+The Codex-only companion now supports the approved continuous conversation loop:
+
+1. Start Talking begins microphone capture.
+2. Speech activity resets the visible silence countdown.
+3. Add 5 Seconds increases the silence allowance without a small fixed limit.
+4. Countdown completion finishes transcription, inserts the message into the verified Codex composer, and presses Enter.
+5. The companion detects Codex's busy state and waits for a new completed response.
+6. The newest response is loaded and read with free Windows voices in paragraph-sized segments.
+7. When playback finishes, listening begins again automatically.
+
+The user can cancel recording, finish and send immediately, pause or continue reading, repeat or move between paragraphs, adjust speed, stop the loop, or start talking again. Companion mode resizes to a compact always-on-top Windows panel. Reader Mode remains available and restores the full window size.
+
+Automatic sending is enabled only from the verified Codex target. Regular ChatGPT and Claude adapters remain future work. Individually movable controls are an approved follow-up after the basic loop is proven with live microphone use.
+
+## Future onboarding and profile recovery requirement
+
+Add a guided onboarding program for every new user, including Readers, Writers, and Editors. This belongs in the future work queue and is not part of the current Codex voice-loop slice.
+
+- Onboarding collects the approved user identity, role, nickname, preferences, and a user-chosen four-digit PIN.
+- Name plus PIN identifies a returning user when activating a newly installed or repaired computer.
+- Normal use remains locally available after activation.
+- Approved profile information and settings should synchronize to that user's personal Long Rot profile file for recovery.
+- On a new computer, the program asks for name and PIN, offers to restore existing settings, and may collect any newly required onboarding information.
+- Requiring the PIN at every program start is optional and disabled by default.
+- Store verification data safely; do not record the plain PIN in project documentation, logs, or ordinary settings files.
+
+## Confirmed product structure — 2026-07-14
+
+The installable Windows program is named **MaggotClaw Games Reader**. It uses one profile and settings system with clearly separated modes:
+
+- Reader Mode preserves Reader Copy reading, playback, position, comments, recovery, and local feedback review.
+- Voice Companion opens a target selector. Codex is implemented first; ChatGPT and Claude remain disabled placeholders until their adapters are built.
+- Test Profile — Local Only provides both modes without onboarding or synchronization and is visibly marked as test mode.
+
+Confirmed Codex defaults and behavior:
+
+- Microphone starts only after Start Talking is pressed.
+- Recognized words appear directly in the Codex composer rather than a second transcript box.
+- Default silence before automatic Send is two seconds.
+- Add Time adds five seconds by default; both values are profile settings.
+- The visible countdown always shows the actual remaining time.
+- Cancel stops listening and reading, clears any unsent Codex draft, and ends the loop.
+- Codex generation disables Start Talking. Start Talking is available while a completed reply is being read and interrupts playback.
+- Completed replies read automatically, then listening restarts automatically.
+- Skip Reply immediately returns to listening.
+- Fenced code or output boxes are announced as “Content box skipped.” Read Skipped Box reads the most recently skipped box on request.
+- Reading speed lives in Settings rather than the main control panel.
+- All main controls remain in stable positions; unavailable controls are dimmed. The implementation must permit separately movable controls later.
+- The panel stays above Codex but drops out of always-on-top behavior when another unrelated program is active.
+- Conversation text is not duplicated in local history. Only profile settings and future button positions are stored.
+
+Future profile and support requirements:
+
+- One main shortcut opens profile selection; direct mode shortcuts are deferred.
+- Every user eventually completes onboarding with name and a four-digit PIN. First activation on a computer restores the profile; requiring PIN at every launch is optional and off by default.
+- Profile settings are local-first and may synchronize to the user's personal Long Rot profile file for recovery.
+- Project authorization must be one-button and hide technical credentials from normal users.
+- Temporary support access is request-based, read-only by default, expires after 30 minutes, and excludes manuscript text, conversations, PINs, and credentials from diagnostics.

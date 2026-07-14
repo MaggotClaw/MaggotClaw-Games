@@ -1,157 +1,313 @@
+import { LogicalSize } from "@tauri-apps/api/dpi";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createCodexAdapter } from "./desktopConversation";
 import { CommentRecorder } from "./recorder";
-import { responseParagraphs } from "./responseSegments";
+import { responsePlaybackSegments, type ResponsePlaybackSegment } from "./responseSegments";
 import { BrowserSpeechPlayer } from "./speech";
+import { loadVoiceSettings } from "./voiceSettings";
 
-type CompanionState = "idle" | "recording" | "review" | "response";
+type CompanionState = "idle" | "recording" | "sending" | "waiting" | "response";
 
-export function TalkScreen({ readerName, onBack }: { readerName: string; onBack: () => void }) {
+export function TalkScreen({ readerName, onBack, onSettings }: { readerName: string; onBack: () => void; onSettings: () => void }) {
+  const settings = useMemo(() => loadVoiceSettings(readerName), [readerName]);
   const [state, setState] = useState<CompanionState>("idle");
   const [transcript, setTranscript] = useState("");
-  const [response, setResponse] = useState("");
-  const [paragraphIndex, setParagraphIndex] = useState(0);
+  const [segments, setSegments] = useState<ResponsePlaybackSegment[]>([]);
+  const [segmentIndex, setSegmentIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [rate, setRate] = useState(1);
-  const [allowance, setAllowance] = useState(5);
-  const [secondsRemaining, setSecondsRemaining] = useState(5);
-  const [status, setStatus] = useState("Ready — uses your existing Codex account and free Windows voices");
+  const [secondsRemaining, setSecondsRemaining] = useState(settings.silenceSeconds);
+  const [status, setStatus] = useState("Ready — press Start Talking once");
+  const [targetReady, setTargetReady] = useState(false);
+  const [lastSkipped, setLastSkipped] = useState("");
   const recorder = useRef(new CommentRecorder());
   const player = useRef(new BrowserSpeechPlayer());
   const silenceDeadline = useRef(0);
-  const allowanceRef = useRef(5);
+  const heardWords = useRef(false);
   const finishing = useRef(false);
+  const baselineResponse = useRef("");
+  const sawBusy = useRef(false);
+  const waitingStarted = useRef(0);
+  const playbackCycle = useRef(0);
+  const segmentsRef = useRef<ResponsePlaybackSegment[]>([]);
+  const liveDraftTimer = useRef<number | null>(null);
   const adapter = useMemo(createCodexAdapter, []);
-  const [targetReady, setTargetReady] = useState(false);
-  const paragraphs = useMemo(() => responseParagraphs(response), [response]);
-
-  useEffect(() => () => { recorder.current.cancel(); player.current.stop(); }, []);
 
   useEffect(() => {
-    if (!adapter.status) { setTargetReady(false); return; }
+    localStorage.setItem("long-rot-companion-active", "true");
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    const appWindow = getCurrentWindow();
+    void appWindow.setAlwaysOnTop(true);
+    void appWindow.setDecorations(false);
+    void appWindow.setResizable(true).then(() => appWindow.setSize(new LogicalSize(230, 72))).then(() => appWindow.setResizable(false));
+    return () => {
+      void appWindow.setAlwaysOnTop(false);
+      void appWindow.setDecorations(true);
+      void appWindow.setResizable(true);
+      void appWindow.setSize(new LogicalSize(1120, 820));
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window) || !adapter.targetForeground) return;
+    const appWindow = getCurrentWindow();
+    const timer = window.setInterval(() => {
+      void adapter.targetForeground!().then((codexActive) => {
+        void appWindow.setAlwaysOnTop(document.hasFocus() || codexActive);
+      }).catch(() => undefined);
+    }, 900);
+    return () => window.clearInterval(timer);
+  }, [adapter]);
+
+  useEffect(() => () => {
+    playbackCycle.current += 1;
+    recorder.current.cancel();
+    player.current.stop();
+    if (liveDraftTimer.current !== null) window.clearTimeout(liveDraftTimer.current);
+  }, []);
+
+  useEffect(() => {
+    if (!adapter.status) {
+      setStatus("The automatic loop requires the installed Windows application.");
+      return;
+    }
     void adapter.status().then((result) => {
       setTargetReady(result.ready);
-      setStatus(result.detail);
+      setStatus(result.ready ? "Codex connected — press Start Talking" : result.detail);
     }).catch((error) => setStatus(message(error)));
   }, [adapter]);
 
   useEffect(() => {
     if (state !== "recording") return;
     const timer = window.setInterval(() => {
-      const remaining = Math.max(0, Math.ceil((silenceDeadline.current - Date.now()) / 1000));
+      if (!heardWords.current) {
+        setSecondsRemaining(settings.silenceSeconds);
+        return;
+      }
+      const remaining = Math.max(0, Math.ceil((silenceDeadline.current - Date.now()) / 100) / 10);
       setSecondsRemaining(remaining);
-      if (remaining === 0 && !finishing.current) void finishTalking();
-    }, 250);
+      if (remaining === 0 && !finishing.current) void finishAndSend();
+    }, 100);
     return () => window.clearInterval(timer);
-  }, [state]);
+  }, [state, settings.silenceSeconds]);
+
+  useEffect(() => {
+    if (state !== "waiting" || !adapter.responseState) return;
+    let checking = false;
+    const timer = window.setInterval(async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        const responseState = await adapter.responseState!();
+        if (responseState.busy) {
+          sawBusy.current = true;
+          setStatus("Codex is answering…");
+          return;
+        }
+        const oldEnough = Date.now() - waitingStarted.current > 2500;
+        if ((sawBusy.current || oldEnough) && responseState.hasCompletedResponse) {
+          const latest = await adapter.readCopiedResponse();
+          if (latest.trim() && latest.trim() !== baselineResponse.current.trim()) {
+            window.clearInterval(timer);
+            beginReply(latest);
+          }
+        }
+        if (Date.now() - waitingStarted.current > 10 * 60 * 1000) {
+          window.clearInterval(timer);
+          setState("idle");
+          setStatus("Stopped waiting after ten minutes. Press Start Talking when ready.");
+        }
+      } catch (error) {
+        setStatus(`${message(error)} I’ll keep checking.`);
+      } finally {
+        checking = false;
+      }
+    }, 1200);
+    return () => window.clearInterval(timer);
+  }, [state, adapter]);
+
+  function updateLiveDraft(words: string) {
+    setTranscript(words);
+    if (!words.trim()) return;
+    heardWords.current = true;
+    silenceDeadline.current = Date.now() + settings.silenceSeconds * 1000;
+    if (liveDraftTimer.current !== null) window.clearTimeout(liveDraftTimer.current);
+    liveDraftTimer.current = window.setTimeout(() => {
+      void adapter.insertDraft(words).catch((error) => setStatus(message(error)));
+    }, 180);
+  }
 
   async function startTalking() {
+    if (state === "waiting" || state === "sending") return;
+    playbackCycle.current += 1;
     player.current.stop();
+    recorder.current.cancel();
     setPlaying(false);
     setTranscript("");
-    setAllowance(5);
-    allowanceRef.current = 5;
-    setSecondsRemaining(5);
-    silenceDeadline.current = Date.now() + 5000;
+    heardWords.current = false;
+    setSecondsRemaining(settings.silenceSeconds);
+    silenceDeadline.current = Date.now() + settings.silenceSeconds * 1000;
     try {
+      await adapter.clearDraft?.();
       await recorder.current.start(
-        () => { silenceDeadline.current = Date.now() + allowanceRef.current * 1000; },
-        setTranscript
+        () => { if (heardWords.current) silenceDeadline.current = Date.now() + settings.silenceSeconds * 1000; },
+        updateLiveDraft
       );
       setState("recording");
-      setStatus("Listening — you can add more quiet time whenever you need it");
+      setStatus("Listening — your words are appearing directly in Codex");
     } catch (error) {
-      setState("review");
-      setStatus(`${message(error)} You can type your message instead.`);
+      setState("idle");
+      setStatus(`${message(error)} Microphone access is required.`);
     }
   }
 
-  async function finishTalking() {
+  async function finishAndSend() {
     if (finishing.current) return;
     finishing.current = true;
+    setState("sending");
+    setStatus("Finishing your message…");
     try {
       const result = await recorder.current.stop();
-      setTranscript((current) => result.transcription || current);
-      setState("review");
-      setStatus("Check the words before putting them into Codex");
+      const words = (result.transcription || transcript).trim();
+      if (!words) {
+        await adapter.clearDraft?.();
+        setState("idle");
+        setStatus("I did not hear any words. Press Start Talking and try again.");
+        return;
+      }
+      if (!adapter.sendMessage || !adapter.responseState) throw new Error("Automatic Send requires the installed Windows companion.");
+      try { baselineResponse.current = await adapter.readCopiedResponse(); } catch { baselineResponse.current = ""; }
+      await adapter.sendMessage(words);
+      sawBusy.current = false;
+      waitingStarted.current = Date.now();
+      setState("waiting");
+      setStatus("Sent — waiting for Codex to answer…");
+    } catch (error) {
+      setState("idle");
+      setStatus(`${message(error)} Press Start Talking to try again.`);
     } finally {
       finishing.current = false;
     }
   }
 
-  function addFiveSeconds() {
-    allowanceRef.current += 5;
-    setAllowance(allowanceRef.current);
-    setSecondsRemaining((current) => current + 5);
-    silenceDeadline.current += 5000;
+  function addTime() {
+    silenceDeadline.current += settings.addSeconds * 1000;
+    setSecondsRemaining((current) => Math.round((current + settings.addSeconds) * 10) / 10);
   }
 
-  async function copyForCodex() {
-    try {
-      await adapter.insertDraft(transcript);
-      setStatus(targetReady ? "Draft inserted into Codex. Check it there before pressing Send." : "Copied. Go to Codex, click its message box, and press Ctrl+V. Check it before sending.");
-    } catch (error) { setStatus(message(error)); }
+  function beginReply(text: string) {
+    const parts = responsePlaybackSegments(text, settings.skipContentBoxes);
+    if (!parts.length) {
+      setState("idle");
+      setStatus("The Codex response was empty. Press Start Talking to continue.");
+      return;
+    }
+    segmentsRef.current = parts;
+    setSegments(parts);
+    setSegmentIndex(0);
+    setState("response");
+    if (settings.readRepliesAutomatically) {
+      const cycle = ++playbackCycle.current;
+      window.setTimeout(() => speakAt(0, cycle), 250);
+    } else {
+      setStatus("Reply ready — press Read Reply or Start Talking");
+    }
   }
 
-  async function loadCopiedResponse() {
-    try {
-      const copied = await adapter.readCopiedResponse();
-      setResponse(copied);
-      setParagraphIndex(0);
-      setState("response");
-      setStatus("Response loaded — ready to read aloud");
-    } catch (error) { setStatus(message(error)); }
-  }
-
-  function speakAt(index: number) {
-    const paragraph = paragraphs[index];
-    if (!paragraph) { setPlaying(false); setStatus("Finished reading"); return; }
-    setParagraphIndex(index);
-    setPlaying(true);
-    setStatus(`Reading paragraph ${index + 1} of ${paragraphs.length}`);
-    player.current.speak(paragraph, rate, () => speakAt(index + 1), () => {
+  function speakAt(index: number, cycle = playbackCycle.current) {
+    if (cycle !== playbackCycle.current) return;
+    const segment = segmentsRef.current[index];
+    if (!segment) {
       setPlaying(false);
-      setStatus("Windows speech needs attention. The written response is still available.");
+      if (settings.listenAfterReading) {
+        setStatus("Finished reading — listening again…");
+        window.setTimeout(() => { if (cycle === playbackCycle.current) void startTalking(); }, 650);
+      } else {
+        setState("idle");
+        setStatus("Finished reading — press Start Talking when ready");
+      }
+      return;
+    }
+    if (segment.kind === "skipped" && segment.hiddenText) setLastSkipped(segment.hiddenText);
+    setSegmentIndex(index);
+    setPlaying(true);
+    setStatus(`Reading part ${index + 1} of ${segmentsRef.current.length}`);
+    player.current.speak(segment.spokenText, settings.speechRate, () => speakAt(index + 1, cycle), () => {
+      setPlaying(false);
+      setStatus("Windows speech stopped. Press Continue, Read Again, or Start Talking.");
     });
   }
 
   function pauseOrContinue() {
     if (playing && !player.current.paused) {
-      player.current.pause();
-      setPlaying(false);
-      setStatus("Paused");
+      player.current.pause(); setPlaying(false); setStatus("Reading paused");
     } else if (player.current.paused) {
-      player.current.resume();
-      setPlaying(true);
-      setStatus("Continuing");
-    } else speakAt(paragraphIndex);
+      player.current.resume(); setPlaying(true); setStatus("Reading continued");
+    } else speakAt(segmentIndex);
   }
 
-  function moveParagraph(amount: number) {
+  function movePart(amount: number) {
+    playbackCycle.current += 1;
+    player.current.stop();
+    const next = Math.max(0, Math.min(segmentIndex + amount, Math.max(0, segments.length - 1)));
+    setSegmentIndex(next);
+    segmentsRef.current = segments;
+    speakAt(next, playbackCycle.current);
+  }
+
+  function readSkippedBox() {
+    if (!lastSkipped) return;
+    playbackCycle.current += 1;
+    player.current.stop();
+    setPlaying(true);
+    setStatus("Reading the skipped content box");
+    const cycle = playbackCycle.current;
+    player.current.speak(lastSkipped, settings.speechRate, () => speakAt(segmentIndex + 1, cycle), () => setPlaying(false));
+  }
+
+  function skipReply() {
+    playbackCycle.current += 1;
     player.current.stop();
     setPlaying(false);
-    const next = Math.max(0, Math.min(paragraphIndex + amount, Math.max(0, paragraphs.length - 1)));
-    setParagraphIndex(next);
-    setStatus(`Paragraph ${next + 1} of ${paragraphs.length}`);
+    if (settings.listenAfterReading) void startTalking();
+    else { setState("idle"); setStatus("Reply skipped — press Start Talking when ready"); }
   }
 
-  return <main className="app-shell talk-shell">
-    <header className="topbar"><button className="text-button" onClick={onBack}>← Reader Mode</button><span className="eyebrow">WINDOWS CODEX COMPANION</span><span>{readerName}</span></header>
-    <section className="target-banner"><strong>Target: {adapter.target.name}</strong><span>{targetReady ? "Connected" : "Clipboard fallback"} • No API key • No separate AI charge</span></section>
+  function stopEverything() {
+    playbackCycle.current += 1;
+    recorder.current.cancel();
+    player.current.stop();
+    if (liveDraftTimer.current !== null) window.clearTimeout(liveDraftTimer.current);
+    if (state === "recording" || state === "sending") void adapter.clearDraft?.();
+    setPlaying(false);
+    setTranscript("");
+    setState("idle");
+    setStatus("Stopped — press Start Talking when you are ready");
+  }
 
-    {state === "idle" && <>
-      <section className="talk-heading"><p className="eyebrow">VOICE INPUT</p><h1>Talk to Codex.</h1><p>Speak here, check the words, then move them safely into your current Codex task.</p></section>
-      <button className="talk-button" onClick={startTalking}><span>●</span> Start Talking</button>
-      <button className="load-response" onClick={loadCopiedResponse}>Read a Copied Codex Response</button>
-    </>}
+  function leaveCompanion() {
+    localStorage.removeItem("long-rot-companion-active");
+    stopEverything();
+    onBack();
+  }
 
-    {state === "recording" && <section className="talk-recording"><div className="recording-pulse"/><h1>I’m listening.</h1><p>{transcript || "Speak now…"}</p><div className="silence-time"><span>Quiet time allowed</span><strong>{allowance} seconds</strong><small>{secondsRemaining} seconds remaining</small></div><div className="companion-actions"><button onClick={addFiveSeconds}>+ Add 5 Seconds</button><button className="send-talk" onClick={finishTalking}>Finish</button></div></section>}
+  const reading = state === "response";
+  const listening = state === "recording";
+  const busy = state === "sending" || state === "waiting";
+  const current = segments[segmentIndex];
 
-    {state === "review" && <section className="talk-review"><h1>Check your message.</h1><label>Your words<textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} rows={7}/></label><div className="companion-actions"><button onClick={startTalking}>Start Over</button><button onClick={() => { recorder.current.cancel(); setState("idle"); setTranscript(""); }}>Cancel</button><button className="send-talk" onClick={copyForCodex}>{targetReady ? "Put Draft Into Codex" : "Copy for Codex"}</button></div><div className="next-step"><strong>Next:</strong> {targetReady ? "Check the message in Codex. It will not send until you press Codex’s Send button." : <>Open Codex, click the message box, press <kbd>Ctrl</kbd> + <kbd>V</kbd>, and check the message before sending it.</>}</div><button className="load-response" onClick={loadCopiedResponse}>{targetReady ? "Get Latest Codex Response and Read It" : "I Copied the Codex Response — Read It"}</button></section>}
-
-    {state === "response" && <section className="answer-card"><p className="eyebrow">SPOKEN RESPONSE</p><h1>Paragraph {paragraphIndex + 1} of {Math.max(1, paragraphs.length)}</h1><p>{paragraphs[paragraphIndex] || response}</p><div className="playback-grid"><button onClick={() => moveParagraph(-1)}>Previous Paragraph</button><button className="send-talk" onClick={pauseOrContinue}>{playing ? "Pause" : player.current.paused ? "Continue" : "Read Aloud"}</button><button onClick={() => moveParagraph(1)}>Next Paragraph</button><button onClick={() => speakAt(paragraphIndex)}>Repeat Paragraph</button><button onClick={() => { player.current.stop(); setPlaying(false); setStatus("Stopped"); }}>Stop</button><button onClick={() => setRate((value) => Math.max(.6, value - .1))}>Slower</button><button onClick={() => setRate((value) => Math.min(1.8, value + .1))}>Faster</button><button className="send-talk" onClick={() => { player.current.stop(); setState("idle"); setResponse(""); setTranscript(""); }}>Talk Again</button></div><p className="speed-label">Voice speed: {rate.toFixed(1)}×</p></section>}
-
-    <footer className="safe-status">{status}</footer>
+  const stateLabel = listening ? heardWords.current ? `${secondsRemaining.toFixed(1)}s` : "Listening" : busy ? "Waiting" : reading ? current?.kind === "skipped" ? "Box skipped" : `Reading ${segmentIndex + 1}/${segments.length}` : targetReady ? "Ready" : "No Codex";
+  return <main className={`voice-floater ${listening ? "is-listening" : ""} ${reading ? "is-reading" : ""}`} title={status}>
+    <button className="drag-handle" aria-label="Move voice bar" title="Drag to move" onPointerDown={() => { if ("__TAURI_INTERNALS__" in window) void getCurrentWindow().startDragging(); }}>⠿</button>
+    <button className="icon-control" aria-label="Targets" title="Targets" onClick={leaveCompanion}>⌂</button>
+    <button className="icon-control main-mic" aria-label={reading ? playing ? "Pause reading" : "Continue reading" : "Start talking"} title={reading ? playing ? "Pause" : "Continue" : "Talk"} disabled={busy || (!reading && (!targetReady || listening))} onClick={reading ? pauseOrContinue : startTalking}>{reading ? playing ? "Ⅱ" : "▶" : listening ? "●" : "🎙"}</button>
+    <button className="icon-control" aria-label={`Add ${settings.addSeconds} seconds`} title={`Add ${settings.addSeconds} seconds`} disabled={!listening} onClick={addTime}>＋</button>
+    <button className="icon-control" aria-label="Send now or next part" title={listening ? "Send now" : "Next part"} disabled={!listening && !reading} onClick={listening ? finishAndSend : () => movePart(1)}>{listening ? "➤" : "≫"}</button>
+    <button className="icon-control" aria-label="Repeat or read skipped box" title={lastSkipped && reading ? "Read skipped box" : "Repeat"} disabled={!reading} onClick={lastSkipped && reading ? readSkippedBox : () => speakAt(segmentIndex)}>↻</button>
+    <button className="icon-control" aria-label="Skip reply" title="Skip reply" disabled={!reading} onClick={skipReply}>≫|</button>
+    <button className="icon-control stop-control" aria-label="Stop everything" title="Stop everything" disabled={state === "idle"} onClick={stopEverything}>■</button>
+    <button className="icon-control" aria-label="Settings" title="Settings" onClick={onSettings}>⚙</button>
+    <span className="floater-state">{stateLabel}</span>
   </main>;
 }
 

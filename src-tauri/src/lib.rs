@@ -237,6 +237,10 @@ pub fn run() {
             openai_speech,
             desktop_companion::codex_target_status,
             desktop_companion::insert_codex_draft,
+            desktop_companion::clear_codex_draft,
+            desktop_companion::send_codex_message,
+            desktop_companion::codex_response_state,
+            desktop_companion::codex_is_foreground,
             desktop_companion::copy_latest_codex_response
         ])
         .run(tauri::generate_context!())

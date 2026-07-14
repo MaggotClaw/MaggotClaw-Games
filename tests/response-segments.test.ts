@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { responseParagraphs } from "../src/responseSegments";
+import { responseParagraphs, responsePlaybackSegments } from "../src/responseSegments";
 
 describe("responseParagraphs", () => {
   it("keeps paragraphs separate while joining wrapped lines", () => {
@@ -14,3 +14,12 @@ describe("responseParagraphs", () => {
   });
 });
 
+describe("responsePlaybackSegments", () => {
+  it("replaces fenced boxes with a short spoken notice", () => {
+    expect(responsePlaybackSegments("Before.\n\n```js\nalert('x');\n```\n\nAfter.")).toEqual([
+      { kind: "text", spokenText: "Before." },
+      { kind: "skipped", spokenText: "Content box skipped.", hiddenText: "alert('x');" },
+      { kind: "text", spokenText: "After." }
+    ]);
+  });
+});

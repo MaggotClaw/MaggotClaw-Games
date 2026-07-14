@@ -12,10 +12,19 @@ export interface CodexTargetStatus {
   detail: string;
 }
 
+export interface CodexResponseState {
+  busy: boolean;
+  hasCompletedResponse: boolean;
+}
+
 export interface DesktopConversationAdapter {
   readonly target: DesktopConversationTarget;
   insertDraft(text: string): Promise<void>;
   readCopiedResponse(): Promise<string>;
+  sendMessage?(text: string): Promise<void>;
+  responseState?(): Promise<CodexResponseState>;
+  clearDraft?(): Promise<void>;
+  targetForeground?(): Promise<boolean>;
 }
 
 export class CodexClipboardAdapter implements DesktopConversationAdapter {
@@ -47,6 +56,22 @@ export class CodexWindowsAdapter implements DesktopConversationAdapter {
 
   readCopiedResponse(): Promise<string> {
     return invoke<string>("copy_latest_codex_response");
+  }
+
+  async sendMessage(text: string): Promise<void> {
+    await invoke("send_codex_message", { draft: text });
+  }
+
+  responseState(): Promise<CodexResponseState> {
+    return invoke<CodexResponseState>("codex_response_state");
+  }
+
+  async clearDraft(): Promise<void> {
+    await invoke("clear_codex_draft");
+  }
+
+  targetForeground(): Promise<boolean> {
+    return invoke<boolean>("codex_is_foreground");
   }
 }
 

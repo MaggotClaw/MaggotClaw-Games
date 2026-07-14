@@ -6,8 +6,9 @@ import { CommentRecorder } from "./recorder";
 import { TalkScreen } from "./TalkScreen";
 import { loadDocument, loadPosition, loadRecoverableComments, loadSavedComments, saveComment, saveDocument, savePosition } from "./storage";
 import type { ConnectionSettings, DocumentRecord, ReaderComment, ReaderCopy } from "./types";
+import { loadVoiceSettings, saveVoiceSettings, type VoiceSettings } from "./voiceSettings";
 
-type Screen = "profile" | "library" | "reader" | "settings" | "comment" | "comments" | "talk";
+type Screen = "profile" | "home" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets";
 const USER_ID = "primary-reader";
 const DEMO_TEXT = `Chapter 1\n\nThe rain had worked at the roof all night. By morning, every board in the house seemed to remember it.\n\nSilas stood at the window and watched the road disappear into Mourning Bend. He had promised himself he would not go back. The promise felt thinner in daylight.`;
 const defaultSettings: ConnectionSettings = {
@@ -25,7 +26,7 @@ function getSettings(): ConnectionSettings {
 
 export function App() {
   const [readerName, setReaderName] = useState(() => localStorage.getItem("long-rot-reader-name") || "");
-  const [screen, setScreen] = useState<Screen>(() => localStorage.getItem("long-rot-reader-name") ? "library" : "profile");
+  const [screen, setScreen] = useState<Screen>(() => localStorage.getItem("long-rot-companion-active") === "true" ? "talk" : localStorage.getItem("long-rot-reader-name") ? "home" : "profile");
   const [settings, setSettings] = useState<ConnectionSettings>(getSettings);
   const [copies, setCopies] = useState<ReaderCopy[]>([]);
   const [document, setDocument] = useState<DocumentRecord | null>(null);
@@ -346,7 +347,7 @@ export function App() {
     if (!clean) return;
     localStorage.setItem("long-rot-reader-name", clean);
     setReaderName(clean);
-    setScreen("library");
+    setScreen("home");
     setStatus(`Welcome, ${clean}`);
   }
 
@@ -374,11 +375,23 @@ export function App() {
   }
 
   if (screen === "talk") {
-    return <TalkScreen readerName={readerName} onBack={() => setScreen("library")} />;
+    return <TalkScreen readerName={readerName} onBack={() => setScreen("voice-targets")} onSettings={() => { localStorage.removeItem("long-rot-companion-active"); setScreen("settings"); }} />;
   }
 
   if (screen === "settings") {
-    return <Settings initial={settings} onSave={saveSettings} onCancel={() => setScreen("library")} />;
+    return <Settings initial={settings} onSave={saveSettings} onCancel={() => setScreen("home")} />;
+  }
+
+  if (screen === "home") {
+    return <main className="app-shell home-shell">
+      <header className="hero"><div><p className="eyebrow">MAGGOTCLAW GAMES</p><h1>Reader</h1><p>Choose what you want to do.</p></div><div className="header-actions"><button className="settings-button" onClick={() => setScreen("settings")}>Settings</button><button className="profile-chip" onClick={() => setScreen("profile")}>{readerName}</button></div></header>
+      {readerName === "Test Profile" && <div className="test-mode-banner">TEST PROFILE — LOCAL ONLY — NOTHING IS SYNCHRONIZED</div>}
+      <section className="mode-grid"><button className="mode-card" onClick={() => setScreen("library")}><span className="mode-icon">LR</span><span><strong>Reader Mode</strong><small>Read or listen, save your place, and record comments.</small></span><span>→</span></button><button className="mode-card voice-mode" onClick={() => setScreen("voice-targets")}><span className="mode-icon">●</span><span><strong>Voice Companion</strong><small>Talk with Codex now. ChatGPT and Claude will be added later.</small></span><span>→</span></button></section>
+    </main>;
+  }
+
+  if (screen === "voice-targets") {
+    return <main className="app-shell target-screen"><header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Main Menu</button><span className="eyebrow">VOICE COMPANION</span><span>{readerName}</span></header><section className="library-heading"><div><h2>Choose the program</h2><p>The companion controls the normal Windows program you already use.</p></div></section><section className="target-grid"><button className="target-card available" onClick={() => setScreen("talk")}><strong>Codex</strong><small>Available now</small></button><button className="target-card" disabled><strong>ChatGPT</strong><small>Coming later</small></button><button className="target-card" disabled><strong>Claude</strong><small>Coming later</small></button></section></main>;
   }
 
   if (screen === "comments") {
@@ -463,14 +476,14 @@ export function App() {
   return (
     <main className="app-shell">
       <header className="hero">
-        <div><p className="eyebrow">THE LONG ROT</p><h1>Reader</h1><p>Choose a Reader Copy and continue where you left off.</p></div>
+        <div><p className="eyebrow">MAGGOTCLAW GAMES READER</p><h1>Reader Mode</h1><p>Choose a Reader Copy and continue where you left off.</p></div>
         <div className="header-actions"><button className="settings-button" onClick={openSavedComments}>My Comments</button><button className="settings-button" onClick={() => setScreen("settings")}>Connection</button><button className="profile-chip" onClick={() => setScreen("profile")}>{readerName}</button></div>
       </header>
       <section className="library-heading">
         <div><h2>Reader Copies</h2><p>{status}</p></div>
         <button className="refresh" onClick={refreshCopies} disabled={loading}>{loading ? "Loading…" : "Refresh"}</button>
       </section>
-      <button className="talk-launch" onClick={() => setScreen("talk")}><span className="talk-icon">●</span><span><strong>Windows Codex Voice Companion</strong><small>Talk to your current Codex task and hear copied responses aloud — no API key.</small></span><span aria-hidden="true">→</span></button>
+      <button className="text-button mode-back" onClick={() => setScreen("home")}>← Main Menu</button>
       {recoverable && <section className="recovery-banner"><div><strong>Unfinished comment found</strong><p>Your recording and reading position are safe on this device.</p></div><button onClick={resumeRecoverable}>Recover</button></section>}
       <section className="copy-grid">
         {copies.map((copy) => (
@@ -490,9 +503,10 @@ export function App() {
 function Profile({ initial, onContinue }: { initial: string; onContinue: (name: string) => void }) {
   const [name, setName] = useState(initial);
   return <main className="app-shell profile-screen">
-    <p className="eyebrow">THE LONG ROT</p><h1>Who is reading?</h1><p>Your name keeps every comment connected to the person who submitted it.</p>
+    <p className="eyebrow">MAGGOTCLAW GAMES READER</p><h1>Who is using this program?</h1><p>Choose your local profile. Onboarding and profile recovery will be added later.</p>
     <label>Reader name<input autoFocus value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onContinue(name); }} /></label>
     <button className="continue-profile" disabled={!name.trim()} onClick={() => onContinue(name)}>Continue as {name.trim() || "reader"}</button>
+    <button className="test-profile-button" onClick={() => onContinue("Test Profile")}>Use Test Profile — Local Only</button>
   </main>;
 }
 
@@ -512,13 +526,24 @@ function SavedCommentCard({ comment }: { comment: ReaderComment }) {
 function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; onSave: (value: ConnectionSettings) => void; onCancel: () => void }) {
   const [endpoint, setEndpoint] = useState(initial.endpoint);
   const [bearerToken, setBearerToken] = useState(initial.bearerToken);
+  const profile = localStorage.getItem("long-rot-reader-name") || "local";
+  const [voice, setVoice] = useState<VoiceSettings>(() => loadVoiceSettings(profile));
+  function updateVoice(changes: Partial<VoiceSettings>) { setVoice((current) => ({ ...current, ...changes })); }
+  function saveAll() { saveVoiceSettings(profile, voice); onSave({ endpoint: endpoint.trim(), bearerToken }); }
   return <main className="app-shell settings-panel">
-    <p className="eyebrow">ADMINISTRATOR</p><h1>Project connection</h1>
-    <p>Ordinary readers do not need this screen. Credentials stay on this device for the prototype.</p>
+    <p className="eyebrow">PROFILE SETTINGS</p><h1>Voice Companion</h1>
+    <p>These settings are saved for {profile} on this computer.</p>
+    <label>Send after silence<input type="number" min="0.5" max="30" step="0.5" value={voice.silenceSeconds} onChange={(event) => updateVoice({ silenceSeconds: Number(event.target.value) })} /></label>
+    <label>Add Time button<input type="number" min="1" max="120" step="1" value={voice.addSeconds} onChange={(event) => updateVoice({ addSeconds: Number(event.target.value) })} /></label>
+    <label>Reading speed<select value={voice.speechRate} onChange={(event) => updateVoice({ speechRate: Number(event.target.value) })}><option value="0.8">Slower</option><option value="1">Normal</option><option value="1.2">Faster</option><option value="1.4">Much faster</option></select></label>
+    <label className="check-setting"><input type="checkbox" checked={voice.readRepliesAutomatically} onChange={(event) => updateVoice({ readRepliesAutomatically: event.target.checked })} /> Read replies automatically</label>
+    <label className="check-setting"><input type="checkbox" checked={voice.listenAfterReading} onChange={(event) => updateVoice({ listenAfterReading: event.target.checked })} /> Listen again after reading</label>
+    <label className="check-setting"><input type="checkbox" checked={voice.skipContentBoxes} onChange={(event) => updateVoice({ skipContentBoxes: event.target.checked })} /> Skip code and output boxes</label>
+    <hr/><p className="eyebrow">ADVANCED CONNECTION</p>
     <label>Connection address<input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} /></label>
     <label>Temporary bearer credential<input type="password" value={bearerToken} onChange={(event) => setBearerToken(event.target.value)} autoComplete="off" /></label>
-    <p className="warning">For local development, use <code>/mcp</code> and configure the Vite proxy. Do not commit credentials.</p>
-    <div className="form-actions"><button onClick={onCancel}>Cancel</button><button className="primary" onClick={() => onSave({ endpoint: endpoint.trim(), bearerToken })}>Save</button></div>
+    <p className="warning">These technical controls will move behind administrator support access in a future build.</p>
+    <div className="form-actions"><button onClick={onCancel}>Cancel</button><button className="primary" onClick={saveAll}>Save</button></div>
   </main>;
 }
 

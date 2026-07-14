@@ -1,7 +1,7 @@
 [package]
 name = "the-long-rot-voice"
-version = "0.3.0"
-description = "Windows reader and spoken feedback application for The Long Rot"
+version = "0.4.0"
+description = "Windows reader, feedback, and voice companion for MaggotClaw Games"
 authors = ["Maggot Claw"]
 edition = "2021"
 
@@ -20,3 +20,4 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "mul
 url = "2"
 keyring = "3"
 uiautomation = { version = "0.25", features = ["clipboard", "process"] }
+windows = { version = "0.62", features = ["Win32_UI_WindowsAndMessaging"] }

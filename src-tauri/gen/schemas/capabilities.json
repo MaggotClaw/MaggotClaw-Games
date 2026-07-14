@@ -1,1 +1,1 @@
-{"reader-window":{"identifier":"reader-window","description":"Minimum permissions for the main reader window.","local":true,"windows":["main"],"permissions":["core:default"]}}
+{"reader-window":{"identifier":"reader-window","description":"Minimum permissions for the main reader window.","local":true,"windows":["main"],"permissions":["core:default","core:window:allow-set-size","core:window:allow-set-always-on-top","core:window:allow-set-decorations","core:window:allow-set-resizable","core:window:allow-start-dragging"]}}
