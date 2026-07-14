@@ -1,6 +1,17 @@
 # The Long Rot Voice
 
-Windows-first reader application for The Long Rot. This initial slice lists Reader Copies through the existing MCP, reads one sentence at a time using system speech, and restores the reader's position from durable browser storage.
+Windows-first voice companion and project application for The Long Rot. The application contains a working Reader Mode and is being expanded into a no-API-key desktop accessibility companion for the installed ChatGPT, Codex, and Claude applications.
+
+Current installed development version: `0.2.0`.
+
+## Product boundary
+
+The project has two distinct experiences:
+
+1. **Project Workspace and Desktop Voice Companion** for authors, editors, contributors, and collaborators. It should dictate into the ordinary ChatGPT, Codex, or Claude desktop application, send the message, detect the displayed response, and read it aloud. It must work with the user's existing Free or paid account and must not require an API key.
+2. **Reader Mode** for selecting Reader Copies, listening, preserving position, and recording version-linked feedback.
+
+Reader Mode is not the primary boundary of the finished product. It is one mode within the larger Long Rot voice workspace.
 
 ## Current scope
 
@@ -18,10 +29,8 @@ Windows-first reader application for The Long Rot. This initial slice lists Read
 - Required reader identity stored locally.
 - Saved-comment review with original audio playback.
 - Local JSON comment-index export without embedding audio.
-- Push-to-talk AI conversation with transcription review.
-- Spoken AI responses with stop, repeat, and follow-up controls.
-- OpenAI API key stored in Windows Credential Manager rather than application files.
-- Local conversation history limited to the most recent turns.
+- An API-backed Talk mode prototype with transcription review and spoken responses.
+- Secure Windows Credential Manager storage for the optional API prototype.
 - Offline demo Reader Copy.
 - Read-only application boundary; no MCP write tools are called.
 
@@ -51,7 +60,7 @@ npm run desktop:build
 
 The desktop shell allows only HTTPS MCP endpoints or the local `http://127.0.0.1/.../mcp` development endpoint. Network requests pass through a narrowly scoped Rust command; Dropbox credentials are never accepted by the application.
 
-Talk mode uses `gpt-4o-transcribe` for transcription, `gpt-5.4-mini` through the Responses API for conversation, and `tts-1` for spoken output. The interface discloses that the spoken voice is AI-generated. API usage is billed independently from ChatGPT subscriptions.
+The current `0.2.0` Talk mode is an implementation prototype, not the accepted production interaction model. It uses an OpenAI API key and therefore does not meet the clarified requirement. API support may remain as an optional advanced provider, but it must not be the default or required path.
 
 The Windows installer is created under `src-tauri/target/release/bundle/nsis/`. It is an unsigned development build and Windows may display a publisher warning until a code-signing certificate is configured.
 
@@ -68,4 +77,7 @@ npm run build
 - The current MCP read tool returns text without file metadata; the app separately requests the newest revision ID. An MCP read-by-revision operation is required for a strict immutable-version guarantee.
 - The current MCP has no binary audio operation.
 - The repository does not define the project ID Registry format or a dedicated Reader Copy listing tool; discovery temporarily uses the filename search tool.
-- Tauri packaging awaits installation of the Rust toolchain. The portable React core is implemented first and is ready to be wrapped after that prerequisite is installed.
+- Live MCP verification is blocked because the local MCP currently has an expired temporary Dropbox access token and does not have refresh-token credentials configured.
+- The no-API-key Windows desktop companion is not implemented yet. It requires Windows UI Automation adapters for the installed ChatGPT, Codex, and Claude applications.
+- The current API Talk screen must be moved under an optional Advanced provider area or disabled by default.
+- iPhone and iPad cannot offer the same unrestricted cross-application automation as Windows. A native Apple companion will require user-mediated handoff through app extensions, clipboard/share flows, or provider-supported app actions; a Safari extension may provide a more automatic optional route.

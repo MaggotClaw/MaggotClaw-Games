@@ -24,3 +24,9 @@ The MCP repository was inspected read-only. No Dropbox, deployment, or MCP sourc
 The first reader slice uses only the three read operations above. It cannot call create, update, move, delete, or restore tools.
 
 For strict version pinning, a later independently approved MCP change should add a read operation that accepts an immutable revision and returns file ID, revision ID, path, content, and content hash in one consistent operation.
+
+## Live verification result
+
+A read-only local HTTP test successfully reached the MCP transport and authentication layer. The first Dropbox search operation failed with an expired temporary access-token response. No Dropbox content was read or changed.
+
+The local `.env` currently has `DROPBOX_ACCESS_TOKEN` and `REMOTE_MCP_API_KEY` entries but does not have refresh-token configuration. Do not place credential values in documentation, source, commits, logs, or chat.
