@@ -18,6 +18,10 @@ Windows-first reader application for The Long Rot. This initial slice lists Read
 - Required reader identity stored locally.
 - Saved-comment review with original audio playback.
 - Local JSON comment-index export without embedding audio.
+- Push-to-talk AI conversation with transcription review.
+- Spoken AI responses with stop, repeat, and follow-up controls.
+- OpenAI API key stored in Windows Credential Manager rather than application files.
+- Local conversation history limited to the most recent turns.
 - Offline demo Reader Copy.
 - Read-only application boundary; no MCP write tools are called.
 
@@ -46,6 +50,8 @@ npm run desktop:build
 ```
 
 The desktop shell allows only HTTPS MCP endpoints or the local `http://127.0.0.1/.../mcp` development endpoint. Network requests pass through a narrowly scoped Rust command; Dropbox credentials are never accepted by the application.
+
+Talk mode uses `gpt-4o-transcribe` for transcription, `gpt-5.4-mini` through the Responses API for conversation, and `tts-1` for spoken output. The interface discloses that the spoken voice is AI-generated. API usage is billed independently from ChatGPT subscriptions.
 
 The Windows installer is created under `src-tauri/target/release/bundle/nsis/`. It is an unsigned development build and Windows may display a publisher warning until a code-signing certificate is configured.
 

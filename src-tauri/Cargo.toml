@@ -1,6 +1,6 @@
 [package]
 name = "the-long-rot-voice"
-version = "0.1.0"
+version = "0.2.0"
 description = "Windows reader and spoken feedback application for The Long Rot"
 authors = ["Maggot Claw"]
 edition = "2021"
@@ -16,6 +16,6 @@ tauri-build = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
 url = "2"
-
+keyring = "3"

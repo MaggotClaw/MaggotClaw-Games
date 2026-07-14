@@ -3,10 +3,11 @@ import { LongRotMcpClient } from "./mcp";
 import { contentHash, segmentDocument } from "./segmenter";
 import { BrowserSpeechPlayer } from "./speech";
 import { CommentRecorder } from "./recorder";
+import { TalkScreen } from "./TalkScreen";
 import { loadDocument, loadPosition, loadRecoverableComments, loadSavedComments, saveComment, saveDocument, savePosition } from "./storage";
 import type { ConnectionSettings, DocumentRecord, ReaderComment, ReaderCopy } from "./types";
 
-type Screen = "profile" | "library" | "reader" | "settings" | "comment" | "comments";
+type Screen = "profile" | "library" | "reader" | "settings" | "comment" | "comments" | "talk";
 const USER_ID = "primary-reader";
 const DEMO_TEXT = `Chapter 1\n\nThe rain had worked at the roof all night. By morning, every board in the house seemed to remember it.\n\nSilas stood at the window and watched the road disappear into Mourning Bend. He had promised himself he would not go back. The promise felt thinner in daylight.`;
 const defaultSettings: ConnectionSettings = {
@@ -372,6 +373,10 @@ export function App() {
     return <Profile initial={readerName} onContinue={saveProfile} />;
   }
 
+  if (screen === "talk") {
+    return <TalkScreen readerName={readerName} onBack={() => setScreen("library")} />;
+  }
+
   if (screen === "settings") {
     return <Settings initial={settings} onSave={saveSettings} onCancel={() => setScreen("library")} />;
   }
@@ -465,6 +470,7 @@ export function App() {
         <div><h2>Reader Copies</h2><p>{status}</p></div>
         <button className="refresh" onClick={refreshCopies} disabled={loading}>{loading ? "Loading…" : "Refresh"}</button>
       </section>
+      <button className="talk-launch" onClick={() => setScreen("talk")}><span className="talk-icon">●</span><span><strong>Talk About the Book</strong><small>Speak with your project assistant and hear the answer aloud.</small></span><span aria-hidden="true">→</span></button>
       {recoverable && <section className="recovery-banner"><div><strong>Unfinished comment found</strong><p>Your recording and reading position are safe on this device.</p></div><button onClick={resumeRecoverable}>Recover</button></section>}
       <section className="copy-grid">
         {copies.map((copy) => (
