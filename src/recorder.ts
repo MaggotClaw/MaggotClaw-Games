@@ -39,7 +39,7 @@ export class CommentRecorder {
   private audioContext: AudioContext | null = null;
   private activityTimer: number | null = null;
 
-  async start(onSpeechActivity: () => void, onTranscript: (text: string) => void): Promise<void> {
+  async start(onSpeechActivity: () => void, onTranscript: (text: string) => void, useBrowserRecognition = true): Promise<void> {
     this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const preferred = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((type) => MediaRecorder.isTypeSupported(type));
     this.mediaRecorder = new MediaRecorder(this.stream, preferred ? { mimeType: preferred } : undefined);
@@ -51,7 +51,7 @@ export class CommentRecorder {
     };
     this.mediaRecorder.start(1000);
     this.startActivityDetection(onSpeechActivity);
-    this.startSpeechRecognition(onSpeechActivity, onTranscript);
+    if (useBrowserRecognition) this.startSpeechRecognition(onSpeechActivity, onTranscript);
   }
 
   stop(): Promise<RecordingResult> {

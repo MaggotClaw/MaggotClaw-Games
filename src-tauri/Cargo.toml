@@ -20,4 +20,4 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "mul
 url = "2"
 keyring = "3"
 uiautomation = { version = "0.25", features = ["clipboard", "process"] }
-windows = { version = "0.62", features = ["Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Foundation", "Media_SpeechRecognition", "Win32_System_WinRT", "Win32_UI_WindowsAndMessaging"] }

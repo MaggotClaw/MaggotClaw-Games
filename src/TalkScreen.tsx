@@ -2,6 +2,7 @@ import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createCodexAdapter } from "./desktopConversation";
+import { listenForNativeSpeech, startNativeDictation, stopNativeDictation } from "./nativeSpeech";
 import { CommentRecorder } from "./recorder";
 import { responsePlaybackSegments, type ResponsePlaybackSegment } from "./responseSegments";
 import { BrowserSpeechPlayer } from "./speech";
@@ -31,7 +32,11 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
   const waitingStarted = useRef(0);
   const playbackCycle = useRef(0);
   const segmentsRef = useRef<ResponsePlaybackSegment[]>([]);
-  const liveDraftTimer = useRef<number | null>(null);
+  const liveDraftInFlight = useRef(false);
+  const pendingLiveDraft = useRef("");
+  const lastInsertedDraft = useRef("");
+  const nativeSpeechActive = useRef(false);
+  const nativeFinalParts = useRef<string[]>([]);
   const adapter = useMemo(createCodexAdapter, []);
 
   useEffect(() => {
@@ -66,7 +71,19 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     playbackCycle.current += 1;
     recorder.current.cancel();
     player.current.stop();
-    if (liveDraftTimer.current !== null) window.clearTimeout(liveDraftTimer.current);
+  }, []);
+
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    let disposed = false;
+    let removeListener: (() => void) | undefined;
+    void listenForNativeSpeech((event) => {
+      if (!nativeSpeechActive.current) return;
+      if (event.isFinal) nativeFinalParts.current.push(event.text.trim());
+      const words = [...nativeFinalParts.current, ...(event.isFinal ? [] : [event.text.trim()])].filter(Boolean).join(" ");
+      updateLiveDraft(words);
+    }).then((remove) => { if (disposed) remove(); else removeListener = remove; });
+    return () => { disposed = true; removeListener?.(); };
   }, []);
 
   useEffect(() => {
@@ -134,10 +151,25 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     if (!words.trim()) return;
     heardWords.current = true;
     silenceDeadline.current = Date.now() + settings.silenceSeconds * 1000;
-    if (liveDraftTimer.current !== null) window.clearTimeout(liveDraftTimer.current);
-    liveDraftTimer.current = window.setTimeout(() => {
-      void adapter.insertDraft(words).catch((error) => setStatus(message(error)));
-    }, 60);
+    pendingLiveDraft.current = words;
+    void flushLiveDraft();
+  }
+
+  async function flushLiveDraft() {
+    if (liveDraftInFlight.current) return;
+    const words = pendingLiveDraft.current.trim();
+    if (!words || words === lastInsertedDraft.current) return;
+    pendingLiveDraft.current = "";
+    liveDraftInFlight.current = true;
+    try {
+      await adapter.insertDraft(words);
+      lastInsertedDraft.current = words;
+    } catch (error) {
+      setStatus(message(error));
+    } finally {
+      liveDraftInFlight.current = false;
+      if (pendingLiveDraft.current.trim() && pendingLiveDraft.current.trim() !== lastInsertedDraft.current) void flushLiveDraft();
+    }
   }
 
   async function startTalking() {
@@ -148,18 +180,34 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     setPlaying(false);
     setTranscript("");
     transcriptRef.current = "";
+    pendingLiveDraft.current = "";
+    lastInsertedDraft.current = "";
+    nativeFinalParts.current = [];
     heardWords.current = false;
     setSecondsRemaining(settings.silenceSeconds);
     silenceDeadline.current = Date.now() + settings.silenceSeconds * 1000;
     try {
       await adapter.clearDraft?.();
+      let useNativeSpeech = false;
+      if ("__TAURI_INTERNALS__" in window) {
+        try {
+          await startNativeDictation();
+          nativeSpeechActive.current = true;
+          useNativeSpeech = true;
+        } catch (error) {
+          setStatus(`${message(error)} Using the backup speech engine.`);
+        }
+      }
       await recorder.current.start(
         () => { if (heardWords.current) silenceDeadline.current = Date.now() + settings.silenceSeconds * 1000; },
-        updateLiveDraft
+        updateLiveDraft,
+        !useNativeSpeech
       );
       setState("recording");
       setStatus("Listening — your words are appearing directly in Codex");
     } catch (error) {
+      nativeSpeechActive.current = false;
+      void stopNativeDictation().catch(() => undefined);
       setState("idle");
       setStatus(`${message(error)} Microphone access is required.`);
     }
@@ -171,6 +219,11 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     setState("sending");
     setStatus("Finishing your message…");
     try {
+      if (nativeSpeechActive.current) {
+        await stopNativeDictation();
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+        nativeSpeechActive.current = false;
+      }
       const result = await recorder.current.stop();
       const words = (result.transcription || transcriptRef.current || transcript).trim();
       if (!words) {
@@ -281,7 +334,8 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     playbackCycle.current += 1;
     recorder.current.cancel();
     player.current.stop();
-    if (liveDraftTimer.current !== null) window.clearTimeout(liveDraftTimer.current);
+    nativeSpeechActive.current = false;
+    void stopNativeDictation().catch(() => undefined);
     if (state === "recording" || state === "sending") void adapter.clearDraft?.();
     setPlaying(false);
     setTranscript("");
