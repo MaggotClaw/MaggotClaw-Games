@@ -43,6 +43,7 @@ struct HelperMessage {
     text: Option<String>,
     is_final: Option<bool>,
     message: Option<String>,
+    level: Option<u32>,
 }
 
 fn dictation_process() -> &'static Mutex<Option<DictationProcess>> {
@@ -142,6 +143,9 @@ fn spawn_helper(app: &AppHandle) -> Result<DictationProcess, String> {
                             },
                         );
                     }
+                }
+                "level" => {
+                    let _ = event_app.emit("native-speech-level", message.level.unwrap_or(0));
                 }
                 "notice" => {
                     if let Some(text) = message.message {

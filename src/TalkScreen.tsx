@@ -2,7 +2,7 @@ import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createCodexAdapter } from "./desktopConversation";
-import { listenForNativeSpeech, listenForNativeSpeechError, listenForNativeSpeechNotice, NativeTranscriptAssembler, prepareNativeDictation, startNativeDictation, stopNativeDictation } from "./nativeSpeech";
+import { listenForNativeSpeech, listenForNativeSpeechError, listenForNativeSpeechLevel, listenForNativeSpeechNotice, NativeTranscriptAssembler, prepareNativeDictation, startNativeDictation, stopNativeDictation } from "./nativeSpeech";
 import { CommentRecorder } from "./recorder";
 import { responsePlaybackSegments, type ResponsePlaybackSegment } from "./responseSegments";
 import { BrowserSpeechPlayer } from "./speech";
@@ -21,6 +21,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
   const [status, setStatus] = useState("Ready — press Start Talking once");
   const [targetReady, setTargetReady] = useState(false);
   const [speechReady, setSpeechReady] = useState(false);
+  const [audioLevel, setAudioLevel] = useState(0);
   const [lastSkipped, setLastSkipped] = useState("");
   const recorder = useRef(new CommentRecorder());
   const player = useRef(new BrowserSpeechPlayer());
@@ -38,6 +39,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
   const lastInsertedDraft = useRef("");
   const nativeSpeechActive = useRef(false);
   const nativeTranscript = useRef(new NativeTranscriptAssembler());
+  const heardMicrophone = useRef(false);
   const adapter = useMemo(createCodexAdapter, []);
 
   useEffect(() => {
@@ -91,6 +93,11 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     void listenForNativeSpeechNotice((notice) => {
       if (nativeSpeechActive.current) setStatus(notice);
     }).then(keep);
+    void listenForNativeSpeechLevel((level) => {
+      if (!nativeSpeechActive.current) return;
+      setAudioLevel(level);
+      if (level > 3) heardMicrophone.current = true;
+    }).then(keep);
     void listenForNativeSpeechError((error) => {
       if (!nativeSpeechActive.current) return;
       nativeSpeechActive.current = false;
@@ -122,6 +129,9 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
 
   useEffect(() => {
     if (state !== "recording") return;
+    const noSoundTimer = window.setTimeout(() => {
+      if (!heardMicrophone.current) setStatus("No microphone sound is reaching the app. Windows may be using a different microphone.");
+    }, 3000);
     const timer = window.setInterval(() => {
       if (!heardWords.current) {
         setSecondsRemaining(settings.silenceSeconds);
@@ -131,7 +141,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
       setSecondsRemaining(remaining);
       if (remaining === 0 && !finishing.current) void finishAndSend();
     }, 100);
-    return () => window.clearInterval(timer);
+    return () => { window.clearInterval(timer); window.clearTimeout(noSoundTimer); };
   }, [state, settings.silenceSeconds]);
 
   useEffect(() => {
@@ -207,6 +217,8 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     lastInsertedDraft.current = "";
     nativeTranscript.current.reset();
     heardWords.current = false;
+    heardMicrophone.current = false;
+    setAudioLevel(0);
     setSecondsRemaining(settings.silenceSeconds);
     silenceDeadline.current = Date.now() + settings.silenceSeconds * 1000;
     try {
@@ -361,6 +373,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     recorder.current.cancel();
     player.current.stop();
     nativeSpeechActive.current = false;
+    setAudioLevel(0);
     void stopNativeDictation().catch(() => undefined);
     if (state === "recording" || state === "sending") void adapter.clearDraft?.();
     setPlaying(false);
@@ -380,10 +393,13 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
   const busy = state === "sending" || state === "waiting";
   const current = segments[segmentIndex];
 
+  const waveHeights = [8, 11, 18, 24, 18, 11, 8];
+  const liveScale = .25 + Math.min(1, audioLevel / 45);
+
   return <main className={`voice-floater ${listening ? "is-listening" : ""} ${reading ? "is-reading" : ""}`} title={status} onPointerDown={(event) => { if (!(event.target as HTMLElement).closest("button") && "__TAURI_INTERNALS__" in window) void getCurrentWindow().startDragging(); }}>
     <button className="icon-control main-mic" aria-label="Start talking" title="Talk" disabled={busy || !targetReady || !speechReady || listening} onClick={startTalking}>●</button>
     <button className="icon-control" aria-label={`Add ${settings.addSeconds} seconds`} title={`Add ${settings.addSeconds} seconds`} disabled={!listening} onClick={addTime}>＋</button>
-    <span className="voice-wave" aria-label={listening ? "Voice detected" : "Voice waveform"}>{[1,2,3,4,5,6,7].map((bar) => <i key={bar} />)}</span>
+    <span className={`voice-wave ${listening && audioLevel <= 3 ? "no-mic-sound" : ""}`} aria-label={listening ? `Microphone level ${audioLevel}` : "Voice waveform"}>{waveHeights.map((height, index) => <i key={index} style={listening ? { height: `${Math.max(3, Math.round(height * liveScale))}px` } : undefined} />)}</span>
     <span className="countdown-display">{secondsRemaining.toFixed(1)}s</span>
     <button className="icon-control send-control" aria-label="Send now" title="Send now" disabled={!listening} onClick={finishAndSend}>➤</button>
     <button className="icon-control" aria-label={playing ? "Pause reading" : "Continue reading"} title={playing ? "Pause" : "Play"} disabled={!reading} onClick={pauseOrContinue}>{playing ? "Ⅱ" : "▶"}</button>

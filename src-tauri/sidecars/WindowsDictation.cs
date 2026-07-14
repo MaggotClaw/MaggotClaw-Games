@@ -83,6 +83,14 @@ internal static class WindowsDictation
                 {
                     Write("{\"type\":\"notice\",\"message\":\"Windows heard sound but could not recognize the words.\"}");
                 };
+                recognizer.AudioLevelUpdated += delegate(object sender, AudioLevelUpdatedEventArgs eventArgs)
+                {
+                    Write("{\"type\":\"level\",\"level\":" + eventArgs.AudioLevel + "}");
+                };
+                recognizer.AudioSignalProblemOccurred += delegate(object sender, AudioSignalProblemOccurredEventArgs eventArgs)
+                {
+                    Write("{\"type\":\"notice\",\"message\":\"Microphone problem: " + Escape(eventArgs.AudioSignalProblem.ToString()) + "\"}");
+                };
                 ManualResetEvent recognitionStopped = new ManualResetEvent(true);
                 recognizer.RecognizeCompleted += delegate
                 {

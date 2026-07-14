@@ -30,6 +30,10 @@ export function listenForNativeSpeechError(handler: (message: string) => void): 
   return listen<string>("native-speech-error", (event) => handler(event.payload));
 }
 
+export function listenForNativeSpeechLevel(handler: (level: number) => void): Promise<UnlistenFn> {
+  return listen<number>("native-speech-level", (event) => handler(event.payload));
+}
+
 export function prepareNativeDictation(): Promise<void> {
   return invoke("prepare_native_dictation");
 }
