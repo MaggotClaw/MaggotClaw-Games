@@ -34,6 +34,7 @@ export class CommentRecorder {
   private chunks: Blob[] = [];
   private recognition: SpeechRecognitionLike | null = null;
   private transcriptParts: string[] = [];
+  private latestTranscript = "";
   private resolveStop: ((result: RecordingResult) => void) | null = null;
   private audioContext: AudioContext | null = null;
   private activityTimer: number | null = null;
@@ -44,6 +45,7 @@ export class CommentRecorder {
     this.mediaRecorder = new MediaRecorder(this.stream, preferred ? { mimeType: preferred } : undefined);
     this.chunks = [];
     this.transcriptParts = [];
+    this.latestTranscript = "";
     this.mediaRecorder.ondataavailable = (event) => {
       if (event.data.size) this.chunks.push(event.data);
     };
@@ -54,7 +56,7 @@ export class CommentRecorder {
 
   stop(): Promise<RecordingResult> {
     if (!this.mediaRecorder || this.mediaRecorder.state === "inactive") {
-      return Promise.resolve({ audio: new Blob(), mimeType: "", transcription: this.transcriptParts.join(" ").trim() });
+      return Promise.resolve({ audio: new Blob(), mimeType: "", transcription: this.latestTranscript.trim() });
     }
     return new Promise((resolve) => {
       const mediaRecorder = this.mediaRecorder!;
@@ -63,7 +65,7 @@ export class CommentRecorder {
         const mimeType = mediaRecorder.mimeType || this.chunks[0]?.type || "audio/webm";
         const audio = new Blob(this.chunks, { type: mimeType });
         this.cleanup();
-        this.resolveStop?.({ audio, mimeType, transcription: this.transcriptParts.join(" ").trim() });
+        this.resolveStop?.({ audio, mimeType, transcription: this.latestTranscript.trim() });
         this.resolveStop = null;
       };
       this.recognition?.stop();
@@ -93,7 +95,8 @@ export class CommentRecorder {
         if (result.isFinal && text) this.transcriptParts.push(text);
         else interim += `${text} `;
       }
-      onTranscript(`${this.transcriptParts.join(" ")} ${interim}`.trim());
+      this.latestTranscript = `${this.transcriptParts.join(" ")} ${interim}`.trim();
+      onTranscript(this.latestTranscript);
     };
     this.recognition = recognition;
     recognition.start();

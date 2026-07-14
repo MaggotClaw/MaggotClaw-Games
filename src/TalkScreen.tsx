@@ -25,7 +25,8 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
   const silenceDeadline = useRef(0);
   const heardWords = useRef(false);
   const finishing = useRef(false);
-  const baselineResponse = useRef("");
+  const baselineResponseCount = useRef(0);
+  const transcriptRef = useRef("");
   const sawBusy = useRef(false);
   const waitingStarted = useRef(0);
   const playbackCycle = useRef(0);
@@ -39,10 +40,12 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     const appWindow = getCurrentWindow();
     void appWindow.setAlwaysOnTop(true);
     void appWindow.setDecorations(false);
+    void appWindow.setShadow(false);
     void appWindow.setResizable(true).then(() => appWindow.setSize(new LogicalSize(544, 74))).then(() => appWindow.setResizable(false));
     return () => {
       void appWindow.setAlwaysOnTop(false);
       void appWindow.setDecorations(true);
+      void appWindow.setShadow(true);
       void appWindow.setResizable(true);
       void appWindow.setSize(new LogicalSize(1120, 820));
     };
@@ -104,10 +107,9 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
           setStatus("Codex is answering…");
           return;
         }
-        const oldEnough = Date.now() - waitingStarted.current > 2500;
-        if ((sawBusy.current || oldEnough) && responseState.hasCompletedResponse) {
+        if ((sawBusy.current || responseState.completedResponseCount > baselineResponseCount.current) && responseState.hasCompletedResponse && responseState.completedResponseCount > baselineResponseCount.current) {
           const latest = await adapter.readCopiedResponse();
-          if (latest.trim() && latest.trim() !== baselineResponse.current.trim()) {
+          if (latest.trim()) {
             window.clearInterval(timer);
             beginReply(latest);
           }
@@ -128,13 +130,14 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
 
   function updateLiveDraft(words: string) {
     setTranscript(words);
+    transcriptRef.current = words;
     if (!words.trim()) return;
     heardWords.current = true;
     silenceDeadline.current = Date.now() + settings.silenceSeconds * 1000;
     if (liveDraftTimer.current !== null) window.clearTimeout(liveDraftTimer.current);
     liveDraftTimer.current = window.setTimeout(() => {
       void adapter.insertDraft(words).catch((error) => setStatus(message(error)));
-    }, 180);
+    }, 60);
   }
 
   async function startTalking() {
@@ -144,6 +147,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     recorder.current.cancel();
     setPlaying(false);
     setTranscript("");
+    transcriptRef.current = "";
     heardWords.current = false;
     setSecondsRemaining(settings.silenceSeconds);
     silenceDeadline.current = Date.now() + settings.silenceSeconds * 1000;
@@ -168,7 +172,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     setStatus("Finishing your message…");
     try {
       const result = await recorder.current.stop();
-      const words = (result.transcription || transcript).trim();
+      const words = (result.transcription || transcriptRef.current || transcript).trim();
       if (!words) {
         await adapter.clearDraft?.();
         setState("idle");
@@ -176,7 +180,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
         return;
       }
       if (!adapter.sendMessage || !adapter.responseState) throw new Error("Automatic Send requires the installed Windows companion.");
-      try { baselineResponse.current = await adapter.readCopiedResponse(); } catch { baselineResponse.current = ""; }
+      baselineResponseCount.current = (await adapter.responseState()).completedResponseCount;
       await adapter.sendMessage(words);
       sawBusy.current = false;
       waitingStarted.current = Date.now();

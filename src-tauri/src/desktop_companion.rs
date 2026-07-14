@@ -2,6 +2,7 @@ use serde::Serialize;
 use uiautomation::{
     clipboards::Clipboard,
     core::{UIAutomation, UIElement},
+    patterns::UIInvokePattern,
     types::ControlType,
 };
 use windows::Win32::Foundation::HWND;
@@ -20,6 +21,7 @@ pub struct CodexTargetStatus {
 pub struct CodexResponseState {
     pub busy: bool,
     pub has_completed_response: bool,
+    pub completed_response_count: usize,
 }
 
 fn automation() -> Result<UIAutomation, String> {
@@ -140,18 +142,20 @@ pub fn codex_response_state() -> Result<CodexResponseState, String> {
         .timeout(0)
         .find_first()
         .is_ok();
-    let has_completed_response = automation
+    let completed_response_count = automation
         .create_matcher()
         .from(window)
         .control_type(ControlType::Button)
         .match_name("Copy")
         .depth(40)
         .timeout(0)
-        .find_first()
-        .is_ok();
+        .find_all()
+        .map(|buttons| buttons.len())
+        .unwrap_or(0);
     Ok(CodexResponseState {
         busy,
-        has_completed_response,
+        has_completed_response: completed_response_count > 0,
+        completed_response_count,
     })
 }
 
@@ -182,7 +186,8 @@ pub fn copy_latest_codex_response() -> Result<String, String> {
     let copy = copy_buttons
         .last()
         .ok_or_else(|| "No completed Codex response is available yet.".to_string())?;
-    copy.click()
+    copy.get_pattern::<UIInvokePattern>()
+        .and_then(|pattern| pattern.invoke())
         .map_err(|_| "The latest Codex response could not be copied.".to_string())?;
     std::thread::sleep(std::time::Duration::from_millis(150));
     let clipboard =

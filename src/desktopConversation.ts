@@ -15,6 +15,7 @@ export interface CodexTargetStatus {
 export interface CodexResponseState {
   busy: boolean;
   hasCompletedResponse: boolean;
+  completedResponseCount: number;
 }
 
 export interface DesktopConversationAdapter {
