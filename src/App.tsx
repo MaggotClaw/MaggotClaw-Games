@@ -470,7 +470,7 @@ export function App() {
         <div><h2>Reader Copies</h2><p>{status}</p></div>
         <button className="refresh" onClick={refreshCopies} disabled={loading}>{loading ? "Loading…" : "Refresh"}</button>
       </section>
-      <button className="talk-launch" onClick={() => setScreen("talk")}><span className="talk-icon">●</span><span><strong>Talk About the Book</strong><small>Speak with your project assistant and hear the answer aloud.</small></span><span aria-hidden="true">→</span></button>
+      <button className="talk-launch" onClick={() => setScreen("talk")}><span className="talk-icon">●</span><span><strong>Windows Codex Voice Companion</strong><small>Talk to your current Codex task and hear copied responses aloud — no API key.</small></span><span aria-hidden="true">→</span></button>
       {recoverable && <section className="recovery-banner"><div><strong>Unfinished comment found</strong><p>Your recording and reading position are safe on this device.</p></div><button onClick={resumeRecoverable}>Recover</button></section>}
       <section className="copy-grid">
         {copies.map((copy) => (

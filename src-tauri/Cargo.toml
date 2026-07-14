@@ -1,6 +1,6 @@
 [package]
 name = "the-long-rot-voice"
-version = "0.2.0"
+version = "0.3.0"
 description = "Windows reader and spoken feedback application for The Long Rot"
 authors = ["Maggot Claw"]
 edition = "2021"
@@ -19,3 +19,4 @@ tauri = { version = "2", features = [] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
 url = "2"
 keyring = "3"
+uiautomation = { version = "0.25", features = ["clipboard", "process"] }

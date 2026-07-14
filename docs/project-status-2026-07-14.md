@@ -169,3 +169,28 @@ A live read-only test reached the MCP but Dropbox returned an expired-access-tok
 10. Test against application updates, multiple windows, focus changes, and accidental-target prevention.
 
 The first automation tests must use harmless test text and must not alter Long Rot project files.
+
+## Windows Codex companion update — version 0.3.0
+
+The first Codex-only Windows companion slice is implemented.
+
+- Normal use no longer requires an OpenAI API key.
+- The companion verifies that the open ChatGPT-titled window is specifically the Codex interface.
+- Spoken text remains editable before transfer.
+- Put Draft Into Codex replaces the current composer draft but does not press Send.
+- The latest completed Codex response can be copied through Windows accessibility and loaded for playback.
+- Playback uses free Windows voices and paragraph-sized segments.
+- Controls include Read Aloud, Pause, Continue, Stop, Repeat Paragraph, Previous Paragraph, Next Paragraph, Slower, Faster, and Talk Again.
+- A clipboard fallback remains available if Codex changes its accessibility structure.
+- Reader Mode remains intact.
+
+Verification completed for this slice:
+
+- TypeScript checks passed.
+- Eight frontend tests passed.
+- Two Rust tests passed.
+- Production frontend and Windows release builds passed.
+- Dependency audit reported zero vulnerabilities.
+- Windows accessibility inspection confirmed the Codex document, ProseMirror composer, Dictate control, and response Copy controls.
+
+Automatic Send remains intentionally disabled until the user has checked the inserted draft in Codex.
