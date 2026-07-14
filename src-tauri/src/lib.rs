@@ -243,11 +243,17 @@ pub fn run() {
             desktop_companion::codex_response_state,
             desktop_companion::codex_is_foreground,
             desktop_companion::copy_latest_codex_response,
+            native_speech::prepare_native_dictation,
             native_speech::start_native_dictation,
             native_speech::stop_native_dictation
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running The Long Rot Voice");
+        .build(tauri::generate_context!())
+        .expect("error while building The Long Rot Voice")
+        .run(|_, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                native_speech::shutdown_native_dictation();
+            }
+        });
 }
 
 #[cfg(test)]

@@ -22,6 +22,18 @@ export function listenForNativeSpeech(handler: (event: NativeSpeechEvent) => voi
   return listen<NativeSpeechEvent>("native-speech", (event) => handler(event.payload));
 }
 
+export function listenForNativeSpeechNotice(handler: (message: string) => void): Promise<UnlistenFn> {
+  return listen<string>("native-speech-notice", (event) => handler(event.payload));
+}
+
+export function listenForNativeSpeechError(handler: (message: string) => void): Promise<UnlistenFn> {
+  return listen<string>("native-speech-error", (event) => handler(event.payload));
+}
+
+export function prepareNativeDictation(): Promise<void> {
+  return invoke("prepare_native_dictation");
+}
+
 export function startNativeDictation(): Promise<void> {
   return invoke("start_native_dictation");
 }

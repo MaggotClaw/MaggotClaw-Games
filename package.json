@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "desktop:dev": "tauri dev",
+    "build:dictation": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-dictation.ps1",
+    "desktop:dev": "npm run build:dictation && tauri dev",
     "desktop:build": "tauri build",
     "test": "vitest run",
     "check": "tsc -b"

@@ -2,7 +2,7 @@ import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createCodexAdapter } from "./desktopConversation";
-import { listenForNativeSpeech, NativeTranscriptAssembler, startNativeDictation, stopNativeDictation } from "./nativeSpeech";
+import { listenForNativeSpeech, listenForNativeSpeechError, listenForNativeSpeechNotice, NativeTranscriptAssembler, prepareNativeDictation, startNativeDictation, stopNativeDictation } from "./nativeSpeech";
 import { CommentRecorder } from "./recorder";
 import { responsePlaybackSegments, type ResponsePlaybackSegment } from "./responseSegments";
 import { BrowserSpeechPlayer } from "./speech";
@@ -20,6 +20,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
   const [secondsRemaining, setSecondsRemaining] = useState(settings.silenceSeconds);
   const [status, setStatus] = useState("Ready — press Start Talking once");
   const [targetReady, setTargetReady] = useState(false);
+  const [speechReady, setSpeechReady] = useState(false);
   const [lastSkipped, setLastSkipped] = useState("");
   const recorder = useRef(new CommentRecorder());
   const player = useRef(new BrowserSpeechPlayer());
@@ -81,16 +82,28 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
   useEffect(() => {
     if (!("__TAURI_INTERNALS__" in window)) return;
     let disposed = false;
-    let removeListener: (() => void) | undefined;
+    const removeListeners: Array<() => void> = [];
+    const keep = (remove: () => void) => { if (disposed) remove(); else removeListeners.push(remove); };
     void listenForNativeSpeech((event) => {
       if (!nativeSpeechActive.current) return;
       updateLiveDraft(nativeTranscript.current.update(event));
-    }).then((remove) => { if (disposed) remove(); else removeListener = remove; });
-    return () => { disposed = true; removeListener?.(); };
+    }).then(keep);
+    void listenForNativeSpeechNotice((notice) => {
+      if (nativeSpeechActive.current) setStatus(notice);
+    }).then(keep);
+    void listenForNativeSpeechError((error) => {
+      if (!nativeSpeechActive.current) return;
+      nativeSpeechActive.current = false;
+      recorder.current.cancel();
+      setState("idle");
+      setStatus(`${error} Press Start Talking to try again.`);
+    }).then(keep);
+    return () => { disposed = true; removeListeners.forEach((remove) => remove()); };
   }, []);
 
   useEffect(() => {
     if (!adapter.status) {
+      setSpeechReady(true);
       setStatus("The automatic loop requires the installed Windows application.");
       return;
     }
@@ -99,6 +112,13 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
       setStatus(result.ready ? "Codex connected — press Start Talking" : result.detail);
     }).catch((error) => setStatus(message(error)));
   }, [adapter]);
+
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    void prepareNativeDictation()
+      .then(() => setSpeechReady(true))
+      .catch((error) => setStatus(`${message(error)} The voice button is unavailable.`));
+  }, []);
 
   useEffect(() => {
     if (state !== "recording") return;
@@ -194,18 +214,21 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
       let useNativeSpeech = false;
       if ("__TAURI_INTERNALS__" in window) {
         try {
-          await startNativeDictation();
           nativeSpeechActive.current = true;
+          await startNativeDictation();
           useNativeSpeech = true;
         } catch (error) {
+          nativeSpeechActive.current = false;
           setStatus(`${message(error)} Using the backup speech engine.`);
         }
       }
-      await recorder.current.start(
-        () => { if (heardWords.current) silenceDeadline.current = Date.now() + settings.silenceSeconds * 1000; },
-        updateLiveDraft,
-        !useNativeSpeech
-      );
+      if (!useNativeSpeech) {
+        await recorder.current.start(
+          () => { if (heardWords.current) silenceDeadline.current = Date.now() + settings.silenceSeconds * 1000; },
+          updateLiveDraft,
+          true
+        );
+      }
       setState("recording");
       setStatus("Listening — your words are appearing directly in Codex");
     } catch (error) {
@@ -358,7 +381,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
   const current = segments[segmentIndex];
 
   return <main className={`voice-floater ${listening ? "is-listening" : ""} ${reading ? "is-reading" : ""}`} title={status} onPointerDown={(event) => { if (!(event.target as HTMLElement).closest("button") && "__TAURI_INTERNALS__" in window) void getCurrentWindow().startDragging(); }}>
-    <button className="icon-control main-mic" aria-label="Start talking" title="Talk" disabled={busy || !targetReady || listening} onClick={startTalking}>●</button>
+    <button className="icon-control main-mic" aria-label="Start talking" title="Talk" disabled={busy || !targetReady || !speechReady || listening} onClick={startTalking}>●</button>
     <button className="icon-control" aria-label={`Add ${settings.addSeconds} seconds`} title={`Add ${settings.addSeconds} seconds`} disabled={!listening} onClick={addTime}>＋</button>
     <span className="voice-wave" aria-label={listening ? "Voice detected" : "Voice waveform"}>{[1,2,3,4,5,6,7].map((bar) => <i key={bar} />)}</span>
     <span className="countdown-display">{secondsRemaining.toFixed(1)}s</span>

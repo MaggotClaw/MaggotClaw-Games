@@ -1,23 +1,32 @@
-use serde::Serialize;
-use std::sync::{mpsc, Mutex, OnceLock};
-use tauri::{AppHandle, Emitter};
-use windows::{
-    Foundation::TypedEventHandler,
-    Media::SpeechRecognition::{
-        SpeechContinuousRecognitionResultGeneratedEventArgs,
-        SpeechRecognitionHypothesisGeneratedEventArgs, SpeechRecognizer,
-    },
-    Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED},
+use serde::{Deserialize, Serialize};
+use std::{
+    io::{BufRead, BufReader, Write},
+    path::PathBuf,
+    process::{Child, Command, Stdio},
+    sync::{mpsc, Mutex, OnceLock},
+    time::Duration,
 };
+use tauri::{AppHandle, Emitter, Manager};
 
-struct WindowsRuntimeGuard;
-impl Drop for WindowsRuntimeGuard {
-    fn drop(&mut self) {
-        unsafe { RoUninitialize() };
-    }
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+struct DictationProcess {
+    child: Child,
+    controls: mpsc::Receiver<HelperControl>,
 }
 
-static STOP_SENDER: OnceLock<Mutex<Option<mpsc::Sender<()>>>> = OnceLock::new();
+enum HelperControl {
+    Ready,
+    Listening,
+    Stopped,
+    Error(String),
+    Closed,
+}
+
+static DICTATION_PROCESS: OnceLock<Mutex<Option<DictationProcess>>> = OnceLock::new();
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,104 +35,210 @@ struct NativeSpeechEvent {
     is_final: bool,
 }
 
-fn stop_sender() -> &'static Mutex<Option<mpsc::Sender<()>>> {
-    STOP_SENDER.get_or_init(|| Mutex::new(None))
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HelperMessage {
+    #[serde(rename = "type")]
+    kind: String,
+    text: Option<String>,
+    is_final: Option<bool>,
+    message: Option<String>,
 }
 
-fn stop_existing() {
-    if let Ok(mut sender) = stop_sender().lock() {
-        if let Some(sender) = sender.take() {
-            let _ = sender.send(());
+fn dictation_process() -> &'static Mutex<Option<DictationProcess>> {
+    DICTATION_PROCESS.get_or_init(|| Mutex::new(None))
+}
+
+fn helper_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let mut candidates = Vec::new();
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        candidates.push(resource_dir.join("resources").join("WindowsDictation.exe"));
+        candidates.push(resource_dir.join("WindowsDictation.exe"));
+    }
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("WindowsDictation.exe"),
+    );
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or_else(|| {
+            "The free offline Windows speech engine is missing from this installation.".to_string()
+        })
+}
+
+fn write_command(process: &mut DictationProcess, command: &str) -> Result<(), String> {
+    let stdin = process.child.stdin.as_mut().ok_or_else(|| {
+        "The offline Windows speech engine is not accepting commands.".to_string()
+    })?;
+    stdin
+        .write_all(format!("{command}\n").as_bytes())
+        .and_then(|_| stdin.flush())
+        .map_err(|_| "The offline Windows speech engine stopped responding.".to_string())
+}
+
+fn wait_for_control(
+    process: &mut DictationProcess,
+    expected: fn(&HelperControl) -> bool,
+    timeout: Duration,
+) -> Result<(), String> {
+    let started = std::time::Instant::now();
+    while started.elapsed() < timeout {
+        let remaining = timeout.saturating_sub(started.elapsed());
+        match process.controls.recv_timeout(remaining) {
+            Ok(control) if expected(&control) => return Ok(()),
+            Ok(HelperControl::Error(error)) => return Err(error),
+            Ok(HelperControl::Closed) => {
+                return Err("The offline Windows speech engine closed unexpectedly.".to_string())
+            }
+            Ok(_) => {}
+            Err(_) => break,
         }
     }
+    Err("The offline Windows speech engine took too long to respond.".to_string())
+}
+
+fn spawn_helper(app: &AppHandle) -> Result<DictationProcess, String> {
+    let helper = helper_path(app)?;
+    let mut command = Command::new(helper);
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    let mut child = command.spawn().map_err(|error| {
+        format!("The free offline Windows speech engine could not start: {error}")
+    })?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+        "The offline Windows speech engine did not provide a response.".to_string()
+    })?;
+    let (control_tx, control_rx) = mpsc::channel();
+    let event_app = app.clone();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            let Ok(line) = line else { break };
+            let Ok(message) = serde_json::from_str::<HelperMessage>(&line) else {
+                continue;
+            };
+            match message.kind.as_str() {
+                "ready" => {
+                    let _ = control_tx.send(HelperControl::Ready);
+                }
+                "listening" => {
+                    let _ = control_tx.send(HelperControl::Listening);
+                }
+                "stopped" => {
+                    let _ = control_tx.send(HelperControl::Stopped);
+                }
+                "speech" => {
+                    if let Some(text) = message.text.filter(|text| !text.trim().is_empty()) {
+                        let _ = event_app.emit(
+                            "native-speech",
+                            NativeSpeechEvent {
+                                text,
+                                is_final: message.is_final.unwrap_or(false),
+                            },
+                        );
+                    }
+                }
+                "notice" => {
+                    if let Some(text) = message.message {
+                        let _ = event_app.emit("native-speech-notice", text);
+                    }
+                }
+                "error" => {
+                    let text = message.message.unwrap_or_else(|| {
+                        "The offline Windows speech engine stopped.".to_string()
+                    });
+                    let _ = control_tx.send(HelperControl::Error(text.clone()));
+                    let _ = event_app.emit("native-speech-error", text);
+                }
+                _ => {}
+            }
+        }
+        let _ = control_tx.send(HelperControl::Closed);
+    });
+
+    let mut process = DictationProcess {
+        child,
+        controls: control_rx,
+    };
+    wait_for_control(
+        &mut process,
+        |control| matches!(control, HelperControl::Ready),
+        Duration::from_secs(25),
+    )?;
+    Ok(process)
+}
+
+fn ensure_helper(app: &AppHandle) -> Result<(), String> {
+    let mut slot = dictation_process()
+        .lock()
+        .map_err(|_| "The offline Windows speech engine could not be opened.".to_string())?;
+    if let Some(process) = slot.as_mut() {
+        if process.child.try_wait().ok().flatten().is_none() {
+            return Ok(());
+        }
+    }
+    *slot = Some(spawn_helper(app)?);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn prepare_native_dictation(app: AppHandle) -> Result<(), String> {
+    ensure_helper(&app)
 }
 
 #[tauri::command]
 pub fn start_native_dictation(app: AppHandle) -> Result<(), String> {
-    stop_existing();
-    let (stop_tx, stop_rx) = mpsc::channel();
-    let (ready_tx, ready_rx) = mpsc::channel();
-    *stop_sender()
+    ensure_helper(&app)?;
+    let mut slot = dictation_process()
         .lock()
-        .map_err(|_| "Windows dictation could not be started.".to_string())? = Some(stop_tx);
-
-    std::thread::spawn(move || {
-        let result = (|| -> windows::core::Result<()> {
-            unsafe { RoInitialize(RO_INIT_MULTITHREADED)? };
-            let _runtime = WindowsRuntimeGuard;
-            let recognizer = SpeechRecognizer::new()?;
-            recognizer.CompileConstraintsAsync()?.join()?;
-            let session = recognizer.ContinuousRecognitionSession()?;
-
-            let hypothesis_app = app.clone();
-            let hypothesis_handler =
-                TypedEventHandler::new(
-                    move |_,
-                          args: windows::core::Ref<
-                        SpeechRecognitionHypothesisGeneratedEventArgs,
-                    >| {
-                        if let Some(args) = args.as_ref() {
-                            let text = args.Hypothesis()?.Text()?.to_string();
-                            if !text.trim().is_empty() {
-                                let _ = hypothesis_app.emit(
-                                    "native-speech",
-                                    NativeSpeechEvent {
-                                        text,
-                                        is_final: false,
-                                    },
-                                );
-                            }
-                        }
-                        Ok(())
-                    },
-                );
-            let hypothesis_token = recognizer.HypothesisGenerated(&hypothesis_handler)?;
-
-            let result_app = app.clone();
-            let result_handler = TypedEventHandler::new(
-                move |_,
-                      args: windows::core::Ref<
-                    SpeechContinuousRecognitionResultGeneratedEventArgs,
-                >| {
-                    if let Some(args) = args.as_ref() {
-                        let text = args.Result()?.Text()?.to_string();
-                        if !text.trim().is_empty() {
-                            let _ = result_app.emit(
-                                "native-speech",
-                                NativeSpeechEvent {
-                                    text,
-                                    is_final: true,
-                                },
-                            );
-                        }
-                    }
-                    Ok(())
-                },
-            );
-            let result_token = session.ResultGenerated(&result_handler)?;
-
-            session.StartAsync()?.join()?;
-            let _ = ready_tx.send(Ok(()));
-            let _ = stop_rx.recv();
-            let _ = session.StopAsync()?.join();
-            let _ = session.RemoveResultGenerated(result_token);
-            let _ = recognizer.RemoveHypothesisGenerated(hypothesis_token);
-            let _ = recognizer.Close();
-            Ok(())
-        })();
-        if let Err(error) = result {
-            let message = format!("Windows dictation could not start: {error}");
-            let _ = ready_tx.send(Err(message.clone()));
-            let _ = app.emit("native-speech-error", message);
-        }
-    });
-
-    ready_rx
-        .recv_timeout(std::time::Duration::from_secs(12))
-        .map_err(|_| "Windows dictation took too long to start.".to_string())?
+        .map_err(|_| "The offline Windows speech engine could not be opened.".to_string())?;
+    let process = slot
+        .as_mut()
+        .ok_or_else(|| "The offline Windows speech engine is unavailable.".to_string())?;
+    write_command(process, "start")?;
+    wait_for_control(
+        process,
+        |control| matches!(control, HelperControl::Listening),
+        Duration::from_secs(5),
+    )
 }
 
 #[tauri::command]
 pub fn stop_native_dictation() {
-    stop_existing();
+    let Ok(mut slot) = dictation_process().lock() else {
+        return;
+    };
+    let Some(process) = slot.as_mut() else {
+        return;
+    };
+    if write_command(process, "stop").is_ok() {
+        let _ = wait_for_control(
+            process,
+            |control| matches!(control, HelperControl::Stopped),
+            Duration::from_secs(3),
+        );
+    }
+}
+
+pub fn shutdown_native_dictation() {
+    let process = dictation_process()
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.take());
+    if let Some(mut process) = process {
+        let _ = write_command(&mut process, "exit");
+        for _ in 0..12 {
+            if process.child.try_wait().ok().flatten().is_some() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let _ = process.child.kill();
+        let _ = process.child.wait();
+    }
 }

@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://127.0.0.1:4173",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run build:dictation && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -29,6 +29,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "resources": ["resources/WindowsDictation.exe"],
     "shortDescription": "Reader, feedback, and voice companion for MaggotClaw Games",
     "category": "Productivity"
   }
