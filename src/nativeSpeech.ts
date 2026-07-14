@@ -6,6 +6,18 @@ export interface NativeSpeechEvent {
   isFinal: boolean;
 }
 
+export class NativeTranscriptAssembler {
+  private finalParts: string[] = [];
+
+  reset(): void { this.finalParts = []; }
+
+  update(event: NativeSpeechEvent): string {
+    const text = event.text.trim();
+    if (event.isFinal && text) this.finalParts.push(text);
+    return [...this.finalParts, ...(event.isFinal || !text ? [] : [text])].join(" ");
+  }
+}
+
 export function listenForNativeSpeech(handler: (event: NativeSpeechEvent) => void): Promise<UnlistenFn> {
   return listen<NativeSpeechEvent>("native-speech", (event) => handler(event.payload));
 }

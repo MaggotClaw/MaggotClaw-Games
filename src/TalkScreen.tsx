@@ -2,7 +2,7 @@ import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createCodexAdapter } from "./desktopConversation";
-import { listenForNativeSpeech, startNativeDictation, stopNativeDictation } from "./nativeSpeech";
+import { listenForNativeSpeech, NativeTranscriptAssembler, startNativeDictation, stopNativeDictation } from "./nativeSpeech";
 import { CommentRecorder } from "./recorder";
 import { responsePlaybackSegments, type ResponsePlaybackSegment } from "./responseSegments";
 import { BrowserSpeechPlayer } from "./speech";
@@ -36,7 +36,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
   const pendingLiveDraft = useRef("");
   const lastInsertedDraft = useRef("");
   const nativeSpeechActive = useRef(false);
-  const nativeFinalParts = useRef<string[]>([]);
+  const nativeTranscript = useRef(new NativeTranscriptAssembler());
   const adapter = useMemo(createCodexAdapter, []);
 
   useEffect(() => {
@@ -46,7 +46,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     void appWindow.setAlwaysOnTop(true);
     void appWindow.setDecorations(false);
     void appWindow.setShadow(false);
-    void appWindow.setResizable(true).then(() => appWindow.setSize(new LogicalSize(544, 74))).then(() => appWindow.setResizable(false));
+    void appWindow.unmaximize().then(() => appWindow.setResizable(true)).then(() => appWindow.setSize(new LogicalSize(550, 80))).then(() => appWindow.setResizable(false));
     return () => {
       void appWindow.setAlwaysOnTop(false);
       void appWindow.setDecorations(true);
@@ -79,9 +79,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     let removeListener: (() => void) | undefined;
     void listenForNativeSpeech((event) => {
       if (!nativeSpeechActive.current) return;
-      if (event.isFinal) nativeFinalParts.current.push(event.text.trim());
-      const words = [...nativeFinalParts.current, ...(event.isFinal ? [] : [event.text.trim()])].filter(Boolean).join(" ");
-      updateLiveDraft(words);
+      updateLiveDraft(nativeTranscript.current.update(event));
     }).then((remove) => { if (disposed) remove(); else removeListener = remove; });
     return () => { disposed = true; removeListener?.(); };
   }, []);
@@ -182,7 +180,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     transcriptRef.current = "";
     pendingLiveDraft.current = "";
     lastInsertedDraft.current = "";
-    nativeFinalParts.current = [];
+    nativeTranscript.current.reset();
     heardWords.current = false;
     setSecondsRemaining(settings.silenceSeconds);
     silenceDeadline.current = Date.now() + settings.silenceSeconds * 1000;
