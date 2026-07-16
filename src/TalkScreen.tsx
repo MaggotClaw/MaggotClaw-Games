@@ -1,16 +1,17 @@
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createCodexAdapter } from "./desktopConversation";
+import { createConversationAdapter } from "./desktopConversation";
+import { deadlineAfterSpeech } from "./countdown";
 import { listenForNativeSpeech, listenForNativeSpeechError, listenForNativeSpeechLevel, listenForNativeSpeechNotice, NativeTranscriptAssembler, prepareNativeDictation, startNativeDictation, stopNativeDictation } from "./nativeSpeech";
 import { CommentRecorder } from "./recorder";
 import { responsePlaybackSegments, type ResponsePlaybackSegment } from "./responseSegments";
 import { BrowserSpeechPlayer } from "./speech";
 import { loadVoiceSettings } from "./voiceSettings";
 
-type CompanionState = "idle" | "recording" | "sending" | "waiting" | "response";
+type CompanionState = "idle" | "starting" | "recording" | "sending" | "waiting" | "response";
 
-export function TalkScreen({ readerName, onBack, onSettings }: { readerName: string; onBack: () => void; onSettings: () => void }) {
+export function TalkScreen({ readerName, onBack, onSettings, companion = false }: { readerName: string; onBack: () => void; onSettings: () => void; companion?: boolean }) {
   const settings = useMemo(() => loadVoiceSettings(readerName), [readerName]);
   const [state, setState] = useState<CompanionState>("idle");
   const [transcript, setTranscript] = useState("");
@@ -19,6 +20,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
   const [playing, setPlaying] = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState(settings.silenceSeconds);
   const [status, setStatus] = useState("Ready — press Start Talking once");
+  const [targetName, setTargetName] = useState("the AI program");
   const [targetReady, setTargetReady] = useState(false);
   const [speechReady, setSpeechReady] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
@@ -26,6 +28,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
   const recorder = useRef(new CommentRecorder());
   const player = useRef(new BrowserSpeechPlayer());
   const silenceDeadline = useRef(0);
+  const lastVoiceAt = useRef(0);
   const heardWords = useRef(false);
   const finishing = useRef(false);
   const baselineResponseCount = useRef(0);
@@ -40,22 +43,37 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
   const nativeSpeechActive = useRef(false);
   const nativeTranscript = useRef(new NativeTranscriptAssembler());
   const heardMicrophone = useRef(false);
-  const adapter = useMemo(createCodexAdapter, []);
+  const adapter = useMemo(() => createConversationAdapter(settings.target), [settings.target]);
 
   useEffect(() => {
     localStorage.setItem("long-rot-companion-active", "true");
     if (!("__TAURI_INTERNALS__" in window)) return;
     const appWindow = getCurrentWindow();
-    void (async () => {
-      await appWindow.unmaximize();
-      await appWindow.setResizable(true);
-      await appWindow.setDecorations(false);
-      await appWindow.setShadow(false);
-      await appWindow.setSize(new LogicalSize(550, 80));
-      await appWindow.setResizable(false);
-      await appWindow.setAlwaysOnTop(true);
-    })().catch((error) => setStatus(`The compact voice bar could not finish opening: ${message(error)}`));
+    // On a cold start straight into companion mode this effect runs before the
+    // WebView2 window is ready, so the first resize is silently dropped and the
+    // bar is stranded in a full-size, decorated window. Re-apply on a timer for
+    // the first few seconds — fire-and-forget, never awaiting a call that could
+    // hang while the window is still busy loading. One attempt lands once ready.
+    const safe = (run: () => Promise<unknown>) => { void run().catch(() => undefined); };
+    const applyCompact = () => {
+      safe(() => appWindow.unmaximize());
+      safe(() => appWindow.setDecorations(false));
+      safe(() => appWindow.setShadow(false));
+      safe(() => appWindow.setResizable(true));
+      safe(() => appWindow.setSize(new LogicalSize(566, 96)));
+      safe(() => appWindow.setAlwaysOnTop(true));
+    };
+    applyCompact();
+    let ticks = 0;
+    const resizeTimer = window.setInterval(() => {
+      applyCompact();
+      if (++ticks >= 20) window.clearInterval(resizeTimer);
+    }, 300);
     return () => {
+      window.clearInterval(resizeTimer);
+      // In its own dedicated window, closing destroys the companion, so never
+      // grow it back to full size. Only the old single-window mode restores.
+      if (companion) return;
       void appWindow.setAlwaysOnTop(false);
       void appWindow.setDecorations(true);
       void appWindow.setShadow(true);
@@ -68,8 +86,8 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     if (!("__TAURI_INTERNALS__" in window) || !adapter.targetForeground) return;
     const appWindow = getCurrentWindow();
     const timer = window.setInterval(() => {
-      void adapter.targetForeground!().then((codexActive) => {
-        void appWindow.setAlwaysOnTop(document.hasFocus() || codexActive);
+      void adapter.targetForeground!().then((targetActive) => {
+        void appWindow.setAlwaysOnTop(document.hasFocus() || targetActive);
       }).catch(() => undefined);
     }, 900);
     return () => window.clearInterval(timer);
@@ -114,10 +132,23 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
       setStatus("The automatic loop requires the installed Windows application.");
       return;
     }
-    void adapter.status().then((result) => {
-      setTargetReady(result.ready);
-      setStatus(result.ready ? "Codex connected — press Start Talking" : result.detail);
-    }).catch((error) => setStatus(message(error)));
+    let stopped = false;
+    let timer = 0;
+    const check = () => {
+      void adapter.status!().then((result) => {
+        if (stopped) return;
+        setTargetReady(result.ready);
+        if (result.name) setTargetName(result.name);
+        setStatus(result.ready ? `${result.name} connected — press Start Talking` : result.detail);
+        if (!result.ready) timer = window.setTimeout(check, 2000);
+      }).catch((error) => {
+        if (stopped) return;
+        setStatus(message(error));
+        timer = window.setTimeout(check, 2000);
+      });
+    };
+    check();
+    return () => { stopped = true; window.clearTimeout(timer); };
   }, [adapter]);
 
   useEffect(() => {
@@ -137,7 +168,13 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
         setSecondsRemaining(settings.silenceSeconds);
         return;
       }
-      const remaining = Math.max(0, Math.ceil((silenceDeadline.current - Date.now()) / 100) / 10);
+      const now = Date.now();
+      // New speech guarantees at least the normal silence allowance, but never
+      // throws away time the user added with the + button.
+      if (now - lastVoiceAt.current < 400) {
+        silenceDeadline.current = deadlineAfterSpeech(silenceDeadline.current, now, settings.silenceSeconds);
+      }
+      const remaining = Math.max(0, Math.ceil((silenceDeadline.current - now) / 100) / 10);
       setSecondsRemaining(remaining);
       if (remaining === 0 && !finishing.current) void finishAndSend();
     }, 100);
@@ -154,10 +191,16 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
         const responseState = await adapter.responseState!();
         if (responseState.busy) {
           sawBusy.current = true;
-          setStatus("Codex is answering…");
+          setStatus(`${targetName} is answering…`);
           return;
         }
-        if ((sawBusy.current || responseState.completedResponseCount > baselineResponseCount.current) && responseState.hasCompletedResponse && responseState.completedResponseCount > baselineResponseCount.current) {
+        // Claude virtualizes its message list, so Copy-button counts are unreliable there;
+        // the primary signal is the Stop button appearing and then going away.
+        const finishedAfterBusy = sawBusy.current && responseState.hasCompletedResponse;
+        const finishedByCount = responseState.hasCompletedResponse
+          && responseState.completedResponseCount > baselineResponseCount.current
+          && Date.now() - waitingStarted.current > 8000;
+        if (finishedAfterBusy || finishedByCount) {
           const latest = await adapter.readCopiedResponse();
           if (latest.trim()) {
             window.clearInterval(timer);
@@ -176,14 +219,15 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
       }
     }, 1200);
     return () => window.clearInterval(timer);
-  }, [state, adapter]);
+  }, [state, adapter, targetName]);
 
   function updateLiveDraft(words: string) {
     setTranscript(words);
     transcriptRef.current = words;
     if (!words.trim()) return;
     heardWords.current = true;
-    silenceDeadline.current = Date.now() + settings.silenceSeconds * 1000;
+    lastVoiceAt.current = Date.now();
+    silenceDeadline.current = deadlineAfterSpeech(silenceDeadline.current, Date.now(), settings.silenceSeconds);
     pendingLiveDraft.current = words;
     void flushLiveDraft();
   }
@@ -206,8 +250,8 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
   }
 
   async function startTalking() {
-    if (state === "waiting" || state === "sending") return;
-    playbackCycle.current += 1;
+    if (state === "starting" || state === "waiting" || state === "sending") return;
+    const startCycle = ++playbackCycle.current;
     player.current.stop();
     recorder.current.cancel();
     setPlaying(false);
@@ -218,16 +262,25 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     nativeTranscript.current.reset();
     heardWords.current = false;
     heardMicrophone.current = false;
+    lastVoiceAt.current = 0;
     setAudioLevel(0);
     setSecondsRemaining(settings.silenceSeconds);
     silenceDeadline.current = Date.now() + settings.silenceSeconds * 1000;
+    setState("starting");
+    setStatus(`Preparing the microphone and ${targetName}…`);
     try {
       await adapter.clearDraft?.();
+      if (startCycle !== playbackCycle.current) return;
       let useNativeSpeech = false;
       if ("__TAURI_INTERNALS__" in window) {
         try {
           nativeSpeechActive.current = true;
           await startNativeDictation();
+          if (startCycle !== playbackCycle.current) {
+            nativeSpeechActive.current = false;
+            await stopNativeDictation().catch(() => undefined);
+            return;
+          }
           useNativeSpeech = true;
         } catch (error) {
           nativeSpeechActive.current = false;
@@ -236,14 +289,16 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
       }
       if (!useNativeSpeech) {
         await recorder.current.start(
-          () => { if (heardWords.current) silenceDeadline.current = Date.now() + settings.silenceSeconds * 1000; },
+          () => { if (heardWords.current) { lastVoiceAt.current = Date.now(); silenceDeadline.current = deadlineAfterSpeech(silenceDeadline.current, Date.now(), settings.silenceSeconds); } },
           updateLiveDraft,
           true
         );
       }
+      if (startCycle !== playbackCycle.current) return;
       setState("recording");
-      setStatus("Listening — your words are appearing directly in Codex");
+      setStatus(`Listening — your words are appearing directly in ${targetName}`);
     } catch (error) {
+      if (startCycle !== playbackCycle.current) return;
       nativeSpeechActive.current = false;
       void stopNativeDictation().catch(() => undefined);
       setState("idle");
@@ -276,7 +331,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
       sawBusy.current = false;
       waitingStarted.current = Date.now();
       setState("waiting");
-      setStatus("Sent — waiting for Codex to answer…");
+      setStatus(`Sent — waiting for ${targetName} to answer…`);
     } catch (error) {
       setState("idle");
       setStatus(`${message(error)} Press Start Talking to try again.`);
@@ -286,6 +341,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
   }
 
   function addTime() {
+    // Added time is a protected reprieve. Further speech cannot erase it.
     silenceDeadline.current += settings.addSeconds * 1000;
     setSecondsRemaining((current) => Math.round((current + settings.addSeconds) * 10) / 10);
   }
@@ -294,7 +350,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     const parts = responsePlaybackSegments(text, settings.skipContentBoxes);
     if (!parts.length) {
       setState("idle");
-      setStatus("The Codex response was empty. Press Start Talking to continue.");
+      setStatus(`The ${targetName} response was empty. Press Start Talking to continue.`);
       return;
     }
     segmentsRef.current = parts;
@@ -375,7 +431,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     nativeSpeechActive.current = false;
     setAudioLevel(0);
     void stopNativeDictation().catch(() => undefined);
-    if (state === "recording" || state === "sending") void adapter.clearDraft?.();
+    if (state === "starting" || state === "recording" || state === "sending") void adapter.clearDraft?.();
     setPlaying(false);
     setTranscript("");
     setState("idle");
@@ -390,14 +446,14 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
 
   const reading = state === "response";
   const listening = state === "recording";
-  const busy = state === "sending" || state === "waiting";
+  const busy = state === "starting" || state === "sending" || state === "waiting";
   const current = segments[segmentIndex];
 
   const waveHeights = [8, 11, 18, 24, 18, 11, 8];
   const liveScale = .25 + Math.min(1, audioLevel / 45);
 
-  return <main className={`voice-floater ${listening ? "is-listening" : ""} ${reading ? "is-reading" : ""}`} title={status} onPointerDown={(event) => { if (!(event.target as HTMLElement).closest("button") && "__TAURI_INTERNALS__" in window) void getCurrentWindow().startDragging(); }}>
-    <button className="icon-control main-mic" aria-label="Start talking" title="Talk" disabled={busy || !targetReady || !speechReady || listening} onClick={startTalking}>●</button>
+  return <main className={`voice-floater ${companion ? "companion" : ""} ${listening ? "is-listening" : ""} ${reading ? "is-reading" : ""}`} title={status} onPointerDown={(event) => { if (!(event.target as HTMLElement).closest("button") && "__TAURI_INTERNALS__" in window) { event.preventDefault(); void getCurrentWindow().startDragging(); } }}>
+    <button className="icon-control main-mic" aria-label="Start talking" title="Talk" disabled={busy || !targetReady || !speechReady || listening} onClick={startTalking} />
     <button className="icon-control" aria-label={`Add ${settings.addSeconds} seconds`} title={`Add ${settings.addSeconds} seconds`} disabled={!listening} onClick={addTime}>＋</button>
     <span className={`voice-wave ${listening && audioLevel <= 3 ? "no-mic-sound" : ""}`} aria-label={listening ? `Microphone level ${audioLevel}` : "Voice waveform"}>{waveHeights.map((height, index) => <i key={index} style={listening ? { height: `${Math.max(3, Math.round(height * liveScale))}px` } : undefined} />)}</span>
     <span className="countdown-display">{secondsRemaining.toFixed(1)}s</span>
@@ -406,6 +462,7 @@ export function TalkScreen({ readerName, onBack, onSettings }: { readerName: str
     <button className="icon-control" aria-label="Skip reply" title="Skip reply" disabled={!reading} onClick={skipReply}>≫</button>
     <button className="icon-control stop-control" aria-label="Stop everything" title="Stop everything" disabled={state === "idle"} onClick={stopEverything}>■</button>
     <button className="icon-control" aria-label="Settings" title="Settings" onClick={onSettings}>⚙</button>
+    {companion && <button className="icon-control close-control" aria-label="Close companion" title="Close companion" onClick={onBack}>✕</button>}
   </main>;
 }
 

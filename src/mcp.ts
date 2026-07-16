@@ -5,6 +5,12 @@ interface McpResponse {
   error?: { message?: string };
 }
 
+export interface ProjectEntry {
+  name: string;
+  path: string;
+  type: "file" | "folder";
+}
+
 export class LongRotMcpClient {
   constructor(private readonly settings: ConnectionSettings) {}
 
@@ -14,6 +20,11 @@ export class LongRotMcpClient {
     return items
       .filter((item): item is ReaderCopy => item.type === "file" && /reader copy/i.test(item.name))
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  }
+
+  async listFolder(path = "/The Long Rot"): Promise<ProjectEntry[]> {
+    const content = await this.callTool("list_dropbox_folder", { path });
+    return JSON.parse(content) as ProjectEntry[];
   }
 
   async readText(path: string): Promise<string> {
@@ -47,6 +58,8 @@ export class LongRotMcpClient {
         method: "POST",
         headers: {
           "content-type": "application/json",
+          // The MCP Streamable HTTP transport requires both types in Accept.
+          accept: "application/json, text/event-stream",
           ...(this.settings.bearerToken
             ? { authorization: `Bearer ${this.settings.bearerToken}` }
             : {})

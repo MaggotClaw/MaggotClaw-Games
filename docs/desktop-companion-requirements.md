@@ -18,6 +18,15 @@ Provide voice input and spoken response playback while the user works in the ord
 10. Support pause, continue, repeat, previous paragraph, next paragraph, speed, stop, and talk again.
 11. Do not modify Long Rot project files through this companion unless a separate, explicit project action is approved.
 12. Keep Reader Mode separate and intact.
+13. The main MaggotClaw Games shortcut always opens the full application hub;
+    Voice Companion opens only after the user chooses it.
+14. The full program uses the approved primary MCG application icon. The
+    compact Voice Companion uses the approved circular MCG icon in the Windows
+    taskbar when technically available.
+15. Add Time is protected: later speech may guarantee the normal silence
+    allowance but must never erase time explicitly added by the user.
+16. Read stable completed paragraphs while the AI is still generating instead
+    of waiting for the entire answer, without repeating revised text.
 
 ## Adapter contract
 

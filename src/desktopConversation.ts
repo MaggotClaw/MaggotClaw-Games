@@ -1,18 +1,19 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export interface DesktopConversationTarget {
-  id: "codex";
+  id: "codex" | "claude" | "auto";
   name: string;
 }
 
-export interface CodexTargetStatus {
+export interface ConversationTargetStatus {
   found: boolean;
   ready: boolean;
+  name: string;
   label: string;
   detail: string;
 }
 
-export interface CodexResponseState {
+export interface ConversationResponseState {
   busy: boolean;
   hasCompletedResponse: boolean;
   completedResponseCount: number;
@@ -23,13 +24,13 @@ export interface DesktopConversationAdapter {
   insertDraft(text: string): Promise<void>;
   readCopiedResponse(): Promise<string>;
   sendMessage?(text: string): Promise<void>;
-  responseState?(): Promise<CodexResponseState>;
+  responseState?(): Promise<ConversationResponseState>;
   clearDraft?(): Promise<void>;
   targetForeground?(): Promise<boolean>;
 }
 
-export class CodexClipboardAdapter implements DesktopConversationAdapter {
-  readonly target = { id: "codex" as const, name: "Codex — current Windows task" };
+export class ClipboardConversationAdapter implements DesktopConversationAdapter {
+  readonly target = { id: "auto" as const, name: "the AI program" };
 
   async insertDraft(text: string): Promise<void> {
     const draft = text.trim();
@@ -39,43 +40,49 @@ export class CodexClipboardAdapter implements DesktopConversationAdapter {
 
   async readCopiedResponse(): Promise<string> {
     const response = (await navigator.clipboard.readText()).trim();
-    if (!response) throw new Error("Copy the Codex response first.");
+    if (!response) throw new Error("Copy the AI response first.");
     return response;
   }
 }
 
-export class CodexWindowsAdapter implements DesktopConversationAdapter {
-  readonly target = { id: "codex" as const, name: "Codex — current Windows task" };
+export class WindowsConversationAdapter implements DesktopConversationAdapter {
+  readonly target = { id: "auto" as const, name: "Claude or Codex" };
+  // "auto" is sent to the backend as no preference so it falls back to detection.
+  private readonly choice: string | null;
 
-  status(): Promise<CodexTargetStatus> {
-    return invoke<CodexTargetStatus>("codex_target_status");
+  constructor(choice: "auto" | "claude" | "codex" = "auto") {
+    this.choice = choice === "auto" ? null : choice;
+  }
+
+  status(): Promise<ConversationTargetStatus> {
+    return invoke<ConversationTargetStatus>("conversation_target_status", { target: this.choice });
   }
 
   async insertDraft(text: string): Promise<void> {
-    await invoke("insert_codex_draft", { draft: text });
+    await invoke("insert_conversation_draft", { draft: text, target: this.choice });
   }
 
   readCopiedResponse(): Promise<string> {
-    return invoke<string>("copy_latest_codex_response");
+    return invoke<string>("copy_latest_conversation_response", { target: this.choice });
   }
 
   async sendMessage(text: string): Promise<void> {
-    await invoke("send_codex_message", { draft: text });
+    await invoke("send_conversation_message", { draft: text, target: this.choice });
   }
 
-  responseState(): Promise<CodexResponseState> {
-    return invoke<CodexResponseState>("codex_response_state");
+  responseState(): Promise<ConversationResponseState> {
+    return invoke<ConversationResponseState>("conversation_response_state", { target: this.choice });
   }
 
   async clearDraft(): Promise<void> {
-    await invoke("clear_codex_draft");
+    await invoke("clear_conversation_draft", { target: this.choice });
   }
 
   targetForeground(): Promise<boolean> {
-    return invoke<boolean>("codex_is_foreground");
+    return invoke<boolean>("conversation_is_foreground", { target: this.choice });
   }
 }
 
-export function createCodexAdapter(): DesktopConversationAdapter & { status?: () => Promise<CodexTargetStatus> } {
-  return "__TAURI_INTERNALS__" in window ? new CodexWindowsAdapter() : new CodexClipboardAdapter();
+export function createConversationAdapter(choice: "auto" | "claude" | "codex" = "auto"): DesktopConversationAdapter & { status?: () => Promise<ConversationTargetStatus> } {
+  return "__TAURI_INTERNALS__" in window ? new WindowsConversationAdapter(choice) : new ClipboardConversationAdapter();
 }

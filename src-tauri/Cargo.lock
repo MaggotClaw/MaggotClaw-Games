@@ -3421,12 +3421,13 @@ dependencies = [
 
 [[package]]
 name = "the-long-rot-voice"
-version = "0.4.0"
+version = "0.6.7"
 dependencies = [
  "keyring",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "uiautomation",

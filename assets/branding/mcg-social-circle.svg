@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1254" height="1254" viewBox="0 0 1254 1254">
+  <defs>
+    <clipPath id="social-circle">
+      <circle cx="627" cy="627" r="622"/>
+    </clipPath>
+    <clipPath id="clean-source">
+      <rect x="116" y="116" width="1022" height="1022" rx="126" ry="126"/>
+    </clipPath>
+  </defs>
+  <circle cx="627" cy="627" r="622" fill="#030706"/>
+  <g clip-path="url(#social-circle)">
+    <image x="75" y="75" width="1104" height="1104" xlink:href="mcg-centered-chroma.png" clip-path="url(#clean-source)"/>
+  </g>
+  <circle cx="627" cy="627" r="617" fill="none" stroke="#00efb1" stroke-width="9"/>
+</svg>

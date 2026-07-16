@@ -1,83 +1,70 @@
-# The Long Rot Voice
+# MaggotClaw Games
 
-Windows-first voice companion and project application for The Long Rot. The application contains a working Reader Mode and is being expanded into a no-API-key desktop accessibility companion for the installed ChatGPT, Codex, and Claude applications.
+Windows-first project hub, Reader Mode, and no-API-key Voice Companion for
+MaggotClaw Games. The Long Rot is the first project used inside the app; it is
+not permanently built into the finished product.
 
-Current installed development version: `0.2.0`.
+Current installed development version: `0.6.3`.
 
-## Product boundary
+For the complete current state, decisions, live-test results, and ordered next
+steps, read [`docs/project-status-2026-07-15.md`](docs/project-status-2026-07-15.md).
+For a clean continuation in another Codex chat, use
+[`docs/new-chat-prompt-2026-07-15.md`](docs/new-chat-prompt-2026-07-15.md).
 
-The project has two distinct experiences:
+## Current application modes
 
-1. **Project Workspace and Desktop Voice Companion** for authors, editors, contributors, and collaborators. It should dictate into the ordinary ChatGPT, Codex, or Claude desktop application, send the message, detect the displayed response, and read it aloud. It must work with the user's existing Free or paid account and must not require an API key.
-2. **Reader Mode** for selecting Reader Copies, listening, preserving position, and recording version-linked feedback.
+1. **Main MaggotClaw Games hub** — profile, settings, project selection, and
+   entry into the other modes. The multi-project dashboard is planned but not
+   implemented yet.
+2. **Reader Mode** — Reader Copy selection, local caching, sentence playback,
+   durable reading position, comments, recovery, and comment review.
+3. **Voice Companion** — free offline speech recognition into the ordinary
+   installed Codex Windows app, automatic Send, response detection, and local
+   neural reply reading. Codex is first; Claude and regular ChatGPT adapters
+   remain unfinished.
 
-Reader Mode is not the primary boundary of the finished product. It is one mode within the larger Long Rot voice workspace.
+Normal Voice Companion use requires no AI API key. It uses the user's existing
+signed-in Codex session. Vosk handles local speech recognition and Piper handles
+local neural reading. The older API experiment remains legacy code and must not
+become the default path.
 
-## Current scope
-
-- Reader Copy discovery through `search_dropbox_filenames`.
-- Text retrieval through `read_dropbox_text_file`.
-- Current revision capture through `list_dropbox_revisions`.
-- Sentence segmentation and highlighting.
-- Play, pause, continue, back, forward, repeat, and speed.
-- Durable cached document and reading position.
-- Local microphone recording with durable comment drafts.
-- Five-second incremental silence allowance with voice-activity reset.
-- Browser transcription when supported, with a manual confirmation fallback.
-- Exact sentence/paragraph/character anchors and post-comment resume.
-- Recovery of unfinished comments after restart.
-- Required reader identity stored locally.
-- Saved-comment review with original audio playback.
-- Local JSON comment-index export without embedding audio.
-- An API-backed Talk mode prototype with transcription review and spoken responses.
-- Secure Windows Credential Manager storage for the optional API prototype.
-- Offline demo Reader Copy.
-- Read-only application boundary; no MCP write tools are called.
-
-Comments remain local in this slice. Project synchronization is intentionally disabled until the feedback location and MCP audio contract are approved.
-
-## Run locally
+## Build and verification
 
 ```powershell
 npm install
-npm run dev
-```
-
-Open `http://127.0.0.1:4173`.
-
-The demo works without credentials. For MCP access, start the MCP HTTP server separately and configure its local authentication. The development server proxies `/mcp` to `LONG_ROT_MCP_URL`, defaulting to `http://127.0.0.1:3000`.
-
-Never commit an MCP bearer token or Dropbox credentials. The prototype connection screen is not the final OAuth flow.
-
-## Windows desktop
-
-After the Rust and Visual C++ build prerequisites are installed:
-
-```powershell
-npm run desktop:dev
+npm run check
+npm test
+cargo test --manifest-path src-tauri/Cargo.toml -j 1
 npm run desktop:build
 ```
 
-The desktop shell allows only HTTPS MCP endpoints or the local `http://127.0.0.1/.../mcp` development endpoint. Network requests pass through a narrowly scoped Rust command; Dropbox credentials are never accepted by the application.
+The NSIS installer is created under
+`src-tauri/target/release/bundle/nsis/`. The current installer is
+`MaggotClaw Games_0.6.3_x64-setup.exe`. Development installers are unsigned.
 
-The current `0.2.0` Talk mode is an implementation prototype, not the accepted production interaction model. It uses an OpenAI API key and therefore does not meet the clarified requirement. API support may remain as an optional advanced provider, but it must not be the default or required path.
+## Local project workspace
 
-The Windows installer is created under `src-tauri/target/release/bundle/nsis/`. It is an unsigned development build and Windows may display a publisher warning until a code-signing certificate is configured.
+The Projects screen can prepare a local workspace under
+`Documents\MaggotClaw Games Projects\The Long Rot`, recursively download
+supported text files, preserve exact local originals, create Markdown copies
+for AI work, and back up an old local original before replacing it with a new
+Dropbox revision. Dropbox uploads are deliberately disabled.
 
-## Checks
+Word, PDF, image, and other binary files are listed in the local inventory but
+cannot be downloaded until the MCP gains a safe binary-download operation.
 
-```powershell
-npm run check
-npm test
-npm run build
-```
+The project selector currently contains The Long Rot and Project Zero Author.
+The Long Rot workspace is prepared locally; Project Zero Author is selectable
+but its workspace and remote source are not configured yet.
 
-## Known integration gaps
+## Safety boundaries
 
-- The current MCP read tool returns text without file metadata; the app separately requests the newest revision ID. An MCP read-by-revision operation is required for a strict immutable-version guarantee.
-- The current MCP has no binary audio operation.
-- The repository does not define the project ID Registry format or a dedicated Reader Copy listing tool; discovery temporarily uses the filename search tool.
-- Live MCP verification is blocked because the local MCP currently has an expired temporary Dropbox access token and does not have refresh-token credentials configured.
-- The no-API-key Windows desktop companion is not implemented yet. It requires Windows UI Automation adapters for the installed ChatGPT, Codex, and Claude applications.
-- The current API Talk screen must be moved under an optional Advanced provider area or disabled by default.
-- iPhone and iPad cannot offer the same unrestricted cross-application automation as Windows. A native Apple companion will require user-mediated handoff through app extensions, clipboard/share flows, or provider-supported app actions; a Safari extension may provide a more automatic optional route.
+- Never commit or display MCP bearer tokens, Dropbox credentials, PINs, or API
+  keys.
+- Voice Companion must never send when the target app or composer cannot be
+  identified confidently.
+- Reader Mode remains read-only toward official project files until a separate
+  approval/upload workflow is built.
+- Live MCP/Dropbox access must be reverified before relying on it; the last
+  recorded local connection used an expired temporary Dropbox token.
+- Do not treat brainstorming or AI conversation as approved project canon.

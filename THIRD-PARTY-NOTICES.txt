@@ -1,0 +1,39 @@
+NAudio 1.10.0
+Copyright 2001-2020 Mark Heath
+License: MIT
+Source: https://github.com/naudio/NAudio
+
+NAudio is used only for selecting and capturing the intended Windows microphone.
+
+Vosk 0.3.38 (and libvosk native library)
+Copyright Alpha Cephei Inc.
+License: Apache License 2.0
+Source: https://github.com/alphacephei/vosk-api
+
+Vosk provides the free offline speech recognition engine. It bundles the
+MinGW runtime libraries libgcc_s_seh-1.dll, libstdc++-6.dll, and
+libwinpthread-1.dll (GCC Runtime Library Exception / MIT-like licenses).
+
+vosk-model-small-en-us-0.15
+License: Apache License 2.0
+Source: https://alphacephei.com/vosk/models
+
+The small English model performs the on-device speech recognition. It is
+bundled unmodified and can be swapped for a larger model for more accuracy.
+
+Piper 2023.11.14-2
+Copyright 2022 Michael Hansen
+License: MIT
+Source: https://github.com/rhasspy/piper
+
+Piper provides the free local neural text-to-speech engine. The archived MIT
+release is bundled as an independent executable with its required libraries.
+
+Piper voice: en_GB-cori-high
+Model repository license: MIT
+Training recordings: LibriVox public domain recordings
+Source: https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_GB/cori/high
+
+The Cori voice is a single-speaker UK English voice trained from scratch. It
+was selected instead of voice models whose training data prohibit commercial
+use.

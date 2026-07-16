@@ -10,3 +10,17 @@ vite.config.js
 vite.config.d.ts
 src-tauri/target/
 src-tauri/resources/WindowsDictation.exe
+src-tauri/resources/NAudio.dll
+src-tauri/resources/Vosk.dll
+src-tauri/resources/libvosk.dll
+src-tauri/resources/libgcc_s_seh-1.dll
+src-tauri/resources/libstdc++-6.dll
+src-tauri/resources/libwinpthread-1.dll
+/work/
+
+# Large third-party binaries. These are free re-downloads (see THIRD-PARTY-NOTICES.txt
+# for the exact sources) and are far too big for GitHub, so they stay out of Git.
+# The build bundles them from these local folders.
+src-tauri/resources/piper/
+src-tauri/resources/vosk-model/
+src-tauri/vendor/

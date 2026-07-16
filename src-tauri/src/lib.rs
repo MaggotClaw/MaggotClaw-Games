@@ -1,7 +1,10 @@
 use serde_json::Value;
+use std::time::Duration;
 
 mod desktop_companion;
 mod native_speech;
+mod piper_speech;
+mod project_workspace;
 
 const OPENAI_KEY_SERVICE: &str = "The Long Rot Reader";
 const OPENAI_KEY_ACCOUNT: &str = "openai-api-key";
@@ -56,8 +59,18 @@ fn validate_endpoint(endpoint: &str) -> Result<url::Url, String> {
 #[tauri::command]
 async fn mcp_call(endpoint: String, bearer_token: String, body: Value) -> Result<Value, String> {
     let endpoint = validate_endpoint(&endpoint)?;
-    let client = reqwest::Client::new();
-    let mut request = client.post(endpoint).json(&body);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|_| {
+            "The project connection could not be prepared. Nothing was changed.".to_string()
+        })?;
+    // The MCP Streamable HTTP transport rejects requests (406) unless the client
+    // declares it accepts both JSON and SSE, even though this server replies JSON.
+    let mut request = client
+        .post(endpoint)
+        .header("accept", "application/json, text/event-stream")
+        .json(&body);
     if !bearer_token.is_empty() {
         request = request.bearer_auth(bearer_token);
     }
@@ -75,6 +88,75 @@ async fn mcp_call(endpoint: String, bearer_token: String, body: Value) -> Result
         ));
     }
     Ok(value)
+}
+
+// Ask GitHub for a repository's latest published release. Runs Rust-side so the
+// call is not blocked by the app's connect-src content-security policy.
+#[tauri::command]
+async fn fetch_latest_release(repo: String) -> Result<Value, String> {
+    // Accept only a clean "owner/name" slug — never an arbitrary URL.
+    let valid_slug = repo.matches('/').count() == 1
+        && !repo.starts_with('/')
+        && !repo.ends_with('/')
+        && repo
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'));
+    if !valid_slug {
+        return Err("The update source is not a valid GitHub owner/name.".to_string());
+    }
+    let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|_| "The update check could not be prepared.".to_string())?;
+    let response = client
+        .get(url)
+        .header("accept", "application/vnd.github+json")
+        .header("user-agent", "MaggotClaw-Games-Updater")
+        .send()
+        .await
+        .map_err(|_| {
+            "Could not reach the update service. Check your internet connection.".to_string()
+        })?;
+    let status = response.status();
+    if status.as_u16() == 404 {
+        return Err("No published releases were found for the update source yet.".to_string());
+    }
+    if !status.is_success() {
+        return Err(format!(
+            "The update service replied with an error ({}).",
+            status.as_u16()
+        ));
+    }
+    response
+        .json()
+        .await
+        .map_err(|_| "The update service returned an unreadable response.".to_string())
+}
+
+// Open a web link in the user's default browser. Refuses anything that is not a
+// plain http(s) URL, and rejects shell metacharacters so nothing can be injected.
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("Only web links can be opened.".to_string());
+    }
+    if url.contains(|c: char| matches!(c, '&' | '|' | '<' | '>' | '^' | '"' | ' ' | '\n' | '\r')) {
+        return Err("That link cannot be opened automatically. Use the release page instead.".to_string());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .spawn()
+            .map_err(|_| "Windows could not open the link.".to_string())?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = url;
+        Err("Opening links is only supported on Windows in this build.".to_string())
+    }
 }
 
 #[tauri::command]
@@ -231,21 +313,32 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             mcp_call,
+            fetch_latest_release,
+            open_url,
             has_openai_api_key,
             save_openai_api_key,
             openai_transcribe,
             openai_respond,
             openai_speech,
-            desktop_companion::codex_target_status,
-            desktop_companion::insert_codex_draft,
-            desktop_companion::clear_codex_draft,
-            desktop_companion::send_codex_message,
-            desktop_companion::codex_response_state,
-            desktop_companion::codex_is_foreground,
-            desktop_companion::copy_latest_codex_response,
+            desktop_companion::conversation_target_status,
+            desktop_companion::insert_conversation_draft,
+            desktop_companion::clear_conversation_draft,
+            desktop_companion::send_conversation_message,
+            desktop_companion::conversation_response_state,
+            desktop_companion::conversation_is_foreground,
+            desktop_companion::copy_latest_conversation_response,
             native_speech::prepare_native_dictation,
             native_speech::start_native_dictation,
-            native_speech::stop_native_dictation
+            native_speech::stop_native_dictation,
+            piper_speech::synthesize_piper_speech,
+            project_workspace::initialize_project_workspace,
+            project_workspace::project_workspace_status,
+            project_workspace::save_project_text_file,
+            project_workspace::record_project_binary_file,
+            project_workspace::open_project_workspace,
+            project_workspace::list_project_documents,
+            project_workspace::read_project_document,
+            project_workspace::search_project_documents
         ])
         .build(tauri::generate_context!())
         .expect("error while building The Long Rot Voice")

@@ -1,3 +1,5 @@
+export type ConversationTargetChoice = "auto" | "claude" | "codex";
+
 export interface VoiceSettings {
   silenceSeconds: number;
   addSeconds: number;
@@ -5,6 +7,7 @@ export interface VoiceSettings {
   readRepliesAutomatically: boolean;
   listenAfterReading: boolean;
   skipContentBoxes: boolean;
+  target: ConversationTargetChoice;
 }
 
 export const defaultVoiceSettings: VoiceSettings = {
@@ -13,7 +16,8 @@ export const defaultVoiceSettings: VoiceSettings = {
   speechRate: 1,
   readRepliesAutomatically: true,
   listenAfterReading: true,
-  skipContentBoxes: true
+  skipContentBoxes: true,
+  target: "auto"
 };
 
 function key(profile: string): string {

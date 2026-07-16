@@ -1,7 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <rect width="1024" height="1024" rx="210" fill="#17130f"/>
-  <rect x="190" y="148" width="644" height="728" rx="58" fill="#c89950"/>
-  <path d="M248 148h96v728h-96c-32 0-58-26-58-58V206c0-32 26-58 58-58Z" fill="#9b6930"/>
-  <path d="M425 342h280v66H425zm0 137h280v66H425zm0 137h210v66H425z" fill="#17130f"/>
-  <circle cx="295" cy="512" r="28" fill="#17130f"/>
+  <defs>
+    <radialGradient id="bg" cx="72%" cy="18%" r="92%">
+      <stop offset="0" stop-color="#123c32"/>
+      <stop offset="0.48" stop-color="#07110f"/>
+      <stop offset="1" stop-color="#020504"/>
+    </radialGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="13" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="18" y="18" width="988" height="988" rx="220" fill="url(#bg)" stroke="#00efb1" stroke-width="22"/>
+  <circle cx="512" cy="500" r="268" fill="#f4f7f6"/>
+  <circle cx="512" cy="500" r="154" fill="#030706"/>
+  <g fill="none" stroke-linecap="round" filter="url(#glow)">
+    <path d="M260 690 580 280" stroke="#00efb1" stroke-width="72"/>
+    <path d="M390 740 710 320" stroke="#00efb1" stroke-width="68"/>
+    <path d="M515 730 805 350" stroke="#00efb1" stroke-width="62"/>
+    <path d="M260 690 580 280" stroke="#030706" stroke-width="39"/>
+    <path d="M390 740 710 320" stroke="#030706" stroke-width="37"/>
+    <path d="M515 730 805 350" stroke="#030706" stroke-width="34"/>
+  </g>
+  <text x="512" y="900" fill="#00efb1" font-family="Arial, sans-serif" font-size="92" font-weight="700" letter-spacing="22" text-anchor="middle">GAMES</text>
 </svg>

@@ -16,6 +16,10 @@ npm run desktop:build
 
 The build creates the desktop executable and an NSIS installer. The installer is unsigned during development. No build command deploys, uploads, pushes, or connects to Dropbox.
 
+The installer also bundles the Piper local speech engine and the commercially
+usable `en_GB-cori-high` voice model. This increases installer size but keeps
+spoken reading private, offline, and free after installation.
+
 Installed development version at the time of this note: `0.2.0`.
 
 ## Desktop network boundary

@@ -255,3 +255,46 @@ Future profile and support requirements:
 - Profile settings are local-first and may synchronize to the user's personal Long Rot profile file for recovery.
 - Project authorization must be one-button and hide technical credentials from normal users.
 - Temporary support access is request-based, read-only by default, expires after 30 minutes, and excludes manuscript text, conversations, PINs, and credentials from diagnostics.
+
+## Local neural reading voice — version 0.5.0
+
+Reader Mode and Voice Companion reply playback now use the bundled Piper neural
+text-to-speech engine by default. The selected `en_GB-cori-high` voice is a
+single-speaker UK English model trained from scratch using public-domain
+LibriVox recordings. It runs entirely on the computer and requires no API key,
+subscription, or network connection.
+
+- Reading speed continues to use the existing profile setting.
+- Pause, continue, stop, paragraph navigation, and automatic listen-after-read
+  behavior are preserved.
+- If Piper or its model cannot start, playback automatically falls back to the
+  installed Windows speech system instead of breaking the conversation loop.
+- The commonly recommended Lessac model was deliberately not bundled because
+  its source-data license is restricted to research use.
+- Piper, the Cori voice, their required runtime libraries, license text, and
+  voice notice are included in the Windows installer.
+
+Verification for this slice includes a native test that invokes the bundled
+Piper executable and confirms that it creates valid RIFF/WAVE audio.
+
+## Live-test corrections — version 0.5.1
+
+The first live test of version 0.5.0 exposed three problems that automated
+build checks did not reproduce. Version 0.5.1 corrects them:
+
+- Add Time is now protected. Continued speech never replaces an added ten
+  seconds with the normal two-second allowance. Once the bonus counts down to
+  the normal allowance, active speech continues refreshing those two seconds.
+- The floating panel disables text selection and prevents the pointer-down
+  event from highlighting the timer while the user drags the panel.
+- Codex now exposes its composer class as `ProseMirror ProseMirror-focused`.
+  The adapter matches the `ProseMirror` class token instead of requiring the
+  obsolete exact class value.
+- All Windows accessibility tree work runs on background threads so checking
+  Codex does not freeze dragging or button feedback.
+- Start Talking immediately displays a preparation state and rejects duplicate
+  clicks while Codex and the microphone are being prepared.
+
+Automated verification: 15 frontend tests, three Rust tests, TypeScript checks,
+and Rust compilation pass. A second live microphone/Codex test is still needed
+before calling the complete conversation loop proven.

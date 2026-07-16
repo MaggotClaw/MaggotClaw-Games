@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1254" height="1254" viewBox="0 0 1254 1254">
+  <defs>
+    <clipPath id="rounded-icon">
+      <rect x="37" y="34" width="1180" height="1180" rx="166" ry="166"/>
+    </clipPath>
+  </defs>
+  <image x="0" y="0" width="1254" height="1254" xlink:href="mcg-centered-chroma.png" clip-path="url(#rounded-icon)"/>
+  <rect x="40" y="37" width="1174" height="1174" rx="163" ry="163" fill="none" stroke="#00efb1" stroke-width="7"/>
+</svg>
