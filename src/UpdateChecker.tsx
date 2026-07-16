@@ -31,6 +31,12 @@ export function UpdateChecker({ configurable = false }: { configurable?: boolean
     setBusy(true);
     setResult(null);
     try {
+      // Never fail silently: if the app version could not be read, say so
+      // instead of leaving the button looking dead.
+      if (!version) {
+        setResult({ state: "error", message: "The app version could not be read, so updates cannot be compared." });
+        return;
+      }
       setResult(await checkForUpdates(version));
     } finally {
       setBusy(false);
@@ -55,7 +61,7 @@ export function UpdateChecker({ configurable = false }: { configurable?: boolean
   return <div className="update-checker">
     <div className="update-line">
       <span className="app-version">Version {version || "…"}</span>
-      <button className="text-button" onClick={() => void check()} disabled={busy || !version}>
+      <button className="text-button" onClick={() => void check()} disabled={busy}>
         {busy ? "Checking…" : "Check for updates"}
       </button>
     </div>

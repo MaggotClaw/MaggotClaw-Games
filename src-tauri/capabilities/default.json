@@ -5,6 +5,7 @@
   "windows": ["main", "companion"],
   "permissions": [
     "core:default",
+    "core:app:allow-version",
     "core:window:allow-set-size",
     "core:window:allow-set-always-on-top",
     "core:window:allow-set-decorations",
