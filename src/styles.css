@@ -41,6 +41,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .owner-dash-button { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; color: #00140e; background: var(--mc-green, #00efb1); border: 0; border-radius: 12px; font-weight: 800; cursor: pointer; }
 .pending-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 6px; color: #fff; background: #d7443f; border-radius: 999px; font-size: .78rem; font-weight: 800; }
 .dashboard-shell { display: flex; flex-direction: column; gap: 18px; }
+.code-box { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; padding: 14px; background: #0b1210; border: 1px solid var(--mc-green, #00efb1); border-radius: 12px; }
+.code-label { color: var(--mc-green-soft, #7fd9c4); font-weight: 700; font-size: .85rem; }
+.code-value { display: block; padding: 10px; color: var(--mc-white, #f2f6f4); background: #060b0a; border: 1px solid #24352f; border-radius: 8px; font: .8rem/1.45 Consolas, monospace; word-break: break-all; user-select: all; }
+.code-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.code-actions small { color: var(--mc-muted, #9aa7a2); }
 .dash-section { display: flex; flex-direction: column; gap: 10px; }
 .dash-section h2 { display: flex; align-items: center; gap: 10px; margin: 0; color: var(--mc-white, #f5eee2); }
 .request-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }

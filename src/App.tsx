@@ -9,11 +9,12 @@ import { loadDocument, loadPosition, loadRecoverableComments, loadSavedComments,
 import type { ConnectionSettings, DocumentRecord, ReaderComment, ReaderCopy } from "./types";
 import { loadVoiceSettings, saveVoiceSettings, type VoiceSettings } from "./voiceSettings";
 import { downloadProject, formatWorkspaceTime, initializeWorkspace, openWorkspace, workspaceStatus, type DownloadProgress, type WorkspaceStatus } from "./projectWorkspace";
-import { canPerform, profileRole, roleLabel, ROLE_ORDER, type ProjectRole } from "./permissions";
+import { canPerform, profileRole, roleLabel, ROLE_ORDER, setProfileRole, type ProjectRole } from "./permissions";
 import { decideAccessRequest, pendingRequests, submitAccessRequest, type AccessRequest } from "./accessRequests";
+import { makeRequestCode, makeUnlockCode, parseRequestCode, parseUnlockCode, unlockMatchesProfile } from "./accessCodes";
 import { UpdateChecker } from "./UpdateChecker";
 
-type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access";
+type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock";
 
 function BrandLogo({ compact = false }: { compact?: boolean }) {
   return <img className={compact ? "brand-logo compact" : "brand-logo"} src="/maggotclaw-modern.png" alt="MaggotClaw Games" />;
@@ -106,6 +107,7 @@ export function App() {
   const [workspaceProgress, setWorkspaceProgress] = useState<DownloadProgress | null>(null);
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [requests, setRequests] = useState<AccessRequest[]>(() => pendingRequests());
+  const [requestCode, setRequestCode] = useState("");
   const refreshRequests = useCallback(() => setRequests(pendingRequests()), []);
 
   function openVoiceTarget(target: VoiceSettings["target"]) {
@@ -465,8 +467,21 @@ export function App() {
   function sendAccessRequest(requestedRole: ProjectRole, reason: string) {
     submitAccessRequest({ name: readerName, currentRole: role, requestedRole, reason });
     refreshRequests();
+    // The request also becomes a code the person sends to the owner, so it can
+    // travel between computers without a server in the middle.
+    setRequestCode(makeRequestCode({ name: readerName, currentRole: role, requestedRole, reason }));
+  }
+
+  // Applies an unlock code the owner sent back. The code names its recipient, so
+  // it only works for the profile it was granted to.
+  function redeemUnlockCode(code: string): string {
+    const payload = parseUnlockCode(code);
+    if (!payload) return "That unlock code was not recognised. Check it was copied in full.";
+    if (!unlockMatchesProfile(payload, readerName)) return `That unlock code was issued to ${payload.name}, not ${readerName}.`;
+    setProfileRole(readerName, payload.role);
     setScreen("home");
-    setStatus("Your request was sent to the owner for approval.");
+    setStatus(`Access granted. You are now ${roleLabel(payload.role)}.`);
+    return "";
   }
 
   async function openLongRotWorkspace() {
@@ -542,11 +557,15 @@ export function App() {
   }
 
   if (screen === "request-access") {
-    return <RequestAccess role={role} onSend={sendAccessRequest} onCancel={() => setScreen("home")} />;
+    return <RequestAccess role={role} code={requestCode} onSend={sendAccessRequest} onCancel={() => { setRequestCode(""); setScreen("home"); }} />;
+  }
+
+  if (screen === "unlock") {
+    return <RedeemUnlock name={readerName} onRedeem={redeemUnlockCode} onCancel={() => setScreen("home")} />;
   }
 
   if (screen === "dashboard") {
-    return <OwnerDashboard requests={requests} onDecide={decideRequest} onBack={() => setScreen("home")} />;
+    return <OwnerDashboard requests={requests} onDecide={decideRequest} onBack={() => setScreen("home")} owner={readerName} />;
   }
 
   if (screen === "home") {
@@ -557,7 +576,7 @@ export function App() {
         <span className="role-badge">{roleLabel(role)}</span>
         {canPerform(role, "manage")
           ? <button className="owner-dash-button" onClick={openDashboard}>Owner Dashboard{requests.length > 0 && <span className="pending-badge">{requests.length}</span>}</button>
-          : <span className="reader-note">You can read and comment right away. Need to edit? <button className="text-button inline" onClick={() => setScreen("request-access")}>Request access</button></span>}
+          : <span className="reader-note">You can read and comment right away. Need to edit? <button className="text-button inline" onClick={() => { setRequestCode(""); setScreen("request-access"); }}>Request access</button> · <button className="text-button inline" onClick={() => setScreen("unlock")}>Enter unlock code</button></span>}
       </section>
       <section className="mode-grid"><button className="mode-card project-mode" onClick={openProjects}><img className="mode-icon image-icon" src="/mcg-social-circle.png" alt="MaggotClaw Games" /><span><strong>Projects</strong><small>Open a project, review its local files, and use the actions allowed for your role.</small></span><span>→</span></button><button className="mode-card" onClick={() => setScreen("library")}><span className="mode-icon">LR</span><span><strong>Reader Mode</strong><small>Read or listen, save your place, and record comments.</small></span><span>→</span></button><button className="mode-card voice-mode" onClick={() => setScreen("voice-targets")}><span className="mode-icon voice-mic-mark" aria-hidden="true" /><span><strong>Voice Companion</strong><small>Talk with Claude or Codex now. ChatGPT will be added later.</small></span><span>→</span></button></section>
     </main>;
@@ -739,12 +758,41 @@ function Profile({ initial, onContinue }: { initial: string; onContinue: (name: 
   </main>;
 }
 
-function RequestAccess({ role, onSend, onCancel }: { role: ProjectRole; onSend: (role: ProjectRole, reason: string) => void; onCancel: () => void }) {
+function CodeBox({ label, code, hint }: { label: string; code: string; hint: string }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard?.writeText(code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard unavailable */ }
+  }
+  return <div className="code-box">
+    <span className="code-label">{label}</span>
+    <code className="code-value">{code}</code>
+    <div className="code-actions">
+      <button className="primary tiny" onClick={() => void copy()}>{copied ? "Copied ✓" : "Copy code"}</button>
+      <small>{hint}</small>
+    </div>
+  </div>;
+}
+
+function RequestAccess({ role, code, onSend, onCancel }: { role: ProjectRole; code: string; onSend: (role: ProjectRole, reason: string) => void; onCancel: () => void }) {
   // Offer only roles above the current one — you cannot request less, and you
   // cannot request the owner role (that stays with the author).
   const options = ROLE_ORDER.filter((r) => ROLE_ORDER.indexOf(r) > ROLE_ORDER.indexOf(role) && r !== "administrator");
   const [requested, setRequested] = useState<ProjectRole>(options[options.length - 1] ?? "editor");
   const [reason, setReason] = useState("");
+
+  if (code) {
+    return <main className="app-shell settings-panel">
+      <BrandLogo compact /><p className="eyebrow">REQUEST ACCESS</p><h1>Send this to the owner</h1>
+      <p>Copy the code below and send it to the owner any way you like — text, email, chat. They approve it and send you back an unlock code.</p>
+      <CodeBox label="Your request code" code={code} hint="Send it to the owner, then use “Enter unlock code” when they reply." />
+      <div className="form-actions"><button className="primary" onClick={onCancel}>Done</button></div>
+    </main>;
+  }
+
   return <main className="app-shell settings-panel">
     <BrandLogo compact /><p className="eyebrow">REQUEST ACCESS</p><h1>Ask for more access</h1>
     <p>You are a <strong>{roleLabel(role)}</strong>. Your request goes to the owner for approval — access is never granted automatically.</p>
@@ -756,10 +804,58 @@ function RequestAccess({ role, onSend, onCancel }: { role: ProjectRole; onSend: 
   </main>;
 }
 
-function OwnerDashboard({ requests, onDecide, onBack }: { requests: AccessRequest[]; onDecide: (id: string, approve: boolean) => void; onBack: () => void }) {
+function RedeemUnlock({ name, onRedeem, onCancel }: { name: string; onRedeem: (code: string) => string; onCancel: () => void }) {
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  return <main className="app-shell settings-panel">
+    <BrandLogo compact /><p className="eyebrow">UNLOCK ACCESS</p><h1>Enter your unlock code</h1>
+    <p>Paste the unlock code the owner sent you. It was issued to <strong>{name}</strong>.</p>
+    <label>Unlock code<textarea rows={3} value={code} placeholder="MCG-KEY-…" onChange={(event) => { setCode(event.target.value); setError(""); }} /></label>
+    {error && <p className="update-status warn">{error}</p>}
+    <div className="form-actions"><button onClick={onCancel}>Cancel</button><button className="primary" disabled={!code.trim()} onClick={() => setError(onRedeem(code))}>Unlock</button></div>
+  </main>;
+}
+
+function OwnerDashboard({ requests, onDecide, onBack, owner }: { requests: AccessRequest[]; onDecide: (id: string, approve: boolean) => void; onBack: () => void; owner: string }) {
+  const [pasted, setPasted] = useState("");
+  const [incoming, setIncoming] = useState<ReturnType<typeof parseRequestCode>>(null);
+  const [codeError, setCodeError] = useState("");
+  const [granted, setGranted] = useState<{ name: string; role: ProjectRole; code: string } | null>(null);
+
+  function readCode() {
+    const parsed = parseRequestCode(pasted);
+    if (!parsed) { setCodeError("That request code was not recognised. Check it was copied in full."); setIncoming(null); return; }
+    setCodeError("");
+    setGranted(null);
+    setIncoming(parsed);
+  }
+
   return <main className="app-shell dashboard-shell">
     <header className="topbar"><button className="text-button" onClick={onBack}>← Main Menu</button><span className="eyebrow">OWNER DASHBOARD</span><span>Author / Owner</span></header>
     <section className="projects-heading"><h1>Things that need you</h1><p>Approvals and communications routed to the owner. Approving a request raises that person's role immediately.</p></section>
+
+    <section className="dash-section">
+      <h2>Approve someone on another computer</h2>
+      <p className="board-hint">Paste the request code they sent you. Approving produces an unlock code to send back — that is what raises their access on their machine.</p>
+      <label>Their request code<textarea rows={3} value={pasted} placeholder="MCG-REQ-…" onChange={(event) => { setPasted(event.target.value); setCodeError(""); }} /></label>
+      {codeError && <p className="update-status warn">{codeError}</p>}
+      <div className="form-actions"><button className="primary" disabled={!pasted.trim()} onClick={readCode}>Read code</button></div>
+
+      {incoming && !granted && <div className="request-card">
+        <div className="request-who"><strong>{incoming.name}</strong><span>{roleLabel(incoming.currentRole)} → {roleLabel(incoming.requestedRole)}</span></div>
+        {incoming.reason && <p className="request-reason">"{incoming.reason}"</p>}
+        <div className="request-actions">
+          <button onClick={() => { setIncoming(null); setPasted(""); }}>Decline</button>
+          <button className="primary" onClick={() => setGranted({ name: incoming.name, role: incoming.requestedRole, code: makeUnlockCode({ name: incoming.name, role: incoming.requestedRole }) })}>Approve</button>
+        </div>
+      </div>}
+
+      {granted && <CodeBox
+        label={`Unlock code for ${granted.name} — ${roleLabel(granted.role)}`}
+        code={granted.code}
+        hint={`Send this back to ${granted.name}. They paste it into “Enter unlock code”.`}
+      />}
+    </section>
 
     <section className="dash-section">
       <h2>Awaiting approval <span className="pending-badge">{requests.length}</span></h2>
