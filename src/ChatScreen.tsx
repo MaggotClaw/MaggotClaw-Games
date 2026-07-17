@@ -6,6 +6,7 @@ import {
 } from "./discordLink";
 import { makeMessagingKey, parseMessagingKey } from "./accessCodes";
 import { addContact, directMessageTargets, loadContacts, recordJoin, removeContact, type Contact } from "./contacts";
+import { ReadSelectionButton } from "./ReadSelectionButton";
 
 // The messaging area. Rooms and direct messages travel through the team's
 // Discord relay channel, so people on different computers see each other.
@@ -197,6 +198,7 @@ export function ChatScreen({ role, name, onBack, onOpenDiscord }: { role: Projec
     <header className="topbar">
       <button className="text-button" onClick={onBack}>← Back</button>
       <span className="eyebrow">Messages</span>
+      <ReadSelectionButton />
       <span className="who-chip">{name} · {roleLabel(role)}</span>
     </header>
 

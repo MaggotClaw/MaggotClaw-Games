@@ -400,6 +400,28 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
     } else speakAt(segmentIndex);
   }
 
+  // Highlight text anywhere, drag it onto the bar, and she reads it aloud —
+  // same voice, same pause/skip controls as a reply.
+  function readDroppedText(text: string) {
+    const clean = text.trim();
+    if (!clean) return;
+    const parts = responsePlaybackSegments(clean, settings.skipContentBoxes);
+    if (!parts.length) return;
+    const cycle = ++playbackCycle.current;
+    recorder.current.cancel();
+    player.current.stop();
+    if (nativeSpeechActive.current) {
+      nativeSpeechActive.current = false;
+      void stopNativeDictation().catch(() => undefined);
+    }
+    segmentsRef.current = parts;
+    setSegments(parts);
+    setSegmentIndex(0);
+    setState("response");
+    setStatus("Reading what you dropped in");
+    window.setTimeout(() => speakAt(0, cycle), 150);
+  }
+
 
 
   function skipReply() {
@@ -432,7 +454,10 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
   const waveHeights = [8, 11, 18, 24, 18, 11, 8];
   const liveScale = .25 + Math.min(1, audioLevel / 45);
 
-  return <main className={`voice-floater ${companion ? "companion" : ""} ${listening ? "is-listening" : ""} ${reading ? "is-reading" : ""}`} title={status} onPointerDown={(event) => { if (!(event.target as HTMLElement).closest("button") && "__TAURI_INTERNALS__" in window) { event.preventDefault(); void getCurrentWindow().startDragging(); } }}>
+  return <main className={`voice-floater ${companion ? "companion" : ""} ${listening ? "is-listening" : ""} ${reading ? "is-reading" : ""}`} title={status}
+    onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }}
+    onDrop={(event) => { event.preventDefault(); readDroppedText(event.dataTransfer.getData("text/plain")); }}
+    onPointerDown={(event) => { if (!(event.target as HTMLElement).closest("button") && "__TAURI_INTERNALS__" in window) { event.preventDefault(); void getCurrentWindow().startDragging(); } }}>
     <button className="icon-control main-mic" aria-label="Start talking" title="Talk" disabled={busy || !targetReady || !speechReady || listening} onClick={startTalking} />
     <button className="icon-control" aria-label={`Add ${settings.addSeconds} seconds`} title={`Add ${settings.addSeconds} seconds`} disabled={!listening} onClick={addTime}>＋</button>
     <span className={`voice-wave ${listening && audioLevel <= 3 ? "no-mic-sound" : ""}`} aria-label={listening ? `Microphone level ${audioLevel}` : "Voice waveform"}>{waveHeights.map((height, index) => <i key={index} style={listening ? { height: `${Math.max(3, Math.round(height * liveScale))}px` } : undefined} />)}</span>

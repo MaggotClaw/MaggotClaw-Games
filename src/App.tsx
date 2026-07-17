@@ -22,6 +22,7 @@ import { checkProjectSync, syncNote } from "./startupSync";
 import { ACCESS_LEVEL_LABELS, loadAccessMap, publishAccessMap, setFileAccess, type FileAccessMap } from "./fileAccess";
 import { recordJoin } from "./contacts";
 import { hasProfilePin, isValidPin, setNickname, setProfilePin } from "./profileInfo";
+import { ReadSelectionButton } from "./ReadSelectionButton";
 
 type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "workspace-files" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock" | "chat" | "directions";
 
@@ -105,6 +106,9 @@ async function openCompanionWindow(): Promise<void> {
   new WebviewWindow("companion", {
     url: "index.html#companion",
     title: "MaggotClaw Voice Companion",
+    // Let dragged-in text reach the page itself, so dropping a highlighted
+    // passage onto the bar reads it aloud.
+    dragDropEnabled: false,
     // Wide enough that the extra companion-only Close (✕) clears the oval's
     // rounded right end instead of being clipped by it.
     width: 690,
@@ -1024,6 +1028,7 @@ ${item.transcriptionConfirmed}`.slice(0, 1800);
         <section className="secondary-controls">
           <button onClick={() => moveBy(-1)}>Repeat sentence</button>
           <button onClick={() => moveBy(1)}>Forward</button>
+          <ReadSelectionButton rate={rate} />
           <label>Speed
             <select value={rate} onChange={(event) => { player.current.stop(); setPlaying(false); setRate(Number(event.target.value)); }}>
               <option value="0.8">Slower</option><option value="1">Normal</option><option value="1.2">Faster</option>
@@ -1144,9 +1149,6 @@ function Profile({ initial, onContinue }: { initial: string; onContinue: (info: 
 function FileWindow({ relative }: { relative: string }) {
   const [text, setText] = useState("Opening…");
   const [html, setHtml] = useState<string | null>(null);
-  const voice = useRef(new BrowserSpeechPlayer());
-  const [speaking, setSpeaking] = useState(false);
-  useEffect(() => () => voice.current.stop(), []);
   useEffect(() => {
     void (async () => {
       try {
@@ -1157,26 +1159,21 @@ function FileWindow({ relative }: { relative: string }) {
           setText((await mammoth.extractRawText({ arrayBuffer: buffer })).value.trim());
           setHtml((await mammoth.convertToHtml({ arrayBuffer: buffer })).value);
         } else {
-          setText(await invoke<string>("read_project_document", { localRelativePath: relative }));
+          // Old files were hard-wrapped at a fixed line width. Repair that on
+          // every read: paragraphs flow to the window, blank lines stay.
+          setText(unwrapHardLines(await invoke<string>("read_project_document", { localRelativePath: relative })));
         }
       } catch {
         setText("This file could not be opened from the local workspace.");
       }
     })();
   }, [relative]);
-  function readSelection() {
-    if (speaking) { voice.current.stop(); setSpeaking(false); return; }
-    const chosen = window.getSelection()?.toString().trim();
-    if (!chosen) return;
-    setSpeaking(true);
-    voice.current.speak(chosen.slice(0, 4000), 1, () => setSpeaking(false), () => setSpeaking(false));
-  }
   const name = relative.split("/").pop() ?? relative;
   return <main className="app-shell file-window">
     <header className="topbar">
       <button className="text-button" onClick={() => { void closeCurrentWindow(); }}>← Back</button>
       <span className="eyebrow">{name}</span>
-      <button className="text-button" onClick={readSelection}>{speaking ? "■ Stop reading" : "🔊 Read highlighted"}</button>
+      <ReadSelectionButton />
     </header>
     {html ? <div className="doc-word" dangerouslySetInnerHTML={{ __html: html }} /> : <pre className="file-text">{text}</pre>}
   </main>;
