@@ -58,6 +58,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .chat-rooms li button { width: 100%; display: flex; align-items: center; gap: 8px; padding: 9px 11px; color: var(--mc-white, #f2f6f4); background: #0d1614; border: 1px solid #1e2c28; border-radius: 9px; text-align: left; cursor: pointer; }
 .chat-rooms li button:hover { border-color: var(--mc-green, #00efb1); }
 .chat-rooms li button.active { background: #14241f; border-color: var(--mc-green, #00efb1); }
+.chat-rooms li { position: relative; }
+.chat-rooms li .tiny-remove { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: auto; padding: 2px 6px; background: transparent; border: 0; color: var(--mc-muted, #9aa7a2); font-size: .8rem; cursor: pointer; }
+.chat-rooms li .tiny-remove:hover { color: #ff8b8b; }
 .room-hash { color: var(--mc-green, #00efb1); font-weight: 700; }
 .room-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .room-lock { font-size: .75rem; opacity: .75; }

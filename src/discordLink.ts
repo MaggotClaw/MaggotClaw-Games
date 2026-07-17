@@ -154,3 +154,89 @@ export async function sendRequestToDiscord(content: string): Promise<boolean> {
     return false;
   }
 }
+
+// ---- Team chat relay --------------------------------------------------------
+//
+// Rooms and direct messages travel through one Discord channel (the relay).
+// Every chat line is posted in a fixed shape the app can read back:
+//   room message:   [#readers] Bob: the text
+//   direct message: [@MaggotClaw] Bob: the text
+// The channel doubles as a plain-language log the owner can read in Discord.
+
+export interface RelayChatMessage {
+  messageId: string;
+  room: string | null;      // "#room" messages
+  to: string | null;        // "@name" direct messages
+  author: string;
+  text: string;
+  sentAt: string;
+}
+
+export function getRelayChannelId(): string {
+  try { return (localStorage.getItem("mcg-discord-relay-channel") || getRequestsChannelId()).trim(); } catch { return getRequestsChannelId(); }
+}
+export function setRelayChannelId(id: string): void {
+  try { localStorage.setItem("mcg-discord-relay-channel", id.trim()); } catch { /* ignore */ }
+}
+
+export function formatChatLine(input: { room?: string; to?: string; author: string; text: string }): string {
+  const target = input.room ? `[#${input.room}]` : `[@${input.to ?? ""}]`;
+  return `${target} ${input.author}: ${input.text}`.slice(0, 1900);
+}
+
+// Pure: recognise relay chat lines among raw Discord messages. Exported for tests.
+export function parseChatLines(
+  messages: Array<{ id?: string; content?: string; timestamp?: string; author?: { username?: string } }>
+): RelayChatMessage[] {
+  const found: RelayChatMessage[] = [];
+  for (const message of messages) {
+    const match = /^\[([#@])([^\]]+)\]\s+([^:]{1,60}):\s?([\s\S]+)$/.exec(message?.content ?? "");
+    if (!match) continue;
+    found.push({
+      messageId: message.id ?? "",
+      room: match[1] === "#" ? match[2].trim() : null,
+      to: match[1] === "@" ? match[2].trim() : null,
+      author: match[3].trim(),
+      text: match[4].trim(),
+      sentAt: message.timestamp ?? ""
+    });
+  }
+  // Discord returns newest first; chat reads oldest first.
+  return found.reverse();
+}
+
+// Anyone with the messaging key can pull the relay channel.
+export async function fetchRelayMessages(): Promise<RelayChatMessage[]> {
+  if (!getBotToken() || !("__TAURI_INTERNALS__" in window)) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  const messages = await invoke<Array<{ id?: string; content?: string; timestamp?: string; author?: { username?: string } }>>(
+    "fetch_discord_messages",
+    { botToken: getBotToken(), channelId: getRelayChannelId(), limit: 100 }
+  );
+  return parseChatLines(Array.isArray(messages) ? messages : []);
+}
+
+// Post a chat line: through the bot when the key is present (reaches the relay
+// channel), otherwise through the baked-in webhook so nobody is ever silenced.
+export async function postRelayMessage(input: { room?: string; to?: string; author: string; text: string }): Promise<boolean> {
+  if (!("__TAURI_INTERNALS__" in window)) return false;
+  const content = formatChatLine(input);
+  const { invoke } = await import("@tauri-apps/api/core");
+  try {
+    if (getBotToken()) {
+      await invoke("post_discord_bot_message", { botToken: getBotToken(), channelId: getRelayChannelId(), content });
+      return true;
+    }
+    const url = getRequestWebhook();
+    if (isDiscordWebhook(url)) {
+      await invoke("post_discord_webhook", { url, content });
+      return true;
+    }
+  } catch { /* fall through */ }
+  return false;
+}
+
+// True once this computer can read team messages (bot key present).
+export function messagingConnected(): boolean {
+  return Boolean(getBotToken() && /^\d+$/.test(getRelayChannelId()));
+}

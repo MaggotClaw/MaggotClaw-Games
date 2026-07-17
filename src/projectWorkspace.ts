@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { LongRotMcpClient, type ProjectEntry } from "./mcp";
+import { fetchSharedAccessMap, roleMayDownload, ACCESS_MAP_DROPBOX_PATH } from "./fileAccess";
+import type { ProjectRole } from "./permissions";
 
 export interface WorkspaceStatus {
   workspacePath: string;
@@ -37,10 +39,17 @@ export function openWorkspace(): Promise<void> {
 
 export async function downloadProject(
   client: LongRotMcpClient,
+  role: ProjectRole,
   onProgress: (progress: DownloadProgress) => void
 ): Promise<DownloadProgress> {
   await initializeWorkspace();
-  const files = await collectFiles(client, "/The Long Rot", onProgress);
+  // The owner's file ratings decide what this role actually needs, so a
+  // Reader's machine is never buried under working files meant for editors.
+  const access = await fetchSharedAccessMap(client);
+  const everything = await collectFiles(client, "/The Long Rot", onProgress);
+  const files = everything.filter((file) =>
+    file.path !== ACCESS_MAP_DROPBOX_PATH && roleMayDownload(access, file.path, role));
+  const withheld = everything.length - files.length;
   let completed = 0;
   let skipped = 0;
   for (const file of files) {
@@ -69,7 +78,10 @@ export async function downloadProject(
     // calls and trip its rate limits. Downloads stay sequential and calm.
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  return { stage: "Local download finished", completed, total: files.length, skipped };
+  const note = withheld > 0
+    ? `Local download finished. ${withheld} file${withheld === 1 ? "" : "s"} stayed on Dropbox — not needed for your role.`
+    : "Local download finished";
+  return { stage: note, completed, total: files.length, skipped };
 }
 
 async function collectFiles(
@@ -80,7 +92,8 @@ async function collectFiles(
   onProgress({ stage: `Checking ${path}`, completed: 0, total: 0, skipped: 0 });
   const entries = await client.listFolder(path);
   const files = entries.filter((entry) => entry.type === "file");
-  const folders = entries.filter((entry) => entry.type === "folder");
+  // ".mcg" holds the app's own shared settings, not project writing.
+  const folders = entries.filter((entry) => entry.type === "folder" && entry.name !== ".mcg");
   for (const folder of folders) {
     files.push(...await collectFiles(client, folder.path, onProgress));
   }

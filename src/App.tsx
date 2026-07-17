@@ -17,9 +17,13 @@ import type { ParsedDoc, ProjectDocument } from "./projectDocs";
 import { invoke } from "@tauri-apps/api/core";
 import { UpdateChecker } from "./UpdateChecker";
 import { ChatScreen } from "./ChatScreen";
-import { getDiscordName, setDiscordName, getRequestWebhook, setRequestWebhook, isDiscordWebhook, requestAnnouncement, sendRequestToDiscord, fetchDiscordRequests, postUnlockToDiscord, markMessageHandled, discordReadingConfigured, getBotToken, setBotToken, getRequestsChannelId, setRequestsChannelId, type DiscordRequestMessage } from "./discordLink";
+import { getDiscordName, setDiscordName, getRequestWebhook, setRequestWebhook, isDiscordWebhook, requestAnnouncement, sendRequestToDiscord, fetchDiscordRequests, postUnlockToDiscord, markMessageHandled, discordReadingConfigured, getBotToken, setBotToken, getRequestsChannelId, setRequestsChannelId, getRelayChannelId, setRelayChannelId, messagingConnected, type DiscordRequestMessage } from "./discordLink";
+import { checkProjectSync, syncNote } from "./startupSync";
+import { ACCESS_LEVEL_LABELS, loadAccessMap, publishAccessMap, setFileAccess, type FileAccessMap } from "./fileAccess";
+import { recordJoin } from "./contacts";
+import { hasProfilePin, isValidPin, setNickname, setProfilePin } from "./profileInfo";
 
-type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock" | "chat" | "directions";
+type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "workspace-files" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock" | "chat" | "directions";
 
 function BrandLogo({ compact = false }: { compact?: boolean }) {
   return <img className={compact ? "brand-logo compact" : "brand-logo"} src="/maggotclaw-modern.png" alt="MaggotClaw Games" />;
@@ -176,6 +180,8 @@ export function App() {
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [requests, setRequests] = useState<AccessRequest[]>(() => pendingRequests());
   const [requestCode, setRequestCode] = useState("");
+  const [syncMessage, setSyncMessage] = useState("");
+  const [discordWaiting, setDiscordWaiting] = useState(0);
   const [shelf, setShelf] = useState<ParsedDoc[]>([]);
   const [readMyself, setReadMyself] = useState(false);
   const [unlockedChapters] = useState<number[]>(() => loadUnlockedChapters());
@@ -271,6 +277,19 @@ export function App() {
       listen("mcg://open-settings", () => setScreen("settings")).then((un) => { unlisten = un; })
     );
     return () => { if (unlisten) unlisten(); };
+  }, []);
+
+  // Startup checks in the main hub only: verify local files against Dropbox and
+  // pull waiting Discord requests, all quietly in the background. Nothing is
+  // downloaded or changed — the results are notes, not actions.
+  useEffect(() => {
+    if (IS_COMPANION_WINDOW || DOC_WINDOW_PATH || FILE_WINDOW_PATH || !("__TAURI_INTERNALS__" in window)) return;
+    if (!readerName) return;
+    void checkProjectSync(client).then((result) => setSyncMessage(syncNote(result))).catch(() => undefined);
+    if (canPerform(realProfileRole(readerName), "manage") && discordReadingConfigured()) {
+      void fetchDiscordRequests().then((found) => setDiscordWaiting(found.length)).catch(() => undefined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -575,11 +594,19 @@ export function App() {
     setStatus("Connection settings saved on this device");
   }
 
-  function saveProfile(name: string, discordName = "", wantedRole: ProjectRole = "reader") {
-    const clean = name.trim();
+  function saveProfile(info: { name: string; discordName?: string; wantedRole?: ProjectRole; nickname?: string; pin?: string; readingSpeed?: number }) {
+    const clean = info.name.trim();
     if (!clean) return;
+    const discordName = info.discordName ?? "";
+    const wantedRole = info.wantedRole ?? "reader";
     localStorage.setItem("long-rot-reader-name", clean);
     if (discordName.trim()) setDiscordName(clean, discordName);
+    if (info.nickname?.trim()) setNickname(clean, info.nickname);
+    if (info.pin && isValidPin(info.pin)) void setProfilePin(clean, info.pin);
+    if (info.readingSpeed) {
+      const voiceNow = loadVoiceSettings(clean);
+      saveVoiceSettings(clean, { ...voiceNow, speechRate: info.readingSpeed });
+    }
     setReaderName(clean);
     const startingRole = profileRole(clean);
     // Anything above the starting role becomes a request to the owner.
@@ -627,7 +654,11 @@ export function App() {
   }
 
   function decideRequest(id: string, approve: boolean) {
+    const request = requests.find((r) => r.id === id);
     decideAccessRequest(id, approve, readerName);
+    // An approved person becomes (or updates) a messaging contact, so their
+    // name can appear under Direct Messages at the right level.
+    if (approve && request) recordJoin(request.name, "", request.requestedRole);
     refreshRequests();
     setStatus(approve ? "Access granted. The reader's role has been raised." : "Request declined. Nothing was changed for that reader.");
   }
@@ -658,8 +689,13 @@ export function App() {
     if (!payload) return "That unlock code was not recognised. Check it was copied in full.";
     if (!unlockMatchesProfile(payload, readerName)) return `That unlock code was issued to ${payload.name}, not ${readerName}.`;
     setProfileRole(readerName, payload.role);
+    // Approvals can carry the team messaging connection along for free.
+    if (payload.messaging) {
+      setBotToken(payload.messaging.botToken);
+      setRelayChannelId(payload.messaging.channelId);
+    }
     setScreen("home");
-    setStatus(`Access granted. You are now ${roleLabel(payload.role)}.`);
+    setStatus(`Access granted. You are now ${roleLabel(payload.role)}.${payload.messaging ? " Team messaging is connected." : ""}`);
     return "";
   }
 
@@ -720,7 +756,7 @@ export function App() {
     setWorkspaceBusy(true);
     setWorkspaceProgress(null);
     try {
-      const result = await downloadProject(client, setWorkspaceProgress);
+      const result = await downloadProject(client, role, setWorkspaceProgress);
       setWorkspace(await workspaceStatus());
       setStatus(`${result.completed} text files saved locally. ${result.skipped} other files need binary download support. Dropbox was not changed.`);
     } catch (error) {
@@ -806,14 +842,21 @@ export function App() {
     return <main className="app-shell home-shell">
       <header className="hero"><BannerWithVersion /></header>
       <section className="home-toolbar">
-        {canPerform(role, "manage") && <button className="pill-button chip" onClick={openDashboard}>Owner Dashboard{requests.length > 0 && <span className="pending-badge">{requests.length}</span>}</button>}
+        {canPerform(role, "manage") && <button className="pill-button chip" onClick={openDashboard}>Owner Dashboard{(requests.length + discordWaiting) > 0 && <span className="pending-badge">{requests.length + discordWaiting}</span>}</button>}
         <button className="pill-button chip" onClick={() => setScreen("settings")}>Settings</button>
         <button className="pill-button chip" onClick={() => setScreen("directions")}>Directions</button>
         {getViewAs()
           ? <button className="pill-button chip" onClick={() => { setViewAs(null); window.location.reload(); }}>Viewing as {roleLabel(role)} — back</button>
           : <button className="pill-button chip" onClick={() => setScreen("profile")}>{readerName || "Start Here"}</button>}
+        <span className="who-chip">{readerName || "Guest"} · {roleLabel(role)}</span>
       </section>
       {readerName === "Test Profile" && <div className="test-mode-banner">TEST PROFILE — LOCAL ONLY — NOTHING IS SYNCHRONIZED</div>}
+      {discordWaiting > 0 && canPerform(role, "manage") && <section className="welcome-strip">
+        <span className="reader-note"><strong>{discordWaiting} Access Request{discordWaiting === 1 ? " Is" : "s Are"} Waiting On Discord.</strong> <button className="text-button inline" onClick={openDashboard}>Open The Owner Dashboard</button></span>
+      </section>}
+      {syncMessage && <section className="welcome-strip">
+        <span className="reader-note">{syncMessage}. {syncMessage.includes("Newer") && <button className="text-button inline" onClick={() => { void openLongRotWorkspace(); }}>Open The Workspace To Update</button>}</span>
+      </section>}
       {!canPerform(role, "manage") && <section className="welcome-strip">
         <span className="reader-note">You can read and comment right away. Need to edit? <button className="text-button inline" onClick={() => { setRequestCode(""); setScreen("request-access"); }}>Request access</button> · <button className="text-button inline" onClick={() => setScreen("unlock")}>Enter unlock code</button></span>
       </section>}
@@ -856,19 +899,23 @@ export function App() {
     return <ProjectExplorer onBack={() => setScreen("project-workspace")} />;
   }
 
+  if (screen === "workspace-files") {
+    return <WorkspaceFilesScreen role={role} readerName={readerName} client={client} onBack={() => setScreen("project-workspace")} />;
+  }
+
   if (screen === "project-workspace") {
     return <main className="app-shell project-shell">
       <header className="topbar"><button className="text-button" onClick={() => setScreen("projects")}>← Back</button><span className="eyebrow">LOCAL PROJECT WORKSPACE</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
       <section className="project-heading"><div><p className="eyebrow">THE LONG ROT</p><h1>Project Workspace</h1><p>Dropbox stays the shared source. The AI works from safe copies on this computer.</p></div></section>
       <section className="workspace-card">
         <div><span>Local workspace</span><strong>{workspace?.initialized ? "Ready" : "Not prepared yet"}</strong><small>{workspace?.workspacePath || "The standard MaggotClaw Games Projects folder will be used."}</small></div>
-        <div><span>Files downloaded</span><strong>{workspace?.downloadedFiles || 0}</strong><small>{workspace?.pendingBinaryFiles || 0} Word, PDF, image, or other binary files waiting for expanded MCP download support.<br/>Last completed file save: {formatWorkspaceTime(workspace?.lastDownloadAt || null)}</small></div>
+        <div><span>Files downloaded</span><strong>{workspace?.downloadedFiles || 0}</strong><small>{workspace?.pendingBinaryFiles || 0} Word, PDF, image, or other binary files waiting for expanded MCP download support.<br/>Last completed file save: {formatWorkspaceTime(workspace?.lastDownloadAt || null)}{syncMessage ? <><br/>{syncMessage}</> : null}<br/><button className="text-button inline" onClick={() => setScreen("workspace-files")} disabled={!workspace?.downloadedFiles}>View The File List →</button></small></div>
         <div><span>Dropbox Uploads</span><strong>{canPerform(role, "manage") ? "Owner Only" : "Locked"}</strong><small>{canPerform(role, "manage") ? "Upload Approved sends everything in 05 Approved Uploads to Dropbox." : "Uploads run from the owner\u2019s account."}</small></div>
       </section>
       {workspaceProgress && <section className="download-progress"><strong>{workspaceProgress.stage}</strong><p>{workspaceProgress.completed} of {workspaceProgress.total || "?"} text files saved · {workspaceProgress.skipped} other files recorded</p></section>}
       <section className="workspace-actions">
         <button className="primary" onClick={() => setScreen("project-explorer")} disabled={!workspace?.downloadedFiles}>Explore Files</button>
-        <button onClick={prepareWorkspace} disabled={workspaceBusy}>{workspace?.initialized ? "Check Local Folders" : "Prepare Local Workspace"}</button>
+        {!workspace?.initialized && <button onClick={prepareWorkspace} disabled={workspaceBusy}>Prepare Local Folders</button>}
         {canPerform(role, "download") && <button className="primary" onClick={downloadWorkspace} disabled={workspaceBusy}>{workspaceBusy ? "Working…" : "Download or Update"}</button>}
         {canPerform(role, "review") && <button onClick={() => setScreen("project-review")} disabled={workspaceBusy}>Review Changes</button>}
         {canPerform(role, "manage")
@@ -1027,10 +1074,14 @@ ${item.transcriptionConfirmed}`.slice(0, 1800);
   );
 }
 
-function Profile({ initial, onContinue }: { initial: string; onContinue: (name: string, discordName: string, wantedRole: ProjectRole) => void }) {
+function Profile({ initial, onContinue }: { initial: string; onContinue: (info: { name: string; discordName: string; wantedRole: ProjectRole; nickname: string; pin: string; readingSpeed: number }) => void }) {
   const [name, setName] = useState(initial);
+  const [nickname, setNicknameState] = useState("");
   const [discordName, setDiscord] = useState(() => initial ? getDiscordName(initial) : "");
   const [wantedRole, setWantedRole] = useState<ProjectRole>("reader");
+  const [pin, setPin] = useState("");
+  const [pinAgain, setPinAgain] = useState("");
+  const [readingSpeed, setReadingSpeed] = useState(1);
   const options: Array<{ value: ProjectRole; label: string; hint: string }> = [
     { value: "reader", label: "Reader", hint: "Read and comment — starts right now" },
     { value: "contributor", label: "Contributor", hint: "Suggest and propose changes — needs approval" },
@@ -1038,14 +1089,22 @@ function Profile({ initial, onContinue }: { initial: string; onContinue: (name: 
     { value: "editor", label: "Editor / Maintainer", hint: "Edit and maintain the project — needs approval" },
     { value: "support", label: "Technical Support", hint: "Keep the machinery running — needs approval" }
   ];
+  // A returning profile already has its PIN; a brand-new one sets it here.
+  const pinAlreadySet = Boolean(name.trim()) && hasProfilePin(name.trim());
+  const pinOk = pinAlreadySet || (isValidPin(pin) && pin === pinAgain);
+  const pinProblem = !pinAlreadySet && pin && (!isValidPin(pin) ? "The PIN is exactly four digits." : pin !== pinAgain ? "The two PINs do not match yet." : "");
   return <main className="app-shell profile-screen">
     <BrandLogo />
     <div className="love-banner" role="status">Whatever you do, don't forget… <strong>MaggotClaw Loves You!!!</strong></div>
-    <p>Three quick things and you're in. Everyone starts as a <strong>Reader</strong> — anything more goes to the owner for approval, and you can read while you wait.</p>
+    <p>A few quick things and you're in. Everyone starts as a <strong>Reader</strong> — anything more goes to the owner for approval, and you can read while you wait.</p>
 
     <label>1. Your name<input autoFocus value={name} onChange={(event) => setName(event.target.value)} /></label>
 
-    <fieldset className="role-picker"><legend>2. What do you want to do here?</legend>
+    <label>2. What should we call you? (optional)
+      <input value={nickname} placeholder="A nickname, if you like one better" onChange={(event) => setNicknameState(event.target.value)} />
+    </label>
+
+    <fieldset className="role-picker"><legend>3. What do you want to do here?</legend>
       {options.map((option) => <label key={option.value} className={wantedRole === option.value ? "role-option picked" : "role-option"}>
         <input type="radio" name="wanted-role" value={option.value} checked={wantedRole === option.value} onChange={() => setWantedRole(option.value)} />
         <span className="role-bubble" aria-hidden="true" />
@@ -1053,15 +1112,33 @@ function Profile({ initial, onContinue }: { initial: string; onContinue: (name: 
       </label>)}
     </fieldset>
 
-    <label>3. Your Discord name (for team messages)
+    <label>4. Your Discord name (for team messages)
       <input value={discordName} placeholder="Leave blank if you don't have one yet" onChange={(event) => setDiscord(event.target.value)} />
     </label>
     <button className="text-button" onClick={() => { void openDiscordWindow(); }}>Open Discord to sign in or create an account →</button>
 
-    <button className="continue-profile" disabled={!name.trim()} onClick={() => onContinue(name, discordName, wantedRole)}>Get Started</button>
+    <label>5. How fast should the narrator read to you?
+      <select value={readingSpeed} onChange={(event) => setReadingSpeed(Number(event.target.value))}>
+        <option value="0.8">Slower</option><option value="1">Normal</option><option value="1.2">Faster</option>
+      </select>
+    </label>
+
+    {pinAlreadySet
+      ? <p className="board-hint">Your recovery PIN is already saved for this name.</p>
+      : <>
+          <label>6. Pick a four-digit PIN
+            <input inputMode="numeric" maxLength={4} value={pin} placeholder="1234" onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))} />
+          </label>
+          <label>Type the PIN again
+            <input inputMode="numeric" maxLength={4} value={pinAgain} onChange={(event) => setPinAgain(event.target.value.replace(/\D/g, ""))} />
+          </label>
+          <small className="board-hint">Your name and PIN together identify you if you ever move to a new computer. The PIN itself is never stored or shared.</small>
+          {pinProblem && <p className="update-status warn">{pinProblem}</p>}
+        </>}
+
+    <button className="continue-profile" disabled={!name.trim() || !pinOk} onClick={() => onContinue({ name, discordName, wantedRole, nickname, pin, readingSpeed })}>Get Started</button>
   </main>;
 }
-
 // One project file in its own window: full text (or Word formatting), with
 // read-highlighted-aloud. Several of these can be open side by side.
 function FileWindow({ relative }: { relative: string }) {
@@ -1102,6 +1179,55 @@ function FileWindow({ relative }: { relative: string }) {
       <button className="text-button" onClick={readSelection}>{speaking ? "■ Stop reading" : "🔊 Read highlighted"}</button>
     </header>
     {html ? <div className="doc-word" dangerouslySetInnerHTML={{ __html: html }} /> : <pre className="file-text">{text}</pre>}
+  </main>;
+}
+
+// Every downloaded file, with the owner's access rating beside it. The rating
+// names the lowest role that needs the file; Download or Update obeys it on
+// every machine once the owner publishes the ratings to Dropbox.
+function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: ProjectRole; readerName: string; client: LongRotMcpClient; onBack: () => void }) {
+  const isOwner = canPerform(role, "manage");
+  const [docs, setDocs] = useState<ProjectDocument[]>([]);
+  const [access, setAccess] = useState<FileAccessMap>(loadAccessMap);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    void invoke<ProjectDocument[]>("list_project_documents")
+      .then((files) => setDocs(files.sort((a, b) => a.localRelativePath.localeCompare(b.localRelativePath))))
+      .catch(() => setNote("The local file list could not be read."));
+  }, []);
+  async function publish() {
+    setBusy(true);
+    try {
+      await publishAccessMap(client);
+      setNote("File Access Published — every machine now downloads by these ratings.");
+    } catch {
+      setNote("The ratings are saved on this computer, but Dropbox could not be reached to share them.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  const levelLabel = (path: string) => ACCESS_LEVEL_LABELS.find((l) => l.value === (access[path] ?? "reader"))?.label ?? "Reader And Up";
+  return <main className="app-shell project-shell">
+    <header className="topbar"><button className="text-button" onClick={onBack}>← Back</button><span className="eyebrow">DOWNLOADED FILES</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+    <section className="projects-heading"><h1>Every File On This Computer</h1><p>{isOwner
+      ? "Rate each file with the lowest role that needs it. People only download what their role calls for, so their AI stays focused. Publish to share the ratings with every machine."
+      : "The files your role downloads. The owner decides which files each role needs."}</p></section>
+    {isOwner && <section className="form-actions"><button className="primary" onClick={() => void publish()} disabled={busy}>{busy ? "Publishing…" : "Publish File Access To Dropbox"}</button></section>}
+    {note && <p className="board-hint">{note}</p>}
+    <section className="comments-list">
+      {docs.length === 0 && <div className="empty-state"><strong>Nothing downloaded yet</strong><p>Run Download or Update in the workspace first.</p></div>}
+      {docs.map((file) => <article key={file.dropboxPath} className="saved-comment">
+        <div className="comment-meta"><span>{file.status === "downloaded" ? "Downloaded" : "Waiting For Binary Support"}</span><span>{file.byteCount ? `${Math.max(1, Math.round(file.byteCount / 1024))} KB` : ""}</span></div>
+        <h2>{file.localRelativePath}</h2>
+        {isOwner
+          ? <label>Who needs this file<select value={access[file.dropboxPath] ?? "reader"} onChange={(event) => setAccess(setFileAccess(file.dropboxPath, event.target.value as FileAccessMap[string]))}>
+              {ACCESS_LEVEL_LABELS.map((level) => <option key={level.value} value={level.value}>{level.label}</option>)}
+            </select></label>
+          : <small>{levelLabel(file.dropboxPath)}</small>}
+      </article>)}
+    </section>
   </main>;
 }
 
@@ -1201,7 +1327,8 @@ function OwnerDashboard({ requests, onDecide, onBack }: { requests: AccessReques
     const parsed = parseRequestCode(item.code);
     if (!parsed) { setInboxNote("That message's code is damaged — handle it by hand in Discord."); return; }
     if (approve) {
-      const unlock = makeUnlockCode({ name: parsed.name, role: parsed.requestedRole });
+      const unlock = makeUnlockCode({ name: parsed.name, role: parsed.requestedRole, messaging: ownerMessagingPayload() });
+      recordJoin(parsed.name, "", parsed.requestedRole);
       const posted = await postUnlockToDiscord(parsed.name, roleLabel(parsed.requestedRole), unlock);
       setInboxNote(posted
         ? `Approved. The unlock code was posted in Discord for ${parsed.name}.`
@@ -1253,7 +1380,7 @@ function OwnerDashboard({ requests, onDecide, onBack }: { requests: AccessReques
         {incoming.reason && <p className="request-reason">"{incoming.reason}"</p>}
         <div className="request-actions">
           <button onClick={() => { setIncoming(null); setPasted(""); }}>Decline</button>
-          <button className="primary" onClick={() => setGranted({ name: incoming.name, role: incoming.requestedRole, code: makeUnlockCode({ name: incoming.name, role: incoming.requestedRole }) })}>Approve</button>
+          <button className="primary" onClick={() => { recordJoin(incoming.name, "", incoming.requestedRole); setGranted({ name: incoming.name, role: incoming.requestedRole, code: makeUnlockCode({ name: incoming.name, role: incoming.requestedRole, messaging: ownerMessagingPayload() }) }); }}>Approve</button>
         </div>
       </div>}
 
@@ -1278,7 +1405,7 @@ function OwnerDashboard({ requests, onDecide, onBack }: { requests: AccessReques
 
     <section className="dash-section">
       <h2>Messages</h2>
-      <div className="empty-state"><strong>No messages yet</strong><p>Team messages between readers, editors, and the owner will collect here.</p></div>
+      <div className="empty-state"><strong>Team chat lives in Messages</strong><p>Rooms and direct messages are on the main page under Messages. Anything sent to MaggotClaw arrives in your direct messages there.</p></div>
     </section>
 
     <footer className="safe-status">Approvals are recorded on this computer. Cross-device requests arrive once the shared connection is turned on.</footer>
@@ -1309,6 +1436,7 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
   const [webhook, setWebhook] = useState(getRequestWebhook);
   const [botToken, setBotTokenState] = useState(getBotToken);
   const [channelId, setChannelIdState] = useState(getRequestsChannelId);
+  const [relayChannel, setRelayChannelState] = useState(getRelayChannelId);
   function updateVoice(changes: Partial<VoiceSettings>) { setVoice((current) => ({ ...current, ...changes })); }
   function saveAll() { saveVoiceSettings(profile, voice); onSave({ endpoint: endpoint.trim(), bearerToken }); }
   return <main className="app-shell settings-panel">
@@ -1348,6 +1476,9 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
       <label>Requests channel ID
         <input value={channelId} placeholder="Right-click the channel → Copy Channel ID" onChange={(event) => { setChannelIdState(event.target.value); setRequestsChannelId(event.target.value); }} autoComplete="off" />
       </label>
+      <label>Team chat channel ID (rooms and direct messages travel here)
+        <input value={relayChannel} placeholder="Uses the requests channel unless you set one" onChange={(event) => { setRelayChannelState(event.target.value); setRelayChannelId(event.target.value); }} autoComplete="off" />
+      </label>
       {discordReadingConfigured() && <small className="update-status ok">Two-way Discord is on: the Owner Dashboard can pull requests and post approvals.</small>}
     </>}
     <hr/><p className="eyebrow">ADVANCED CONNECTION</p>
@@ -1356,6 +1487,12 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
     <p className="warning">These technical controls will move behind administrator support access in a future build.</p>
     <div className="form-actions"><button onClick={onCancel}>Cancel</button><button className="primary" onClick={saveAll}>Save</button></div>
   </main>;
+}
+
+// When the owner's machine has the bot key, approvals carry the team messaging
+// connection along inside the unlock code — one paste sets everything up.
+function ownerMessagingPayload(): { botToken: string; channelId: string } | undefined {
+  return messagingConnected() ? { botToken: getBotToken(), channelId: getRelayChannelId() } : undefined;
 }
 
 function cleanTitle(name: string): string {

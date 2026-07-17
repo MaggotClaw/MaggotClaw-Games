@@ -13,6 +13,7 @@ import { ROLE_ORDER, type ProjectRole } from "./permissions";
 
 export const REQUEST_PREFIX = "MCG-REQ";
 export const UNLOCK_PREFIX = "MCG-KEY";
+export const MESSAGING_PREFIX = "MCG-MSG";
 
 export interface RequestPayload {
   name: string;
@@ -24,6 +25,16 @@ export interface RequestPayload {
 export interface UnlockPayload {
   name: string;
   role: ProjectRole;
+  // Optional messaging connection carried along with an approval, so the person
+  // can read and send team messages the moment their new role lands.
+  messaging?: MessagingPayload;
+}
+
+// The messaging key: what an app needs to read and post in the team's Discord
+// relay channel. Handed out by the owner as a pasteable code.
+export interface MessagingPayload {
+  botToken: string;
+  channelId: string;
 }
 
 function b64urlEncode(text: string): string {
@@ -101,13 +112,34 @@ export function parseRequestCode(code: string): RequestPayload | null {
 }
 
 export function makeUnlockCode(payload: UnlockPayload): string {
-  return pack(UNLOCK_PREFIX, { n: payload.name, r: payload.role });
+  const body: Record<string, unknown> = { n: payload.name, r: payload.role };
+  if (payload.messaging?.botToken && payload.messaging.channelId) {
+    body.mt = payload.messaging.botToken;
+    body.mc = payload.messaging.channelId;
+  }
+  return pack(UNLOCK_PREFIX, body);
 }
 
 export function parseUnlockCode(code: string): UnlockPayload | null {
   const raw = unpack(UNLOCK_PREFIX, code) as Record<string, unknown> | null;
   if (!raw || typeof raw.n !== "string" || !raw.n.trim() || !isRole(raw.r)) return null;
-  return { name: raw.n.trim(), role: raw.r };
+  const messaging = typeof raw.mt === "string" && raw.mt.trim() && typeof raw.mc === "string" && /^\d+$/.test(raw.mc)
+    ? { botToken: raw.mt.trim(), channelId: raw.mc }
+    : undefined;
+  return { name: raw.n.trim(), role: raw.r, messaging };
+}
+
+// A standalone messaging key, for people who already have the role they want
+// but still need the team chat connected.
+export function makeMessagingKey(payload: MessagingPayload): string {
+  return pack(MESSAGING_PREFIX, { t: payload.botToken, c: payload.channelId });
+}
+
+export function parseMessagingKey(code: string): MessagingPayload | null {
+  const raw = unpack(MESSAGING_PREFIX, code) as Record<string, unknown> | null;
+  if (!raw || typeof raw.t !== "string" || !raw.t.trim()) return null;
+  if (typeof raw.c !== "string" || !/^\d+$/.test(raw.c)) return null;
+  return { botToken: raw.t.trim(), channelId: raw.c };
 }
 
 // An unlock code is meant for one person. Compare forgivingly (case/spacing) so
