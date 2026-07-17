@@ -52,6 +52,10 @@ export async function loadRecoverableComments(): Promise<ReaderComment[]> {
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
+export async function deleteComment(commentId: string): Promise<void> {
+  await (await database).delete("comments", commentId);
+}
+
 export async function loadSavedComments(): Promise<ReaderComment[]> {
   return (await database).getAllFromIndex("comments", "by-status", "saved");
 }

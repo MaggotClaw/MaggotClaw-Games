@@ -1,4 +1,4 @@
-import type { ConnectionSettings, ReaderCopy } from "./types";
+import type { ConnectionSettings } from "./types";
 
 interface McpResponse {
   result?: { content?: Array<{ type: string; text?: string }>; isError?: boolean };
@@ -13,14 +13,6 @@ export interface ProjectEntry {
 
 export class LongRotMcpClient {
   constructor(private readonly settings: ConnectionSettings) {}
-
-  async listReaderCopies(): Promise<ReaderCopy[]> {
-    const content = await this.callTool("search_dropbox_filenames", { query: "Reader Copy" });
-    const items = JSON.parse(content) as Array<{ name: string; path: string; type: string }>;
-    return items
-      .filter((item): item is ReaderCopy => item.type === "file" && /reader copy/i.test(item.name))
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-  }
 
   async listFolder(path = "/The Long Rot"): Promise<ProjectEntry[]> {
     const content = await this.callTool("list_dropbox_folder", { path });

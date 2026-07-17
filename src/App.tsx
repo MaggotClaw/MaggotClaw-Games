@@ -5,8 +5,8 @@ import { BrowserSpeechPlayer } from "./speech";
 import { CommentRecorder } from "./recorder";
 import { TalkScreen } from "./TalkScreen";
 import { ProjectExplorer } from "./ProjectExplorer";
-import { loadDocument, loadPosition, loadRecoverableComments, loadSavedComments, saveComment, saveDocument, savePosition } from "./storage";
-import type { ConnectionSettings, DocumentRecord, ReaderComment, ReaderCopy } from "./types";
+import { deleteComment, loadDocument, loadPosition, loadRecoverableComments, loadSavedComments, saveComment, saveDocument, savePosition } from "./storage";
+import type { ConnectionSettings, DocumentRecord, ReaderComment } from "./types";
 import { loadVoiceSettings, saveVoiceSettings, type VoiceSettings } from "./voiceSettings";
 import { downloadProject, formatWorkspaceTime, initializeWorkspace, openWorkspace, workspaceStatus, type DownloadProgress, type WorkspaceStatus } from "./projectWorkspace";
 import { canPerform, profileRole, roleLabel, ROLE_ORDER, setProfileRole, type ProjectRole } from "./permissions";
@@ -115,7 +115,6 @@ export function App() {
   const [readerName, setReaderName] = useState(() => localStorage.getItem("long-rot-reader-name") || "");
   const [screen, setScreen] = useState<Screen>(() => localStorage.getItem("long-rot-reader-name") ? "home" : "profile");
   const [settings, setSettings] = useState<ConnectionSettings>(getSettings);
-  const [copies, setCopies] = useState<ReaderCopy[]>([]);
   const [document, setDocument] = useState<DocumentRecord | null>(null);
   const [segmentIndex, setSegmentIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -133,6 +132,7 @@ export function App() {
   const [requests, setRequests] = useState<AccessRequest[]>(() => pendingRequests());
   const [requestCode, setRequestCode] = useState("");
   const [shelf, setShelf] = useState<ParsedDoc[]>([]);
+  const [readMyself, setReadMyself] = useState(false);
   const [unlockedChapters] = useState<number[]>(() => loadUnlockedChapters());
   const refreshRequests = useCallback(() => setRequests(pendingRequests()), []);
 
@@ -610,7 +610,7 @@ export function App() {
   }
 
   if (screen === "dashboard") {
-    return <OwnerDashboard requests={requests} onDecide={decideRequest} onBack={() => setScreen("home")} owner={readerName} />;
+    return <OwnerDashboard requests={requests} onDecide={decideRequest} onBack={() => setScreen("home")} />;
   }
 
   if (screen === "chat") {
@@ -696,10 +696,10 @@ export function App() {
   if (screen === "comments") {
     return <main className="app-shell comments-shell">
       <header className="topbar"><button className="text-button" onClick={() => setScreen("library")}>← Chapters</button><span className="eyebrow">MY COMMENTS</span><span>{readerName}</span></header>
-      <section className="comments-heading"><div><h1>Saved Comments</h1><p>{savedComments.length} saved safely on this device.</p></div><button onClick={exportComments} disabled={!savedComments.length}>Export index</button></section>
+      <section className="comments-heading"><div><h1>Saved Comments</h1><p>{savedComments.length} saved safely on this device.</p></div><button onClick={exportComments} disabled={!savedComments.length}>Save comments file</button></section>
       <section className="comments-list">
         {savedComments.length === 0 && <div className="empty-state"><strong>No comments yet</strong><p>Comments you confirm while reading will appear here.</p></div>}
-        {savedComments.map((item) => <SavedCommentCard key={item.id} comment={item} />)}
+        {savedComments.map((item) => <SavedCommentCard key={item.id} comment={item} onDelete={async () => { await deleteComment(item.id); setSavedComments(await loadSavedComments()); }} />)}
       </section>
     </main>;
   }
@@ -737,21 +737,32 @@ export function App() {
     return (
       <main className="app-shell reader-shell">
         <header className="topbar">
-          <button className="text-button" onClick={closeReader}>← Reader Copies</button>
-          <span className="eyebrow">THE LONG ROT</span>
+          <button className="text-button" onClick={closeReader}>← Chapters</button>
+          <span className="eyebrow">The Long Rot</span>
           <span className="status-dot" aria-label={status}>{status}</span>
         </header>
         <section className="reader-heading">
-          <p className="eyebrow">Reader Copy</p>
+          <p className="eyebrow">Chapter</p>
           <h1>{cleanTitle(document.name)}</h1>
           <div className="progress-track" aria-label={`${progress}% complete`}><span style={{ width: `${progress}%` }} /></div>
           <p className="progress-label">{progress}% complete · Sentence {segmentIndex + 1} of {document.segments.length}</p>
         </section>
-        <article className="reading-card" aria-live="polite">
-          <p className="context">{document.segments[segmentIndex - 1]?.text}</p>
-          <p className="current-sentence">{current?.text || "This file has no readable text."}</p>
-          <p className="context">{document.segments[segmentIndex + 1]?.text}</p>
-        </article>
+        <div className="read-mode-toggle" role="group" aria-label="Reading mode">
+          <button className={readMyself ? "" : "active"} onClick={() => setReadMyself(false)}>Narrated</button>
+          <button className={readMyself ? "active" : ""} onClick={() => { player.current.stop(); setPlaying(false); setReadMyself(true); }}>Read myself</button>
+        </div>
+        {readMyself
+          ? <article className="reading-card self-read">
+              {Object.values(document.segments.reduce<Record<number, string[]>>((acc, segment) => {
+                (acc[segment.paragraphIndex] ??= []).push(segment.text);
+                return acc;
+              }, {})).map((sentences, index) => <p key={index}>{sentences.join(" ")}</p>)}
+            </article>
+          : <article className="reading-card" aria-live="polite">
+              <p className="context">{document.segments[segmentIndex - 1]?.text}</p>
+              <p className="current-sentence">{current?.text || "This file has no readable text."}</p>
+              <p className="context">{document.segments[segmentIndex + 1]?.text}</p>
+            </article>}
         <section className="primary-controls" aria-label="Reading controls">
           <button className="control secondary" onClick={() => moveBy(-1)}>Back</button>
           <button className="control primary" onClick={togglePlayback}>{playing ? "Pause" : "Continue"}</button>
@@ -879,7 +890,7 @@ function RedeemUnlock({ name, onRedeem, onCancel }: { name: string; onRedeem: (c
   </main>;
 }
 
-function OwnerDashboard({ requests, onDecide, onBack, owner }: { requests: AccessRequest[]; onDecide: (id: string, approve: boolean) => void; onBack: () => void; owner: string }) {
+function OwnerDashboard({ requests, onDecide, onBack }: { requests: AccessRequest[]; onDecide: (id: string, approve: boolean) => void; onBack: () => void }) {
   const [pasted, setPasted] = useState("");
   const [incoming, setIncoming] = useState<ReturnType<typeof parseRequestCode>>(null);
   const [codeError, setCodeError] = useState("");
@@ -941,7 +952,7 @@ function OwnerDashboard({ requests, onDecide, onBack, owner }: { requests: Acces
   </main>;
 }
 
-function SavedCommentCard({ comment }: { comment: ReaderComment }) {
+function SavedCommentCard({ comment, onDelete }: { comment: ReaderComment; onDelete?: () => void }) {
   const [audioUrl] = useState(() => comment.audio?.size ? URL.createObjectURL(comment.audio) : null);
   useEffect(() => () => { if (audioUrl) URL.revokeObjectURL(audioUrl); }, [audioUrl]);
   return <article className="saved-comment">
@@ -950,6 +961,7 @@ function SavedCommentCard({ comment }: { comment: ReaderComment }) {
     <blockquote>“{comment.anchorText}”</blockquote>
     <p>{comment.transcriptionConfirmed}</p>
     <small>Paragraph {comment.paragraphIndex + 1}, sentence {comment.sentenceIndex + 1} · Submitted by {comment.readerName}</small>
+    {onDelete && <button className="text-button comment-delete" onClick={() => { if (window.confirm("Delete this comment? This cannot be undone.")) void onDelete(); }}>Delete</button>}
     {audioUrl && <audio controls src={audioUrl}>Your browser cannot play this recording.</audio>}
   </article>;
 }

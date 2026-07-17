@@ -71,6 +71,14 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .chat-composer textarea { flex: 1; resize: none; padding: 9px 12px; color: var(--mc-white, #f2f6f4); background: #0b1210; border: 1px solid #24352f; border-radius: 10px; }
 .chat-note { margin: 0 0 10px; padding: 0 16px; color: var(--mc-muted, #9aa7a2); font-size: .75rem; }
 @media (max-width: 760px) { .chat-body { grid-template-columns: 1fr; } }
+.comment-delete { align-self: flex-start; margin-top: 6px; color: #ff9d9d; }
+.comment-delete:hover { color: #ff6b6b; }
+.read-mode-toggle { display: flex; gap: 6px; justify-content: center; margin: 8px 0 14px; }
+.read-mode-toggle button { padding: 8px 18px; color: var(--mc-white, #f2f6f4); background: #111a18; border: 1px solid #2c8d75; border-radius: 999px; cursor: pointer; font-weight: 600; }
+.read-mode-toggle button.active { color: #00140e; background: var(--mc-green, #00efb1); border-color: var(--mc-green, #00efb1); }
+.reading-card.self-read { display: block; max-height: 62vh; overflow-y: auto; gap: 0; }
+.reading-card.self-read p { margin: 0 0 .85em; text-indent: 1.4em; }
+.reading-card.self-read p:first-child { text-indent: 0; }
 .book-mark.image-mark { object-fit: cover; background: #020504; border: 1px solid var(--mc-green, #00efb1); }
 .copy-card.locked { opacity: .5; cursor: not-allowed; }
 .copy-card.locked:hover { transform: none; box-shadow: none; }
@@ -94,7 +102,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .hero { min-height: 220px; border-bottom: 1px solid #4a3d30; }
 .hero h1, .reader-heading h1, .settings-panel h1 { margin: 3px 0 10px; font: 800 clamp(2.7rem, 8vw, 5.5rem)/.95 Bahnschrift, "Arial Black", sans-serif; letter-spacing: -.045em; }
 .hero p, .library-heading p, .settings-panel p { color: #bdb2a4; }
-.eyebrow { color: #d5a85f; font-weight: 800; letter-spacing: .18em; font-size: .78rem; }
+.eyebrow { color: #d5a85f; font-weight: 800; letter-spacing: .14em; font-size: .8rem; text-transform: capitalize; }
 .settings-button, .refresh, .text-button, .secondary-controls button, .secondary-controls select, .form-actions button { color: #f5eee2; background: #262019; border: 1px solid #574738; border-radius: 12px; padding: 12px 17px; }
 .library-heading { padding: 42px 0 20px; }
 .library-heading h2 { margin: 0; font: 700 2rem Georgia, serif; }

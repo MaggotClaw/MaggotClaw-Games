@@ -397,24 +397,7 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
     } else speakAt(segmentIndex);
   }
 
-  function movePart(amount: number) {
-    playbackCycle.current += 1;
-    player.current.stop();
-    const next = Math.max(0, Math.min(segmentIndex + amount, Math.max(0, segments.length - 1)));
-    setSegmentIndex(next);
-    segmentsRef.current = segments;
-    speakAt(next, playbackCycle.current);
-  }
 
-  function readSkippedBox() {
-    if (!lastSkipped) return;
-    playbackCycle.current += 1;
-    player.current.stop();
-    setPlaying(true);
-    setStatus("Reading the skipped content box");
-    const cycle = playbackCycle.current;
-    player.current.speak(lastSkipped, settings.speechRate, () => speakAt(segmentIndex + 1, cycle), () => setPlaying(false));
-  }
 
   function skipReply() {
     playbackCycle.current += 1;
@@ -438,16 +421,10 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
     setStatus("Stopped — press Start Talking when you are ready");
   }
 
-  function leaveCompanion() {
-    localStorage.removeItem("long-rot-companion-active");
-    stopEverything();
-    onBack();
-  }
 
   const reading = state === "response";
   const listening = state === "recording";
   const busy = state === "starting" || state === "sending" || state === "waiting";
-  const current = segments[segmentIndex];
 
   const waveHeights = [8, 11, 18, 24, 18, 11, 8];
   const liveScale = .25 + Math.min(1, audioLevel / 45);

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { canPerform, roleLabel, type ProjectRole } from "./permissions";
+import { roleLabel, type ProjectRole } from "./permissions";
 
 // The messaging area. The layout, rooms, and rules are real; the transport that
 // carries messages between people is not built yet, so nothing sends. Rooms are

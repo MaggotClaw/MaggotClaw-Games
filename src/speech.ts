@@ -5,7 +5,6 @@ import { invoke } from "@tauri-apps/api/core";
 export class BrowserSpeechPlayer {
   private audio: HTMLAudioElement | null = null;
   private audioUrl = "";
-  private utterance: SpeechSynthesisUtterance | null = null;
   private keepAlive = 0;
   private watchdog = 0;
   private generation = 0;
@@ -62,7 +61,6 @@ export class BrowserSpeechPlayer {
     utterance.onstart = () => { started = true; };
     utterance.onend = () => finish(onEnd);
     utterance.onerror = () => finish(onError);
-    this.utterance = utterance;
     window.speechSynthesis.speak(utterance);
 
     this.keepAlive = window.setInterval(() => {
@@ -109,7 +107,6 @@ export class BrowserSpeechPlayer {
     this.releaseAudio();
     this.clearTimers();
     window.speechSynthesis.cancel();
-    this.utterance = null;
   }
 
   get paused(): boolean {
