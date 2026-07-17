@@ -159,6 +159,35 @@ fn open_url(url: String) -> Result<(), String> {
     }
 }
 
+/// Posts a message to a Discord webhook. Only real Discord webhook addresses
+/// are accepted, so this cannot be used to send data anywhere else.
+#[tauri::command]
+async fn post_discord_webhook(url: String, content: String) -> Result<(), String> {
+    let parsed = url::Url::parse(&url)
+        .map_err(|_| "The Discord webhook address is invalid.".to_string())?;
+    let host_ok = matches!(parsed.host_str(), Some("discord.com") | Some("discordapp.com"));
+    if parsed.scheme() != "https" || !host_ok || !parsed.path().starts_with("/api/webhooks/") {
+        return Err("Only Discord webhook addresses are allowed.".to_string());
+    }
+    if content.trim().is_empty() || content.len() > 1900 {
+        return Err("The message must be between 1 and 1900 characters.".to_string());
+    }
+    let response = reqwest::Client::new()
+        .post(parsed)
+        .json(&serde_json::json!({ "content": content }))
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|_| "Discord could not be reached. The request code still works by hand.".to_string())?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Discord did not accept the message ({}).",
+            response.status().as_u16()
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn openai_transcribe(audio: Vec<u8>, mime_type: String) -> Result<String, String> {
     if audio.is_empty() {
@@ -315,6 +344,7 @@ pub fn run() {
             mcp_call,
             fetch_latest_release,
             open_url,
+            post_discord_webhook,
             has_openai_api_key,
             save_openai_api_key,
             openai_transcribe,

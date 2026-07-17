@@ -17,6 +17,7 @@ import type { ParsedDoc, ProjectDocument } from "./projectDocs";
 import { invoke } from "@tauri-apps/api/core";
 import { UpdateChecker } from "./UpdateChecker";
 import { ChatScreen } from "./ChatScreen";
+import { getDiscordName, setDiscordName, getRequestWebhook, setRequestWebhook, isDiscordWebhook, requestAnnouncement, sendRequestToDiscord } from "./discordLink";
 
 type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock" | "chat";
 
@@ -473,11 +474,32 @@ export function App() {
     setStatus("Connection settings saved on this device");
   }
 
-  function saveProfile(name: string) {
+  function saveProfile(name: string, discordName = "", wantedRole: ProjectRole = "reader") {
     const clean = name.trim();
     if (!clean) return;
     localStorage.setItem("long-rot-reader-name", clean);
+    if (discordName.trim()) setDiscordName(clean, discordName);
     setReaderName(clean);
+    const startingRole = profileRole(clean);
+    // Anything above the starting role becomes a request to the owner.
+    if (ROLE_ORDER.indexOf(wantedRole) > ROLE_ORDER.indexOf(startingRole) && wantedRole !== "administrator") {
+      submitAccessRequest({ name: clean, currentRole: startingRole, requestedRole: wantedRole, reason: "Chosen during onboarding" });
+      refreshRequests();
+      const code = makeRequestCode({ name: clean, currentRole: startingRole, requestedRole: wantedRole, reason: "Chosen during onboarding" });
+      void sendRequestToDiscord(requestAnnouncement({
+        name: clean, discordName: discordName.trim(), currentRole: roleLabel(startingRole),
+        requestedRole: roleLabel(wantedRole), reason: "Chosen during onboarding", code
+      })).then((sent) => {
+        if (sent) {
+          setScreen("home");
+          setStatus("Your request was sent to the owner. You can read while you wait.");
+        } else {
+          setRequestCode(code);
+          setScreen("request-access");
+        }
+      });
+      return;
+    }
     setScreen("home");
     setStatus(`Welcome, ${clean}`);
   }
@@ -512,9 +534,20 @@ export function App() {
   function sendAccessRequest(requestedRole: ProjectRole, reason: string) {
     submitAccessRequest({ name: readerName, currentRole: role, requestedRole, reason });
     refreshRequests();
-    // The request also becomes a code the person sends to the owner, so it can
-    // travel between computers without a server in the middle.
-    setRequestCode(makeRequestCode({ name: readerName, currentRole: role, requestedRole, reason }));
+    const code = makeRequestCode({ name: readerName, currentRole: role, requestedRole, reason });
+    // Discord carries the request straight to the owner when the webhook is
+    // configured; the copy/paste code remains the fallback path.
+    void sendRequestToDiscord(requestAnnouncement({
+      name: readerName, discordName: getDiscordName(readerName), currentRole: roleLabel(role),
+      requestedRole: roleLabel(requestedRole), reason, code
+    })).then((sent) => {
+      if (sent) {
+        setScreen("home");
+        setStatus("Your request was sent to the owner. You can keep reading while you wait.");
+      } else {
+        setRequestCode(code);
+      }
+    });
   }
 
   // Applies an unlock code the owner sent back. The code names its recipient, so
@@ -820,15 +853,35 @@ export function App() {
   );
 }
 
-function Profile({ initial, onContinue }: { initial: string; onContinue: (name: string) => void }) {
+function Profile({ initial, onContinue }: { initial: string; onContinue: (name: string, discordName: string, wantedRole: ProjectRole) => void }) {
   const [name, setName] = useState(initial);
+  const [discordName, setDiscord] = useState(() => initial ? getDiscordName(initial) : "");
+  const [wantedRole, setWantedRole] = useState<ProjectRole>("reader");
+  const ready = Boolean(name.trim());
   return <main className="app-shell profile-screen">
     <div className="love-banner" role="status">Whatever you do, don't forget… <strong>MaggotClaw loves you!!!</strong></div>
-    <BrandLogo /><h1>Welcome to MaggotClaw Games</h1>
-    <p>Enter your name and you're in as a <strong>Reader</strong> — you can start reading and commenting right away. No waiting for approval. If you ever need to edit, you can request more access from inside the app.</p>
-    <label>Your name<input autoFocus value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onContinue(name); }} /></label>
-    <button className="continue-profile" disabled={!name.trim()} onClick={() => onContinue(name)}>Start reading as {name.trim() || "reader"}</button>
-    <button className="test-profile-button" onClick={() => onContinue("Test Profile")}>Enter as Owner (this computer)</button>
+    <BrandLogo /><h1>Start here</h1>
+    <p>Three quick things and you're in. Everyone starts as a <strong>Reader</strong> — reading and commenting work right away, no waiting. Anything above Reader goes to the owner for approval.</p>
+
+    <label>1. Your name<input autoFocus value={name} onChange={(event) => setName(event.target.value)} /></label>
+
+    <label>2. What do you want to do here?
+      <select value={wantedRole} onChange={(event) => setWantedRole(event.target.value as ProjectRole)}>
+        <option value="reader">Read and comment (Reader — starts now)</option>
+        <option value="contributor">Suggest and propose changes (Contributor — needs approval)</option>
+        <option value="editor">Edit and review the project (Editor — needs approval)</option>
+      </select>
+    </label>
+
+    <label>3. Your Discord name (for team messages)
+      <input value={discordName} placeholder="e.g. maggotfan99 — leave blank if you don't have one yet" onChange={(event) => setDiscord(event.target.value)} />
+    </label>
+    <button className="text-button" onClick={() => { void openDiscordWindow(); }}>Open Discord to sign in or create an account →</button>
+
+    <button className="continue-profile" disabled={!ready} onClick={() => onContinue(name, discordName, wantedRole)}>
+      {wantedRole === "reader" ? `Start reading as ${name.trim() || "reader"}` : "Enter and send my request to the owner"}
+    </button>
+    <button className="test-profile-button" onClick={() => onContinue("Test Profile", "", "administrator")}>Enter as Owner (this computer)</button>
   </main>;
 }
 
@@ -971,6 +1024,8 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
   const [bearerToken, setBearerToken] = useState(initial.bearerToken);
   const profile = localStorage.getItem("long-rot-reader-name") || "local";
   const [voice, setVoice] = useState<VoiceSettings>(() => loadVoiceSettings(profile));
+  const isOwner = canPerform(profileRole(profile), "manage");
+  const [webhook, setWebhook] = useState(getRequestWebhook);
   function updateVoice(changes: Partial<VoiceSettings>) { setVoice((current) => ({ ...current, ...changes })); }
   function saveAll() { saveVoiceSettings(profile, voice); onSave({ endpoint: endpoint.trim(), bearerToken }); }
   return <main className="app-shell settings-panel">
@@ -985,8 +1040,16 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
     <label className="check-setting"><input type="checkbox" checked={voice.readRepliesAutomatically} onChange={(event) => updateVoice({ readRepliesAutomatically: event.target.checked })} /> Read replies automatically</label>
     <label className="check-setting"><input type="checkbox" checked={voice.listenAfterReading} onChange={(event) => updateVoice({ listenAfterReading: event.target.checked })} /> Listen again after reading</label>
     <label className="check-setting"><input type="checkbox" checked={voice.skipContentBoxes} onChange={(event) => updateVoice({ skipContentBoxes: event.target.checked })} /> Skip code and output boxes</label>
-    <hr/><p className="eyebrow">UPDATES</p>
+    <hr/><p className="eyebrow">Updates</p>
     <UpdateChecker configurable />
+    {isOwner && <>
+      <hr/><p className="eyebrow">Owner — access requests via Discord</p>
+      <label>Discord webhook for the requests channel
+        <input value={webhook} placeholder="https://discord.com/api/webhooks/…" onChange={(event) => { setWebhook(event.target.value); setRequestWebhook(event.target.value); }} autoComplete="off" />
+      </label>
+      {webhook && !isDiscordWebhook(webhook) && <small className="update-status warn">That does not look like a Discord webhook address.</small>}
+      {webhook && isDiscordWebhook(webhook) && <small className="update-status ok">Access requests will arrive in your Discord channel automatically.</small>}
+    </>}
     <hr/><p className="eyebrow">ADVANCED CONNECTION</p>
     <label>Connection address<input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} /></label>
     <label>Temporary bearer credential<input type="password" value={bearerToken} onChange={(event) => setBearerToken(event.target.value)} autoComplete="off" /></label>
