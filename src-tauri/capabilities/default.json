@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "reader-window",
   "description": "Permissions for the main hub window and the separate Voice Companion window.",
-  "windows": ["main", "companion"],
+  "windows": ["main", "companion", "discord", "doc-*", "file-*"],
   "permissions": [
     "core:default",
     "core:app:allow-version",

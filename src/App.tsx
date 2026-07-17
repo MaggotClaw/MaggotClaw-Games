@@ -54,6 +54,37 @@ function getSettings(): ConnectionSettings {
 
 // The Voice Companion runs in its own small window loaded with the "#companion"
 // URL hash, so the main hub window stays open and visible behind it.
+const WINDOW_HASH = typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : "";
+// A chapter or file opened in its own window carries its path in the hash.
+const DOC_WINDOW_PATH = WINDOW_HASH.startsWith("doc:") ? decodeURIComponent(WINDOW_HASH.slice(4)) : null;
+const FILE_WINDOW_PATH = WINDOW_HASH.startsWith("file:") ? decodeURIComponent(WINDOW_HASH.slice(5)) : null;
+
+function windowLabelFor(prefix: string, relative: string): string {
+  let hash = 5381;
+  for (let i = 0; i < relative.length; i += 1) hash = ((hash * 33) ^ relative.charCodeAt(i)) >>> 0;
+  return prefix + "-" + hash.toString(36);
+}
+
+// Every chapter or file opens in its own window, so several can sit side by side.
+export async function openContentWindow(kind: "doc" | "file", relative: string, title: string): Promise<void> {
+  const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  const label = windowLabelFor(kind, relative);
+  const existing = await WebviewWindow.getByLabel(label);
+  if (existing) {
+    try { await existing.show(); await existing.setFocus(); } catch { /* ignore */ }
+    return;
+  }
+  // eslint-disable-next-line no-new
+  new WebviewWindow(label, {
+    url: "index.html#" + kind + ":" + encodeURIComponent(relative),
+    title,
+    width: kind === "doc" ? 1000 : 900,
+    height: 800,
+    resizable: true,
+    focus: true
+  });
+}
+
 const IS_COMPANION_WINDOW =
   typeof window !== "undefined" && window.location.hash.replace(/^#/, "") === "companion";
 
@@ -190,6 +221,40 @@ export function App() {
     void loadRecoverableComments().then((items) => setRecoverable(items[0] || null));
   }, []);
 
+  // Chapter window: load its document and land directly on the reading screen.
+  useEffect(() => {
+    if (!DOC_WINDOW_PATH || !("__TAURI_INTERNALS__" in window)) return;
+    void (async () => {
+      try {
+        let content: string;
+        let html: string | undefined;
+        if (/docx$/i.test(DOC_WINDOW_PATH)) {
+          const bytes = await invoke<number[]>("read_project_document_bytes", { localRelativePath: DOC_WINDOW_PATH });
+          const buffer = new Uint8Array(bytes).buffer;
+          const mammoth = await import("mammoth/mammoth.browser");
+          content = (await mammoth.extractRawText({ arrayBuffer: buffer })).value.trim();
+          html = (await mammoth.convertToHtml({ arrayBuffer: buffer })).value;
+        } else {
+          content = unwrapHardLines(await invoke<string>("read_project_document", { localRelativePath: DOC_WINDOW_PATH }));
+        }
+        const hash = await contentHash(content);
+        await enterDocument({
+          id: "local:" + DOC_WINDOW_PATH + ":" + hash,
+          path: "local:" + DOC_WINDOW_PATH,
+          name: DOC_WINDOW_PATH.split("/").pop() ?? DOC_WINDOW_PATH,
+          content,
+          html,
+          contentHash: hash,
+          segments: segmentDocument(content),
+          retrievedAt: new Date().toISOString()
+        });
+      } catch {
+        setStatus("This chapter could not be opened.");
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // The chapter shelf loads itself when Reader Mode opens, so it is never empty
   // waiting on a Refresh press.
   useEffect(() => {
@@ -265,6 +330,10 @@ export function App() {
   async function openCopy(copy: ParsedDoc) {
     if (!isChapterUnlocked(copy.chapter, role, unlockedChapters)) {
       setStatus(`Chapter ${copy.chapter} is not released yet.`);
+      return;
+    }
+    if ("__TAURI_INTERNALS__" in window) {
+      void openContentWindow("doc", copy.doc.localRelativePath, copy.title.startsWith("Chapter") ? "Chapter " + copy.chapter : copy.title);
       return;
     }
     setLoading(true);
@@ -352,6 +421,7 @@ export function App() {
   }
 
   function closeReader() {
+    if (DOC_WINDOW_PATH) { void closeCurrentWindow(); return; }
     player.current.stop();
     setPlaying(false);
     documentRef.current = null;
@@ -674,6 +744,10 @@ export function App() {
     URL.revokeObjectURL(url);
   }
 
+  if (FILE_WINDOW_PATH) {
+    return <FileWindow relative={FILE_WINDOW_PATH} />;
+  }
+
   if (IS_COMPANION_WINDOW) {
     // This window shows only the compact voice bar; the hub lives in its own window.
     return <TalkScreen
@@ -714,7 +788,7 @@ export function App() {
 
   if (screen === "directions") {
     return <main className="app-shell directions-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Main Menu</button><span className="eyebrow">Directions</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Directions</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
       <section className="projects-heading"><h1>Finding your way around</h1><p>What each part of MaggotClaw Games does.</p></section>
       <section className="directions-grid">
         <article><h2>Reader Mode</h2><p>The book itself. Pick a chapter, then choose Narrated (she reads to you, sentence by sentence) or Read myself (a normal book page). Locked chapters are not released yet. Press Comment while reading to record a note tied to the exact sentence.</p></article>
@@ -730,14 +804,15 @@ export function App() {
 
   if (screen === "home") {
     return <main className="app-shell home-shell">
-      <header className="hero"><BannerWithVersion /><div className="header-actions">
-        {canPerform(role, "manage") && <button className="pill-button" onClick={openDashboard}>Owner Dashboard{requests.length > 0 && <span className="pending-badge">{requests.length}</span>}</button>}
-        <button className="pill-button" onClick={() => setScreen("settings")}>Settings</button>
-        <button className="pill-button" onClick={() => setScreen("directions")}>Directions</button>
+      <header className="hero"><BannerWithVersion /></header>
+      <section className="home-toolbar">
+        {canPerform(role, "manage") && <button className="pill-button chip" onClick={openDashboard}>Owner Dashboard{requests.length > 0 && <span className="pending-badge">{requests.length}</span>}</button>}
+        <button className="pill-button chip" onClick={() => setScreen("settings")}>Settings</button>
+        <button className="pill-button chip" onClick={() => setScreen("directions")}>Directions</button>
         {getViewAs()
-          ? <button className="pill-button chip" onClick={() => { setViewAs(null); window.location.reload(); }}>Viewing as {roleLabel(role)} — back to my account</button>
+          ? <button className="pill-button chip" onClick={() => { setViewAs(null); window.location.reload(); }}>Viewing as {roleLabel(role)} — back</button>
           : <button className="pill-button chip" onClick={() => setScreen("profile")}>{readerName || "Start Here"}</button>}
-      </div></header>
+      </section>
       {readerName === "Test Profile" && <div className="test-mode-banner">TEST PROFILE — LOCAL ONLY — NOTHING IS SYNCHRONIZED</div>}
       {!canPerform(role, "manage") && <section className="welcome-strip">
         <span className="reader-note">You can read and comment right away. Need to edit? <button className="text-button inline" onClick={() => { setRequestCode(""); setScreen("request-access"); }}>Request access</button> · <button className="text-button inline" onClick={() => setScreen("unlock")}>Enter unlock code</button></span>
@@ -753,7 +828,7 @@ export function App() {
 
   if (screen === "projects") {
     return <main className="app-shell projects-list-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Main Menu</button><span className="eyebrow">PROJECTS</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">PROJECTS</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
       <section className="projects-heading"><h1>Your projects</h1><p>Select a project to open its local workspace and available actions.</p></section>
       <section className="project-tiles"><button className="project-tile" onClick={openLongRotWorkspace}><img className="project-placeholder project-icon-image" src="/long-rot-icon.png" alt="The Long Rot" /><span><strong>The Long Rot</strong><small>Local workspace ready · Dropbox connection needs attention</small></span><span>Open →</span></button><button className="project-tile project-zero-tile" onClick={() => setScreen("project-zero")}><img className="project-placeholder project-icon-image" src="/project-zero-icon.svg" alt="Project Zero Author" /><span><strong>Project Zero Author</strong><small>Project added · Local workspace and connection not configured yet</small></span><span>Open →</span></button></section>
     </main>;
@@ -761,7 +836,7 @@ export function App() {
 
   if (screen === "project-zero") {
     return <main className="app-shell project-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("projects")}>← Projects</button><span className="eyebrow">PROJECT ZERO AUTHOR</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("projects")}>← Back</button><span className="eyebrow">PROJECT ZERO AUTHOR</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
       <section className="project-heading"><div><p className="eyebrow">PROJECT ADDED</p><h1>Project Zero Author</h1><p>This project is selectable. Its local filing structure and remote source still need to be configured.</p></div><span className="role-badge">{roleLabel(role)}</span></section>
       <section className="workspace-card"><div><span>Local workspace</span><strong>Not prepared</strong><small>No Project Zero Author files have been created or changed.</small></div><div><span>Remote files</span><strong>Not connected</strong><small>No Dropbox location or other source has been assigned.</small></div><div><span>Project actions</span><strong>Safely locked</strong><small>Download and upload stay unavailable until the project source is explicitly configured.</small></div></section>
       <section className="workspace-actions"><button disabled>Prepare Workspace</button><button disabled>Download or Update</button>{canPerform(role, "review") && <button disabled>Review Changes</button>}{canPerform(role, "upload") && <button disabled>Upload Approved</button>}</section>
@@ -771,7 +846,7 @@ export function App() {
 
   if (screen === "project-review") {
     return <main className="app-shell project-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("project-workspace")}>← The Long Rot</button><span className="eyebrow">REVIEW QUEUE</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("project-workspace")}>← Back</button><span className="eyebrow">REVIEW QUEUE</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
       <section className="projects-heading"><h1>Proposed changes</h1><p>Nothing is waiting for review yet. Future AI and human drafts will appear here before anything can be approved for upload.</p></section>
       <section className="empty-state"><strong>No proposed changes</strong><p>Dropbox remains unchanged.</p></section>
     </main>;
@@ -783,7 +858,7 @@ export function App() {
 
   if (screen === "project-workspace") {
     return <main className="app-shell project-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("projects")}>← Projects</button><span className="eyebrow">LOCAL PROJECT WORKSPACE</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("projects")}>← Back</button><span className="eyebrow">LOCAL PROJECT WORKSPACE</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
       <section className="project-heading"><div><p className="eyebrow">THE LONG ROT</p><h1>Project workspace</h1><p>Dropbox stays the shared source. The AI works from safe copies on this computer.</p></div><span className="role-badge">{roleLabel(role)}</span></section>
       <section className="workspace-card">
         <div><span>Local workspace</span><strong>{workspace?.initialized ? "Ready" : "Not prepared yet"}</strong><small>{workspace?.workspacePath || "The standard MaggotClaw Games Projects folder will be used."}</small></div>
@@ -807,12 +882,12 @@ export function App() {
   }
 
   if (screen === "voice-targets") {
-    return <main className="app-shell target-screen"><header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Main Menu</button><span className="eyebrow">VOICE COMPANION</span><span>{readerName}</span></header><section className="library-heading"><div><h2>Choose the program</h2><p>The companion controls the normal Windows program you already use.</p></div></section><section className="target-grid"><button className="target-card available" onClick={() => openVoiceTarget("claude")}><strong>Claude</strong><small>Available now</small></button><button className="target-card available" onClick={() => openVoiceTarget("codex")}><strong>Codex</strong><small>Available now</small></button><button className="target-card" disabled><strong>ChatGPT</strong><small>Coming later</small></button></section></main>;
+    return <main className="app-shell target-screen"><header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">VOICE COMPANION</span><span>{readerName}</span></header><section className="library-heading"><div><h2>Choose the program</h2><p>The companion controls the normal Windows program you already use.</p></div></section><section className="target-grid"><button className="target-card available" onClick={() => openVoiceTarget("claude")}><strong>Claude</strong><small>Available now</small></button><button className="target-card available" onClick={() => openVoiceTarget("codex")}><strong>Codex</strong><small>Available now</small></button><button className="target-card" disabled><strong>ChatGPT</strong><small>Coming later</small></button></section></main>;
   }
 
   if (screen === "comments") {
     return <main className="app-shell comments-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("library")}>← Chapters</button><span className="eyebrow">MY COMMENTS</span><span>{readerName}</span></header>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("library")}>← Back</button><span className="eyebrow">MY COMMENTS</span><span>{readerName}</span></header>
       <section className="comments-heading"><div><h1>Saved Comments</h1><p>{savedComments.length} saved safely on this device.</p></div><button onClick={exportComments} disabled={!savedComments.length}>Save comments file</button><button className="primary" disabled={!savedComments.length} onClick={async () => {
         setStatus("Sending comments to the owner…");
         let sent = 0;
@@ -866,7 +941,7 @@ ${item.transcriptionConfirmed}`.slice(0, 1800);
     return (
       <main className="app-shell reader-shell">
         <header className="topbar">
-          <button className="text-button" onClick={closeReader}>← Chapters</button>
+          <button className="text-button" onClick={closeReader}>← Back</button>
           <span className="eyebrow">The Long Rot</span>
           <span className="status-dot" aria-label={status}>{status}</span>
         </header>
@@ -915,15 +990,16 @@ ${item.transcriptionConfirmed}`.slice(0, 1800);
 
   return (
     <main className="app-shell">
-      <header className="hero">
-        <div><BrandLogo compact /><h1>Reader Mode</h1><p>Choose a chapter and continue where you left off.</p></div>
-        <div className="header-actions"><button className="settings-button" onClick={openSavedComments}>My Comments</button><button className="settings-button" onClick={() => setScreen("settings")}>Settings</button><button className="profile-chip" onClick={() => setScreen("profile")}>{readerName}</button></div>
-      </header>
-      <section className="library-heading">
-        <div><h2>Chapters</h2><p>{status}</p></div>
-        <button className="refresh" onClick={refreshCopies} disabled={loading}>{loading ? "Loading…" : "Refresh"}</button>
+      <section className="home-toolbar page">
+        <button className="pill-button chip" onClick={() => setScreen("home")}>← Back</button>
+        <button className="pill-button chip" onClick={openSavedComments}>My Comments</button>
+        <button className="pill-button chip" onClick={() => setScreen("settings")}>Settings</button>
+        <button className="pill-button chip" onClick={refreshCopies} disabled={loading}>{loading ? "Loading…" : "Refresh"}</button>
+        <span className="who-chip">{readerName} · {roleLabel(role)}</span>
       </section>
-      <button className="text-button mode-back" onClick={() => setScreen("home")}>← Main Menu</button>
+      <header className="hero">
+        <div><BrandLogo compact /><h1>Reader Mode</h1><p>{status}</p></div>
+      </header>
       {recoverable && <section className="recovery-banner"><div><strong>Unfinished comment found</strong><p>Your recording and reading position are safe on this device.</p></div><button onClick={resumeRecoverable}>Recover</button></section>}
       <section className="copy-grid">
         {shelf.map((copy) => {
@@ -983,6 +1059,49 @@ function Profile({ initial, onContinue }: { initial: string; onContinue: (name: 
     <button className="text-button" onClick={() => { void openDiscordWindow(); }}>Open Discord to sign in or create an account →</button>
 
     <button className="continue-profile" disabled={!name.trim()} onClick={() => onContinue(name, discordName, wantedRole)}>Get Started</button>
+  </main>;
+}
+
+// One project file in its own window: full text (or Word formatting), with
+// read-highlighted-aloud. Several of these can be open side by side.
+function FileWindow({ relative }: { relative: string }) {
+  const [text, setText] = useState("Opening…");
+  const [html, setHtml] = useState<string | null>(null);
+  const voice = useRef(new BrowserSpeechPlayer());
+  const [speaking, setSpeaking] = useState(false);
+  useEffect(() => () => voice.current.stop(), []);
+  useEffect(() => {
+    void (async () => {
+      try {
+        if (/docx$/i.test(relative)) {
+          const bytes = await invoke<number[]>("read_project_document_bytes", { localRelativePath: relative });
+          const buffer = new Uint8Array(bytes).buffer;
+          const mammoth = await import("mammoth/mammoth.browser");
+          setText((await mammoth.extractRawText({ arrayBuffer: buffer })).value.trim());
+          setHtml((await mammoth.convertToHtml({ arrayBuffer: buffer })).value);
+        } else {
+          setText(await invoke<string>("read_project_document", { localRelativePath: relative }));
+        }
+      } catch {
+        setText("This file could not be opened from the local workspace.");
+      }
+    })();
+  }, [relative]);
+  function readSelection() {
+    if (speaking) { voice.current.stop(); setSpeaking(false); return; }
+    const chosen = window.getSelection()?.toString().trim();
+    if (!chosen) return;
+    setSpeaking(true);
+    voice.current.speak(chosen.slice(0, 4000), 1, () => setSpeaking(false), () => setSpeaking(false));
+  }
+  const name = relative.split("/").pop() ?? relative;
+  return <main className="app-shell file-window">
+    <header className="topbar">
+      <button className="text-button" onClick={() => { void closeCurrentWindow(); }}>← Back</button>
+      <span className="eyebrow">{name}</span>
+      <button className="text-button" onClick={readSelection}>{speaking ? "■ Stop reading" : "🔊 Read highlighted"}</button>
+    </header>
+    {html ? <div className="doc-word" dangerouslySetInnerHTML={{ __html: html }} /> : <pre className="file-text">{text}</pre>}
   </main>;
 }
 
@@ -1094,7 +1213,7 @@ function OwnerDashboard({ requests, onDecide, onBack }: { requests: AccessReques
   }
 
   return <main className="app-shell dashboard-shell">
-    <header className="topbar"><button className="text-button" onClick={onBack}>← Main Menu</button><span className="eyebrow">OWNER DASHBOARD</span><span>Author / Owner</span></header>
+    <header className="topbar"><button className="text-button" onClick={onBack}>← Back</button><span className="eyebrow">OWNER DASHBOARD</span><span>Author / Owner</span></header>
     <section className="projects-heading"><h1>Things that need you</h1><p>Approvals and communications routed to the owner. Approving a request raises that person's role immediately.</p></section>
 
     <section className="dash-section">

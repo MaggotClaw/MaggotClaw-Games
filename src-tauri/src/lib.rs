@@ -138,6 +138,14 @@ async fn fetch_latest_release(repo: String) -> Result<Value, String> {
 // plain http(s) URL, and rejects shell metacharacters so nothing can be injected.
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
+    // mailto: opens the user's email program with the share link prefilled.
+    if url.starts_with("mailto:") && !url.contains(['&','|','^','<','>','"']) {
+        return std::process::Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .spawn()
+            .map(|_| ())
+            .map_err(|_| "The email program could not be opened.".to_string());
+    }
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err("Only web links can be opened.".to_string());
     }

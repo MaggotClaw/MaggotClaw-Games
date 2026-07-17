@@ -83,6 +83,21 @@ export function UpdateChecker({ configurable = false }: { configurable?: boolean
       <div className="share-actions">
         <button className="primary tiny" onClick={() => void copyShareLink(downloadShareLink(repo)!)}>{copied ? "Copied ✓" : "Copy link"}</button>
         <button className="text-button" onClick={() => void openDownload(downloadShareLink(repo)!)}>Open</button>
+        <button className="primary tiny" onClick={() => {
+          const link = downloadShareLink(repo)!;
+          void import("@tauri-apps/api/core").then(({ invoke }) =>
+            invoke("open_url", { url: "mailto:?subject=" + encodeURIComponent("MaggotClaw Games") + "&body=" + encodeURIComponent("Download MaggotClaw Games here: " + link) })
+          );
+        }}>Email</button>
+        <button className="primary tiny" onClick={() => {
+          void copyShareLink(downloadShareLink(repo)!);
+          void import("@tauri-apps/api/webviewWindow").then(async ({ WebviewWindow }) => {
+            const existing = await WebviewWindow.getByLabel("discord");
+            if (existing) { await existing.show(); await existing.setFocus(); return; }
+            // eslint-disable-next-line no-new
+            new WebviewWindow("discord", { url: "https://discord.com/app", title: "MaggotClaw Messages", width: 1100, height: 780, resizable: true, focus: true });
+          });
+        }}>Message</button>
       </div>
     </div>}
   </div>;

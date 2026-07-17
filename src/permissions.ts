@@ -18,7 +18,7 @@ const ROLE_LABELS: Record<ProjectRole, string> = {
   reader: "Reader",
   contributor: "Contributor",
   reviewer: "Reviewer",
-  editor: "Editor / Maintainer",
+  editor: "Editor / Manager",
   support: "Technical Support",
   administrator: "Author / Owner"
 };

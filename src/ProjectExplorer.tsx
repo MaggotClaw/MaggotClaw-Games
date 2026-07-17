@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { BrowserSpeechPlayer } from "./speech";
+import { openContentWindow } from "./App";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { compareVersions, parseDoc, type ParsedDoc, type ProjectDocument } from "./projectDocs";
 import { describeDoc, resolveQuickOpen } from "./quickOpen";
@@ -153,25 +154,11 @@ export function ProjectExplorer({ onBack }: { onBack: () => void }) {
   }
 
   async function openDoc(parsed: ParsedDoc) {
-    setSelected(parsed);
-    setHits(null);
-    setContentBusy(true);
-    setContentHtml(null);
-    try {
-      if (/\.docx$/i.test(parsed.fileName)) {
-        const bytes = await invoke<number[]>("read_project_document_bytes", { localRelativePath: parsed.doc.localRelativePath });
-        const buffer = new Uint8Array(bytes).buffer;
-        const mammoth = await import("mammoth/mammoth.browser");
-        setContent((await mammoth.extractRawText({ arrayBuffer: buffer })).value.trim());
-        setContentHtml((await mammoth.convertToHtml({ arrayBuffer: buffer })).value);
-      } else {
-        setContent(await invoke<string>("read_project_document", { localRelativePath: parsed.doc.localRelativePath }));
-      }
-    } catch {
-      setContent("This file could not be opened from the local workspace.");
-    } finally {
-      setContentBusy(false);
+    if ("__TAURI_INTERNALS__" in window) {
+      void openContentWindow("file", parsed.doc.localRelativePath, parsed.title);
+      return;
     }
+    setSelected(parsed);
   }
 
   // Reads whatever text is highlighted in the viewer out loud with the same
@@ -312,7 +299,6 @@ export function ProjectExplorer({ onBack }: { onBack: () => void }) {
           onChange={(event) => setSearchQuery(event.target.value)}
           onKeyDown={(event) => { if (event.key === "Enter") void runSearch(); }}
         />
-        <button className="primary" onClick={() => void runSearch()} disabled={searchBusy}>{searchBusy ? "…" : "Find"}</button>
         {hits !== null && <button className="text-button" onClick={() => setHits(null)}>Clear</button>}
       </div>
     </nav>
@@ -321,7 +307,22 @@ export function ProjectExplorer({ onBack }: { onBack: () => void }) {
 
     <section className="explorer-body">
       <div className="explorer-list">
-        {view === "files" && <>
+        {hits !== null && <div className="search-results">
+          <h2>{hits.length ? `“${searchQuery}” — found in ${hits.length} file${hits.length === 1 ? "" : "s"}` : `No files mention “${searchQuery}”`}</h2>
+          <ul>
+            {hits.map((hit) => {
+              const parsed = docFor(hit.localRelativePath);
+              return <li key={hit.localRelativePath}>
+                <button onClick={() => parsed && void openDoc(parsed)}>
+                  <strong>{parsed ? parsed.title : hit.localRelativePath}</strong>
+                  <span className="hit-count">{hit.matchCount}×</span>
+                  <em>{hit.snippet}</em>
+                </button>
+              </li>;
+            })}
+          </ul>
+        </div>}
+        {hits === null && view === "files" && <>
           <div className="group-toggle">
             <span>Group by</span>
             <button className={mode === "chapter" ? "active" : ""} onClick={() => setMode("chapter")}>Chapter</button>
@@ -344,7 +345,7 @@ export function ProjectExplorer({ onBack }: { onBack: () => void }) {
           {groups.length === 0 && <p className="explorer-empty">No downloaded files yet.</p>}
         </>}
 
-        {view === "chapters" && <div className="status-board">
+        {hits === null && view === "chapters" && <div className="status-board">
           <p className="board-hint">Every chapter needs Blueprint · Development · Draft · Reader Copy. Click a filled box to open it.</p>
           {chapters.map((row) => <div key={row.chapter} className="status-row">
             <div className="status-name"><strong>Ch {String(row.chapter).padStart(2, "0")}</strong><small>{row.title.startsWith("Chapter") ? "Untitled" : row.title}</small></div>
@@ -358,7 +359,7 @@ export function ProjectExplorer({ onBack }: { onBack: () => void }) {
           {chapters.length === 0 && <p className="explorer-empty">No chapter files downloaded yet.</p>}
         </div>}
 
-        {view === "codex" && <div className="bible-list">
+        {hits === null && view === "codex" && <div className="bible-list">
           {brainNote && <p className="explorer-error">{brainNote}</p>}
           {!registryDoc && <p className="explorer-empty">Download the project to build the Story Brain from your ID Registry.</p>}
           {registryDoc && !brain && !brainNote && <p className="explorer-empty">Reading the ID Registry…</p>}
@@ -395,35 +396,6 @@ export function ProjectExplorer({ onBack }: { onBack: () => void }) {
         </div>}
       </div>
 
-      <div className="explorer-view">
-        {hits !== null ? <div className="search-results">
-          <h2>{hits.length ? `“${searchQuery}” — found in ${hits.length} file${hits.length === 1 ? "" : "s"}` : `No files mention “${searchQuery}”`}</h2>
-          <ul>
-            {hits.map((hit) => {
-              const parsed = docFor(hit.localRelativePath);
-              return <li key={hit.localRelativePath}>
-                <button onClick={() => parsed && void openDoc(parsed)}>
-                  <strong>{parsed ? parsed.title : hit.localRelativePath}</strong>
-                  <span className="hit-count">{hit.matchCount}×</span>
-                  <em>{hit.snippet}</em>
-                </button>
-              </li>;
-            })}
-          </ul>
-        </div> : selected ? <div className="doc-viewer">
-          <div className="doc-viewer-head">
-            <div><strong>{selected.title}</strong><small>{selected.fileName}</small></div>
-            <span className="doc-version">{!contentBusy && `${wordCount(content).toLocaleString()} words`}{selected.version ? ` · v${selected.version}` : ""}</span>
-            <button className="text-button" onClick={readSelection} title="Highlight some text first, then press this to hear it">{speaking ? "■ Stop reading" : "🔊 Read highlighted"}</button>
-          </div>
-          {contentHtml
-            ? <div className="doc-word" dangerouslySetInnerHTML={{ __html: contentHtml }} />
-            : <pre>{contentBusy ? "Opening…" : content}</pre>}
-        </div> : <div className="explorer-hint">
-          <h2>Your project, organized</h2>
-          <p>Pick a file to read it, browse <strong>Chapters</strong> to see what's done, open the <strong>Codex</strong> for characters and places, or use <strong>Ask anything</strong> to find every mention of something — no AI needed.</p>
-        </div>}
-      </div>
     </section>
   </main>;
 }
