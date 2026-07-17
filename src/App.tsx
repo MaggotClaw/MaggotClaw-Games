@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LongRotMcpClient } from "./mcp";
-import { contentHash, segmentDocument } from "./segmenter";
+import { contentHash, segmentDocument, unwrapHardLines } from "./segmenter";
 import { BrowserSpeechPlayer } from "./speech";
 import { CommentRecorder } from "./recorder";
 import { TalkScreen } from "./TalkScreen";
@@ -66,6 +66,26 @@ async function openCompanionWindow(): Promise<void> {
     shadow: false,
     alwaysOnTop: true,
     center: false,
+    focus: true
+  });
+}
+
+// Discord runs inside the app in its own MaggotClaw window. The webview keeps
+// its sign-in between launches, so after the first login it connects itself.
+async function openDiscordWindow(): Promise<void> {
+  const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  const existing = await WebviewWindow.getByLabel("discord");
+  if (existing) {
+    try { await existing.show(); await existing.setFocus(); } catch { /* ignore */ }
+    return;
+  }
+  // eslint-disable-next-line no-new
+  new WebviewWindow("discord", {
+    url: "https://discord.com/app",
+    title: "MaggotClaw Messages",
+    width: 1100,
+    height: 780,
+    resizable: true,
     focus: true
   });
 }
@@ -230,7 +250,8 @@ export function App() {
     setLoading(true);
     setStatus("Opening chapter…");
     try {
-      const content = await invoke<string>("read_project_document", { localRelativePath: copy.doc.localRelativePath });
+      const raw = await invoke<string>("read_project_document", { localRelativePath: copy.doc.localRelativePath });
+      const content = unwrapHardLines(raw);
       const hash = await contentHash(content);
       await enterDocument({
         id: `${copy.doc.dropboxPath}:${copy.doc.revisionId || hash}`,
@@ -593,7 +614,7 @@ export function App() {
   }
 
   if (screen === "chat") {
-    return <ChatScreen role={role} name={readerName} onBack={() => setScreen("home")} />;
+    return <ChatScreen role={role} name={readerName} onBack={() => setScreen("home")} onOpenDiscord={() => { void openDiscordWindow(); }} />;
   }
 
   if (screen === "home") {
@@ -610,7 +631,7 @@ export function App() {
         <button className="mode-card" onClick={() => setScreen("library")}><img className="mode-icon image-icon" src="/long-rot-icon.png" alt="The Long Rot" /><span><strong>Reader Mode</strong><small>Read or listen, save your place, and record comments.</small></span><span>→</span></button>
         <button className="mode-card voice-mode" onClick={() => setScreen("voice-targets")}><span className="mode-icon voice-mic-mark" aria-hidden="true" /><span><strong>Voice Companion</strong><small>Talk with Claude or Codex now. ChatGPT will be added later.</small></span><span>→</span></button>
         <button className="mode-card project-mode" onClick={openProjects}><img className="mode-icon image-icon" src="/mcg-social-circle.png" alt="MaggotClaw Games" /><span><strong>Projects</strong><small>{canPerform(role, "review") ? "Open a project, review its local files, and use the actions allowed for your role." : "Editing the project files needs approval from the owner."}</small></span><span>→</span></button>
-        <button className="mode-card chat-mode" onClick={() => setScreen("chat")}><span className="mode-icon chat-mark" aria-hidden="true">✉</span><span><strong>Messages</strong><small>Rooms for readers, editors, and the author. Not connected yet.</small></span><span>→</span></button>
+        <button className="mode-card chat-mode" onClick={() => setScreen("chat")}><span className="mode-icon chat-mark" aria-hidden="true">✉</span><span><strong>Messages</strong><small>Rooms and voice calls for readers, editors, and the author.</small></span><span>→</span></button>
       </section>
     </main>;
   }

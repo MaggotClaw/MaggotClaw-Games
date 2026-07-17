@@ -4,6 +4,18 @@ const sentenceSegmenter = typeof Intl.Segmenter === "function"
   ? new Intl.Segmenter("en", { granularity: "sentence" })
   : null;
 
+// Project files are hard-wrapped at ~75 characters, so a single newline inside
+// a paragraph is a formatting artifact, not a pause. Unwrap those into spaces
+// (keeping blank-line paragraph breaks) BEFORE storing/segmenting a document,
+// so narration reads straight through and never pauses at a wrapped line end.
+export function unwrapHardLines(content: string): string {
+  return content
+    .split(/\r?\n\s*\r?\n+/)
+    .map((block) => block.replace(/\s*\r?\n\s*/g, " ").trim())
+    .filter((block) => block.length > 0)
+    .join("\n\n");
+}
+
 export function segmentDocument(content: string): Segment[] {
   const segments: Segment[] = [];
   const paragraphs = content.split(/\r?\n(?:\s*\r?\n)*/);

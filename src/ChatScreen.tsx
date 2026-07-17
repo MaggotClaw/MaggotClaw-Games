@@ -28,7 +28,7 @@ export function visibleRooms(role: ProjectRole): ChatRoom[] {
   return CHAT_ROOMS.filter((room) => ROLE_RANK[role] >= ROLE_RANK[room.minRole]);
 }
 
-export function ChatScreen({ role, name, onBack }: { role: ProjectRole; name: string; onBack: () => void }) {
+export function ChatScreen({ role, name, onBack, onOpenDiscord }: { role: ProjectRole; name: string; onBack: () => void; onOpenDiscord?: () => void }) {
   const rooms = useMemo(() => visibleRooms(role), [role]);
   const [activeId, setActiveId] = useState(rooms[0]?.id ?? "");
   const [draft, setDraft] = useState("");
@@ -76,8 +76,9 @@ export function ChatScreen({ role, name, onBack }: { role: ProjectRole; name: st
 
           <div className="chat-messages">
             <div className="chat-placeholder">
-              <strong>No messages yet</strong>
-              <p>This room is ready, but messages have nowhere to travel yet — the connection between people still needs to be built. Everything you see here is the real layout and the real room rules.</p>
+              <strong>Messages run through Discord</strong>
+              <p>Talk, share, and start voice calls in the MaggotClaw Messages window. Sign in once and it connects itself from then on.</p>
+              {onOpenDiscord && <button className="primary" onClick={onOpenDiscord}>Open Messages window</button>}
             </div>
           </div>
 
@@ -88,9 +89,9 @@ export function ChatScreen({ role, name, onBack }: { role: ProjectRole; name: st
               placeholder={`Message #${active.name}…`}
               onChange={(event) => setDraft(event.target.value)}
             />
-            <button className="primary" disabled title="Messaging is not connected yet">Send</button>
+            <button className="primary" disabled title="Type in the Messages window for now">Send</button>
           </div>
-          <p className="chat-note">Not connected yet — nothing is sent or stored.</p>
+          <p className="chat-note">The rooms listed here mirror how the Discord server is organised.</p>
         </>}
       </section>
     </section>

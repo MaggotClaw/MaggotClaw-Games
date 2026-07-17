@@ -122,9 +122,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .progress-track span { display: block; height: 100%; background: #cf9a4c; transition: width .2s; }
 .progress-label { color: #a79b8e; font-size: .85rem; }
 .reading-card { min-height: 300px; display: flex; flex-direction: column; justify-content: center; gap: 22px; padding: 36px clamp(25px, 7vw, 80px); background: #f0e4cf; color: #29221b; border-radius: 22px; box-shadow: 0 20px 60px #0007; }
-.reading-card p { margin: 0; font: 1.15rem/1.75 Georgia, serif; }
+.reading-card p { margin: 0; font: 1rem/1.7 Georgia, "Times New Roman", serif; text-align: justify; hyphens: auto; }
 .reading-card .context { color: #8d8173; }
-.reading-card .current-sentence { padding: 12px 17px; margin: 0 -17px; background: #e0bd78; border-left: 5px solid #7c501d; font-size: 1.35rem; }
+.reading-card .current-sentence { padding: 3px 8px; margin: 0 -8px; background: #e6cd97; border-left: 3px solid #7c501d; border-radius: 4px; font-size: 1rem; }
 .primary-controls { display: grid; grid-template-columns: 1fr 1.25fr 1.25fr; gap: 14px; margin-top: 24px; }
 .control { min-height: 82px; color: #f8f1e5; border-radius: 18px; border: 1px solid #5c4938; font-weight: 800; font-size: 1.1rem; }
 .control.primary, .form-actions .primary { background: #c3893e; color: #17100a; border-color: #dfa651; }
