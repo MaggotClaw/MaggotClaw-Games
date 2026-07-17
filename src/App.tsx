@@ -17,7 +17,7 @@ import type { ParsedDoc, ProjectDocument } from "./projectDocs";
 import { invoke } from "@tauri-apps/api/core";
 import { UpdateChecker } from "./UpdateChecker";
 import { ChatScreen } from "./ChatScreen";
-import { getDiscordName, setDiscordName, getRequestWebhook, setRequestWebhook, isDiscordWebhook, requestAnnouncement, sendRequestToDiscord } from "./discordLink";
+import { getDiscordName, setDiscordName, getRequestWebhook, setRequestWebhook, isDiscordWebhook, requestAnnouncement, sendRequestToDiscord, fetchDiscordRequests, postUnlockToDiscord, markMessageHandled, discordReadingConfigured, getBotToken, setBotToken, getRequestsChannelId, setRequestsChannelId, type DiscordRequestMessage } from "./discordLink";
 
 type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock" | "chat";
 
@@ -957,9 +957,67 @@ function OwnerDashboard({ requests, onDecide, onBack }: { requests: AccessReques
     setIncoming(parsed);
   }
 
+  const [inbox, setInbox] = useState<DiscordRequestMessage[]>([]);
+  const [inboxBusy, setInboxBusy] = useState(false);
+  const [inboxNote, setInboxNote] = useState("");
+
+  async function checkDiscord() {
+    setInboxBusy(true);
+    setInboxNote("");
+    try {
+      const found = await fetchDiscordRequests();
+      setInbox(found);
+      setInboxNote(found.length ? "" : "No new requests waiting on Discord.");
+    } catch (error) {
+      setInboxNote(message(error));
+    } finally {
+      setInboxBusy(false);
+    }
+  }
+
+  async function decideDiscordRequest(item: DiscordRequestMessage, approve: boolean) {
+    const parsed = parseRequestCode(item.code);
+    if (!parsed) { setInboxNote("That message's code is damaged — handle it by hand in Discord."); return; }
+    if (approve) {
+      const unlock = makeUnlockCode({ name: parsed.name, role: parsed.requestedRole });
+      const posted = await postUnlockToDiscord(parsed.name, roleLabel(parsed.requestedRole), unlock);
+      setInboxNote(posted
+        ? `Approved. The unlock code was posted in Discord for ${parsed.name}.`
+        : "Approved, but Discord could not be reached — send the code by hand.");
+      if (!posted) { setGranted({ name: parsed.name, role: parsed.requestedRole, code: unlock }); }
+    } else {
+      setInboxNote(`Declined ${parsed.name}'s request. Nothing changed.`);
+    }
+    markMessageHandled(item.messageId);
+    setInbox((current) => current.filter((entry) => entry.messageId !== item.messageId));
+  }
+
   return <main className="app-shell dashboard-shell">
     <header className="topbar"><button className="text-button" onClick={onBack}>← Main Menu</button><span className="eyebrow">OWNER DASHBOARD</span><span>Author / Owner</span></header>
     <section className="projects-heading"><h1>Things that need you</h1><p>Approvals and communications routed to the owner. Approving a request raises that person's role immediately.</p></section>
+
+    <section className="dash-section">
+      <h2>Requests from Discord</h2>
+      {discordReadingConfigured()
+        ? <>
+            <p className="board-hint">Pulls new access requests straight out of your Discord channel. Approving posts the unlock code back automatically.</p>
+            <div className="form-actions"><button className="primary" onClick={() => void checkDiscord()} disabled={inboxBusy}>{inboxBusy ? "Checking…" : "Check Discord"}</button></div>
+            {inboxNote && <p className="board-hint">{inboxNote}</p>}
+            {inbox.map((item) => {
+              const parsed = parseRequestCode(item.code);
+              return <div key={item.messageId} className="request-card">
+                <div className="request-who"><strong>{parsed?.name ?? item.author}</strong><span>{parsed ? `${roleLabel(parsed.currentRole)} → ${roleLabel(parsed.requestedRole)}` : "unreadable request"}</span></div>
+                {parsed?.reason && <p className="request-reason">"{parsed.reason}"</p>}
+                <time>{item.sentAt ? new Date(item.sentAt).toLocaleString() : ""} · via Discord ({item.author})</time>
+                <div className="request-actions">
+                  <button onClick={() => void decideDiscordRequest(item, false)}>Decline</button>
+                  <button className="primary" onClick={() => void decideDiscordRequest(item, true)}>Approve</button>
+                </div>
+              </div>;
+            })}
+          </>
+        : <p className="board-hint">Add the bot key and channel ID in Settings → Owner to see requests here without leaving the app.</p>}
+    </section>
 
     <section className="dash-section">
       <h2>Approve someone on another computer</h2>
@@ -1026,6 +1084,8 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
   const [voice, setVoice] = useState<VoiceSettings>(() => loadVoiceSettings(profile));
   const isOwner = canPerform(profileRole(profile), "manage");
   const [webhook, setWebhook] = useState(getRequestWebhook);
+  const [botToken, setBotTokenState] = useState(getBotToken);
+  const [channelId, setChannelIdState] = useState(getRequestsChannelId);
   function updateVoice(changes: Partial<VoiceSettings>) { setVoice((current) => ({ ...current, ...changes })); }
   function saveAll() { saveVoiceSettings(profile, voice); onSave({ endpoint: endpoint.trim(), bearerToken }); }
   return <main className="app-shell settings-panel">
@@ -1049,6 +1109,13 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
       </label>
       {webhook && !isDiscordWebhook(webhook) && <small className="update-status warn">That does not look like a Discord webhook address.</small>}
       {webhook && isDiscordWebhook(webhook) && <small className="update-status ok">Access requests will arrive in your Discord channel automatically.</small>}
+      <label>Discord bot key (lets the app read the requests channel)
+        <input type="password" value={botToken} placeholder="Paste the bot token from the Discord Developer Portal" onChange={(event) => { setBotTokenState(event.target.value); setBotToken(event.target.value); }} autoComplete="off" />
+      </label>
+      <label>Requests channel ID
+        <input value={channelId} placeholder="Right-click the channel → Copy Channel ID" onChange={(event) => { setChannelIdState(event.target.value); setRequestsChannelId(event.target.value); }} autoComplete="off" />
+      </label>
+      {discordReadingConfigured() && <small className="update-status ok">Two-way Discord is on: the Owner Dashboard can pull requests and post approvals.</small>}
     </>}
     <hr/><p className="eyebrow">ADVANCED CONNECTION</p>
     <label>Connection address<input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} /></label>

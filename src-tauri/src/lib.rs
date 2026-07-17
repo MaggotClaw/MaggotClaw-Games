@@ -188,6 +188,77 @@ async fn post_discord_webhook(url: String, content: String) -> Result<(), String
     Ok(())
 }
 
+fn discord_api_url(path: &str) -> Result<url::Url, String> {
+    let full = format!("https://discord.com/api/v10/{path}");
+    url::Url::parse(&full).map_err(|_| "The Discord address is invalid.".to_string())
+}
+
+/// Reads recent messages from one Discord channel using the owner's bot key.
+/// Talks only to discord.com and returns the raw message list.
+#[tauri::command]
+async fn fetch_discord_messages(
+    bot_token: String,
+    channel_id: String,
+    limit: u8,
+) -> Result<Value, String> {
+    if !channel_id.chars().all(|c| c.is_ascii_digit()) || channel_id.is_empty() {
+        return Err("The channel ID must be a number.".to_string());
+    }
+    let capped = limit.clamp(1, 100);
+    let endpoint = discord_api_url(&format!("channels/{channel_id}/messages?limit={capped}"))?;
+    let response = reqwest::Client::new()
+        .get(endpoint)
+        .header("authorization", format!("Bot {}", bot_token.trim()))
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|_| "Discord could not be reached.".to_string())?;
+    let status = response.status();
+    let value: Value = response
+        .json()
+        .await
+        .map_err(|_| "Discord returned an unreadable response.".to_string())?;
+    if !status.is_success() {
+        return Err(match status.as_u16() {
+            401 => "Discord rejected the bot key. Check it in Settings.".to_string(),
+            403 => "The bot is not allowed into that channel. Invite it to the server and give it access.".to_string(),
+            code => format!("Discord refused the request ({code})."),
+        });
+    }
+    Ok(value)
+}
+
+/// Posts a message to a channel as the bot (used for sending unlock codes back).
+#[tauri::command]
+async fn post_discord_bot_message(
+    bot_token: String,
+    channel_id: String,
+    content: String,
+) -> Result<(), String> {
+    if !channel_id.chars().all(|c| c.is_ascii_digit()) || channel_id.is_empty() {
+        return Err("The channel ID must be a number.".to_string());
+    }
+    if content.trim().is_empty() || content.len() > 1900 {
+        return Err("The message must be between 1 and 1900 characters.".to_string());
+    }
+    let endpoint = discord_api_url(&format!("channels/{channel_id}/messages"))?;
+    let response = reqwest::Client::new()
+        .post(endpoint)
+        .header("authorization", format!("Bot {}", bot_token.trim()))
+        .json(&serde_json::json!({ "content": content }))
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|_| "Discord could not be reached.".to_string())?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Discord did not accept the message ({}).",
+            response.status().as_u16()
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn openai_transcribe(audio: Vec<u8>, mime_type: String) -> Result<String, String> {
     if audio.is_empty() {
@@ -345,6 +416,8 @@ pub fn run() {
             fetch_latest_release,
             open_url,
             post_discord_webhook,
+            fetch_discord_messages,
+            post_discord_bot_message,
             has_openai_api_key,
             save_openai_api_key,
             openai_transcribe,
