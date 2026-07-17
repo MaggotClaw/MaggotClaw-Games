@@ -72,7 +72,7 @@ async function openCompanionWindow(): Promise<void> {
     title: "MaggotClaw Voice Companion",
     // Wide enough that the extra companion-only Close (✕) clears the oval's
     // rounded right end instead of being clipped by it.
-    width: 634,
+    width: 690,
     height: 96,
     resizable: true,
     decorations: false,

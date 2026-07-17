@@ -60,7 +60,10 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
       safe(() => appWindow.setDecorations(false));
       safe(() => appWindow.setShadow(false));
       safe(() => appWindow.setResizable(true));
-      safe(() => appWindow.setSize(new LogicalSize(566, 96)));
+      // The companion window is wider: its extra Close button needs room to
+      // clear the oval's rounded right end. This runs on a timer, so it must
+      // match the width the window was created with or it undoes the fix.
+      safe(() => appWindow.setSize(new LogicalSize(companion ? 690 : 566, 96)));
       safe(() => appWindow.setAlwaysOnTop(true));
     };
     applyCompact();
