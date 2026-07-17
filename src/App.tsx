@@ -789,7 +789,7 @@ export function App() {
   if (screen === "directions") {
     return <main className="app-shell directions-shell">
       <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Directions</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
-      <section className="projects-heading"><h1>Finding your way around</h1><p>What each part of MaggotClaw Games does.</p></section>
+      <section className="projects-heading"><h1>Finding Your Way Around</h1><p>What each part of MaggotClaw Games does.</p></section>
       <section className="directions-grid">
         <article><h2>Reader Mode</h2><p>The book itself. Pick a chapter, then choose Narrated (she reads to you, sentence by sentence) or Read myself (a normal book page). Locked chapters are not released yet. Press Comment while reading to record a note tied to the exact sentence.</p></article>
         <article><h2>Voice Companion</h2><p>Talk out loud and your words are typed into Claude or Codex for you. The little bar floats above the AI program: microphone to start, + to add time, ➤ to send now, ■ to stop, ✕ to close.</p></article>
@@ -829,7 +829,7 @@ export function App() {
   if (screen === "projects") {
     return <main className="app-shell projects-list-shell">
       <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">PROJECTS</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
-      <section className="projects-heading"><h1>Your projects</h1><p>Select a project to open its local workspace and available actions.</p></section>
+      <section className="projects-heading"><h1>Your Projects</h1><p>Select a project to open its local workspace and available actions.</p></section>
       <section className="project-tiles"><button className="project-tile" onClick={openLongRotWorkspace}><img className="project-placeholder project-icon-image" src="/long-rot-icon.png" alt="The Long Rot" /><span><strong>The Long Rot</strong><small>Local workspace ready · Dropbox connection needs attention</small></span><span>Open →</span></button><button className="project-tile project-zero-tile" onClick={() => setScreen("project-zero")}><img className="project-placeholder project-icon-image" src="/project-zero-icon.svg" alt="Project Zero Author" /><span><strong>Project Zero Author</strong><small>Project added · Local workspace and connection not configured yet</small></span><span>Open →</span></button></section>
     </main>;
   }
@@ -837,7 +837,7 @@ export function App() {
   if (screen === "project-zero") {
     return <main className="app-shell project-shell">
       <header className="topbar"><button className="text-button" onClick={() => setScreen("projects")}>← Back</button><span className="eyebrow">PROJECT ZERO AUTHOR</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
-      <section className="project-heading"><div><p className="eyebrow">PROJECT ADDED</p><h1>Project Zero Author</h1><p>This project is selectable. Its local filing structure and remote source still need to be configured.</p></div><span className="role-badge">{roleLabel(role)}</span></section>
+      <section className="project-heading"><div><p className="eyebrow">PROJECT ADDED</p><h1>Project Zero Author</h1><p>This project is selectable. Its local filing structure and remote source still need to be configured.</p></div></section>
       <section className="workspace-card"><div><span>Local workspace</span><strong>Not prepared</strong><small>No Project Zero Author files have been created or changed.</small></div><div><span>Remote files</span><strong>Not connected</strong><small>No Dropbox location or other source has been assigned.</small></div><div><span>Project actions</span><strong>Safely locked</strong><small>Download and upload stay unavailable until the project source is explicitly configured.</small></div></section>
       <section className="workspace-actions"><button disabled>Prepare Workspace</button><button disabled>Download or Update</button>{canPerform(role, "review") && <button disabled>Review Changes</button>}{canPerform(role, "upload") && <button disabled>Upload Approved</button>}</section>
       <footer className="safe-status">Project Zero Author has been added to the app. Nothing was synchronized.</footer>
@@ -847,7 +847,7 @@ export function App() {
   if (screen === "project-review") {
     return <main className="app-shell project-shell">
       <header className="topbar"><button className="text-button" onClick={() => setScreen("project-workspace")}>← Back</button><span className="eyebrow">REVIEW QUEUE</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
-      <section className="projects-heading"><h1>Proposed changes</h1><p>Nothing is waiting for review yet. Future AI and human drafts will appear here before anything can be approved for upload.</p></section>
+      <section className="projects-heading"><h1>Proposed Changes</h1><p>Nothing is waiting for review yet. Future AI and human drafts will appear here before anything can be approved for upload.</p></section>
       <section className="empty-state"><strong>No proposed changes</strong><p>Dropbox remains unchanged.</p></section>
     </main>;
   }
@@ -859,11 +859,11 @@ export function App() {
   if (screen === "project-workspace") {
     return <main className="app-shell project-shell">
       <header className="topbar"><button className="text-button" onClick={() => setScreen("projects")}>← Back</button><span className="eyebrow">LOCAL PROJECT WORKSPACE</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
-      <section className="project-heading"><div><p className="eyebrow">THE LONG ROT</p><h1>Project workspace</h1><p>Dropbox stays the shared source. The AI works from safe copies on this computer.</p></div><span className="role-badge">{roleLabel(role)}</span></section>
+      <section className="project-heading"><div><p className="eyebrow">THE LONG ROT</p><h1>Project Workspace</h1><p>Dropbox stays the shared source. The AI works from safe copies on this computer.</p></div></section>
       <section className="workspace-card">
         <div><span>Local workspace</span><strong>{workspace?.initialized ? "Ready" : "Not prepared yet"}</strong><small>{workspace?.workspacePath || "The standard MaggotClaw Games Projects folder will be used."}</small></div>
         <div><span>Files downloaded</span><strong>{workspace?.downloadedFiles || 0}</strong><small>{workspace?.pendingBinaryFiles || 0} Word, PDF, image, or other binary files waiting for expanded MCP download support.<br/>Last completed file save: {formatWorkspaceTime(workspace?.lastDownloadAt || null)}</small></div>
-        <div><span>Dropbox uploads</span><strong>Disabled</strong><small>No button or command in this build can upload, replace, move, or delete a Dropbox file.</small></div>
+        <div><span>Dropbox Uploads</span><strong>{canPerform(role, "manage") ? "Owner Only" : "Locked"}</strong><small>{canPerform(role, "manage") ? "Upload Approved sends everything in 05 Approved Uploads to Dropbox." : "Uploads run from the owner\u2019s account."}</small></div>
       </section>
       {workspaceProgress && <section className="download-progress"><strong>{workspaceProgress.stage}</strong><p>{workspaceProgress.completed} of {workspaceProgress.total || "?"} text files saved · {workspaceProgress.skipped} other files recorded</p></section>}
       <section className="workspace-actions">
@@ -882,12 +882,12 @@ export function App() {
   }
 
   if (screen === "voice-targets") {
-    return <main className="app-shell target-screen"><header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">VOICE COMPANION</span><span>{readerName}</span></header><section className="library-heading"><div><h2>Choose the program</h2><p>The companion controls the normal Windows program you already use.</p></div></section><section className="target-grid"><button className="target-card available" onClick={() => openVoiceTarget("claude")}><strong>Claude</strong><small>Available now</small></button><button className="target-card available" onClick={() => openVoiceTarget("codex")}><strong>Codex</strong><small>Available now</small></button><button className="target-card" disabled><strong>ChatGPT</strong><small>Coming later</small></button></section></main>;
+    return <main className="app-shell target-screen"><header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Voice Companion</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header><section className="library-heading"><div><h2>Choose the program</h2><p>The companion controls the normal Windows program you already use.</p></div></section><section className="home-toolbar page"><button className="pill-button chip" onClick={() => setScreen("settings")}>Voice Settings</button></section><section className="target-grid"><button className="target-card available" onClick={() => openVoiceTarget("claude")}><strong>Claude</strong><small>Available now</small></button><button className="target-card available" onClick={() => openVoiceTarget("codex")}><strong>Codex</strong><small>Available now</small></button><button className="target-card" disabled><strong>ChatGPT</strong><small>Coming later</small></button></section></main>;
   }
 
   if (screen === "comments") {
     return <main className="app-shell comments-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("library")}>← Back</button><span className="eyebrow">MY COMMENTS</span><span>{readerName}</span></header>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("library")}>← Back</button><span className="eyebrow">My Comments</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
       <section className="comments-heading"><div><h1>Saved Comments</h1><p>{savedComments.length} saved safely on this device.</p></div><button onClick={exportComments} disabled={!savedComments.length}>Save comments file</button><button className="primary" disabled={!savedComments.length} onClick={async () => {
         setStatus("Sending comments to the owner…");
         let sent = 0;
@@ -943,7 +943,7 @@ ${item.transcriptionConfirmed}`.slice(0, 1800);
         <header className="topbar">
           <button className="text-button" onClick={closeReader}>← Back</button>
           <span className="eyebrow">The Long Rot</span>
-          <span className="status-dot" aria-label={status}>{status}</span>
+          <span className="who-chip">{readerName} · {roleLabel(role)}</span>
         </header>
         <section className="reader-heading">
           <p className="eyebrow">Chapter</p>
@@ -1141,7 +1141,7 @@ function RequestAccess({ role, code, onSend, onCancel }: { role: ProjectRole; co
   }
 
   return <main className="app-shell settings-panel">
-    <BrandLogo compact /><p className="eyebrow">REQUEST ACCESS</p><h1>Ask for more access</h1>
+    <BrandLogo compact /><p className="eyebrow">REQUEST ACCESS</p><h1>Ask For More Access</h1>
     <p>You are a <strong>{roleLabel(role)}</strong>. Your request goes to the owner for approval — access is never granted automatically.</p>
     <label>Access you're requesting<select value={requested} onChange={(event) => setRequested(event.target.value as ProjectRole)}>
       {options.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
@@ -1178,6 +1178,8 @@ function OwnerDashboard({ requests, onDecide, onBack }: { requests: AccessReques
   }
 
   const [inbox, setInbox] = useState<DiscordRequestMessage[]>([]);
+  // The dashboard checks Discord by itself the moment it opens.
+  useEffect(() => { if (discordReadingConfigured()) void checkDiscord(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   const [inboxBusy, setInboxBusy] = useState(false);
   const [inboxNote, setInboxNote] = useState("");
 
@@ -1213,11 +1215,11 @@ function OwnerDashboard({ requests, onDecide, onBack }: { requests: AccessReques
   }
 
   return <main className="app-shell dashboard-shell">
-    <header className="topbar"><button className="text-button" onClick={onBack}>← Back</button><span className="eyebrow">OWNER DASHBOARD</span><span>Author / Owner</span></header>
-    <section className="projects-heading"><h1>Things that need you</h1><p>Approvals and communications routed to the owner. Approving a request raises that person's role immediately.</p></section>
+    <header className="topbar"><button className="text-button" onClick={onBack}>← Back</button><span className="eyebrow">Owner Dashboard</span><span className="who-chip">{(localStorage.getItem("long-rot-reader-name") || "Owner")} · Author / Owner</span></header>
+    <section className="projects-heading"><h1>Things That Need You</h1><p>Approvals and communications routed to the owner. Approving a request raises that person's role immediately.</p></section>
 
     <section className="dash-section">
-      <h2>Requests from Discord</h2>
+      <h2>Requests From Discord</h2>
       {discordReadingConfigured()
         ? <>
             <p className="board-hint">Pulls new access requests straight out of your Discord channel. Approving posts the unlock code back automatically.</p>
@@ -1240,7 +1242,7 @@ function OwnerDashboard({ requests, onDecide, onBack }: { requests: AccessReques
     </section>
 
     <section className="dash-section">
-      <h2>Approve someone on another computer</h2>
+      <h2>Approve Someone On Another Computer</h2>
       <p className="board-hint">Paste the request code they sent you. Approving produces an unlock code to send back — that is what raises their access on their machine.</p>
       <label>Their request code<textarea rows={3} value={pasted} placeholder="MCG-REQ-…" onChange={(event) => { setPasted(event.target.value); setCodeError(""); }} /></label>
       {codeError && <p className="update-status warn">{codeError}</p>}
@@ -1263,7 +1265,7 @@ function OwnerDashboard({ requests, onDecide, onBack }: { requests: AccessReques
     </section>
 
     <section className="dash-section">
-      <h2>Awaiting approval <span className="pending-badge">{requests.length}</span></h2>
+      <h2>Awaiting Approval <span className="pending-badge">{requests.length}</span></h2>
       {requests.length === 0
         ? <div className="empty-state"><strong>Nothing waiting</strong><p>When someone requests more access, it appears here.</p></div>
         : <ul className="request-list">{requests.map((r) => <li key={r.id} className="request-card">
@@ -1313,7 +1315,7 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
     <button className="text-button mode-back" onClick={onCancel}>← Back</button>
     <BrandLogo compact /><p className="eyebrow">Profile settings</p><h1>Voice Companion</h1>
     <p>These settings are saved for {profile} on this computer.</p>
-    <label>Talk to<select value={voice.target} onChange={(event) => updateVoice({ target: event.target.value as VoiceSettings["target"] })}><option value="auto">Auto (whichever is open)</option><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
+    <label>Talk to<select value={voice.target} onChange={(event) => updateVoice({ target: event.target.value as VoiceSettings["target"] })}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
     <label>Send after silence<input type="number" min="0.5" max="30" step="0.5" value={voice.silenceSeconds} onChange={(event) => updateVoice({ silenceSeconds: Number(event.target.value) })} /></label>
     <label>Add Time button<input type="number" min="1" max="120" step="1" value={voice.addSeconds} onChange={(event) => updateVoice({ addSeconds: Number(event.target.value) })} /></label>
     <div className="voice-choice"><span>Reading voice</span><strong>Cori Neural · Local</strong><small>Natural UK English. Runs privately on this computer with no API charge.</small></div>

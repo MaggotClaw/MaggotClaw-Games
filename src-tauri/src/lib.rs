@@ -139,9 +139,10 @@ async fn fetch_latest_release(repo: String) -> Result<Value, String> {
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
     // mailto: opens the user's email program with the share link prefilled.
-    if url.starts_with("mailto:") && !url.contains(['&','|','^','<','>','"']) {
-        return std::process::Command::new("cmd")
-            .args(["/C", "start", "", &url])
+    if url.starts_with("mailto:") && !url.contains(['|','^','<','>','"']) {
+        // rundll32 takes the address directly — no shell, so & in the link is safe.
+        return std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", &url])
             .spawn()
             .map(|_| ())
             .map_err(|_| "The email program could not be opened.".to_string());

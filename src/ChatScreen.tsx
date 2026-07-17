@@ -58,7 +58,7 @@ export function ChatScreen({ role, name, onBack, onOpenDiscord }: { role: Projec
     <header className="topbar">
       <button className="text-button" onClick={onBack}>← Main Menu</button>
       <span className="eyebrow">Messages</span>
-      <span>{name} · {roleLabel(role)}</span>
+      <span className="who-chip">{name} · {roleLabel(role)}</span>
     </header>
 
     <section className="chat-body">
@@ -76,8 +76,14 @@ export function ChatScreen({ role, name, onBack, onOpenDiscord }: { role: Projec
           </li>)}
         </ul>
 
-        <div className="chat-rooms-head"><h2>Direct messages</h2></div>
-        <p className="chat-empty-note">People you can message will appear here once messaging is connected.</p>
+        <div className="chat-rooms-head"><h2>Direct Messages</h2></div>
+        <button className="primary tiny" onClick={() => {
+          const text = window.prompt("What do you want to tell MaggotClaw?");
+          if (!text || !text.trim()) return;
+          void import("./discordLink").then(({ sendRequestToDiscord }) =>
+            sendRequestToDiscord(`**Message to MaggotClaw** from ${name}:\n${text.trim().slice(0, 1700)}`)
+          );
+        }}>Message MaggotClaw</button>
 
         <div className="chat-rooms-head"><h2>Who's on</h2></div>
         <ul className="chat-presence">

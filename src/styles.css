@@ -574,3 +574,11 @@ select option { background: #0b1210; color: var(--mc-white); }
 .file-window .doc-word { margin-top: 10px; }
 .explorer-body { grid-template-columns: 1fr; }
 .explorer-list { max-width: 900px; }
+
+
+/* ---- final trim ---- */
+.pill-button, .pill-button.chip { padding: 6px 12px; font-size: .8rem; }
+.topbar .text-button { padding: 6px 12px; font-size: .8rem; }
+.who-chip { padding: 5px 11px; font-size: .78rem; }
+.dash-section label { display: flex; flex-direction: column; gap: 8px; }
+.dash-section textarea { max-width: 560px; min-height: 40px; height: 44px; margin-top: 6px; }
