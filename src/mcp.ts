@@ -19,6 +19,11 @@ export class LongRotMcpClient {
     return JSON.parse(content) as ProjectEntry[];
   }
 
+  // Owner-approved upload: writes a UTF-8 text file in place on Dropbox.
+  async writeText(path: string, content: string): Promise<void> {
+    await this.callTool("write_dropbox_text_file", { path, content, overwrite: true });
+  }
+
   async readText(path: string): Promise<string> {
     return this.callTool("read_dropbox_text_file", { path });
   }

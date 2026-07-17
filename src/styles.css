@@ -501,3 +501,64 @@ kbd { padding: 2px 7px; color: #2b241d; background: #fffaf0; border: 1px solid #
 .project-zero-placeholder { color: var(--mc-white); background: linear-gradient(145deg, #3a454c, #131a1e); border: 1px solid #829099; font-size: 20px; }
 .project-icon-note { margin-top: 16px; font-size: 13px; }
 @media (max-width: 700px) { .project-tile { grid-template-columns: 70px 1fr; } .project-tile > :last-child { grid-column: 2; } .project-placeholder { width: 66px; height: 66px; } }
+
+
+/* ---- 2026-07-17 polish pass ---- */
+/* One pill shape for the header controls, chip variant filled green. */
+.pill-button { display: inline-flex; align-items: center; gap: 8px; padding: 11px 20px; color: var(--mc-white); background: #101a17; border: 1px solid #2c8d75; border-radius: 999px; font-weight: 700; cursor: pointer; }
+.pill-button:hover { border-color: var(--mc-green); box-shadow: 0 0 10px #00efb144; }
+.pill-button.chip { color: #00140e; background: var(--mc-green); border-color: var(--mc-green); }
+.who-chip { padding: 7px 14px; color: var(--mc-green-soft); background: #0c1512; border: 1px solid #2c8d75; border-radius: 999px; font-weight: 700; font-size: .9rem; white-space: nowrap; }
+
+/* Radio bubbles for choosing a role. */
+.role-picker { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; padding: 14px; border: 1px solid #24352f; border-radius: 14px; }
+.role-picker legend { padding: 0 8px; color: var(--mc-muted); font-size: .9rem; }
+.role-option { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #1e2c28; border-radius: 12px; cursor: pointer; background: #0c1512; }
+.role-option input { position: absolute; opacity: 0; }
+.role-option .role-bubble { flex: 0 0 auto; width: 18px; height: 18px; border: 2px solid #4a5a55; border-radius: 50%; }
+.role-option.picked { border-color: var(--mc-green); background: #12211c; }
+.role-option.picked .role-bubble { border-color: var(--mc-green); background: radial-gradient(circle, var(--mc-green) 0 45%, transparent 50%); }
+.role-option small { display: block; color: var(--mc-muted); }
+.role-picker.compact .role-option { padding: 7px 12px; }
+
+/* Dark form controls everywhere — no more white boxes. */
+select, textarea { color: var(--mc-white); background: #0b1210; border: 1px solid #2c8d75; border-radius: 10px; padding: 9px 12px; }
+select:focus, textarea:focus { outline: none; border-color: var(--mc-green); box-shadow: 0 0 0 2px #00efb133; }
+select option { background: #0b1210; color: var(--mc-white); }
+
+/* Green copy/share buttons wherever they appear. */
+.share-actions .primary, .code-actions .primary, .primary.tiny { color: #00140e; background: var(--mc-green); border: 0; border-radius: 10px; font-weight: 800; cursor: pointer; }
+
+/* Explorer: compact chrome so the reading pane gets the room. */
+.explorer-shell { padding: 10px 16px; gap: 8px; }
+.explorer-shell .topbar { font-size: .85rem; }
+.explorer-tabs > button { padding: 5px 12px; font-size: .85rem; }
+.explorer-tabs .ask-anything input { padding: 6px 10px; font-size: .85rem; }
+.explorer-tabs .ask-anything .primary { padding: 6px 12px; font-size: .85rem; }
+.list-filter { padding: 5px 10px; font-size: .82rem; }
+.explorer-group h3 { font-size: .8rem; margin: 3px 0; }
+.explorer-group li button { padding: 5px 8px; font-size: .85rem; }
+.group-toggle button { padding: 5px 10px; font-size: .82rem; }
+.explorer-body { grid-template-columns: minmax(230px, 300px) 1fr; }
+
+/* Word documents rendered with their own formatting. */
+.doc-word { color: #e7ece9; font: 1rem/1.65 Georgia, serif; }
+.doc-word h1, .doc-word h2, .doc-word h3 { color: var(--mc-white); }
+.doc-word img { max-width: 100%; }
+.doc-word table { border-collapse: collapse; } .doc-word td, .doc-word th { border: 1px solid #24352f; padding: 4px 8px; }
+
+/* Local chat log. */
+.chat-log { list-style: none; margin: 0; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; width: 100%; align-self: start; }
+.chat-log li { padding: 10px 12px; background: #0d1614; border: 1px solid #1e2c28; border-radius: 10px; }
+.chat-log .chat-author { color: var(--mc-green-soft); font-weight: 800; margin-right: 8px; }
+.chat-log time { color: var(--mc-muted); font-size: .72rem; }
+.chat-log p { margin: 4px 0 0; }
+.chat-messages { place-items: stretch; overflow-y: auto; }
+.chat-messages:has(.chat-placeholder) { display: grid; place-items: center; }
+
+/* Directions screen. */
+.directions-shell { display: flex; flex-direction: column; gap: 14px; }
+.directions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.directions-grid article { padding: 16px 18px; background: #0d1614; border: 1px solid #1e2c28; border-radius: 14px; }
+.directions-grid h2 { margin: 0 0 6px; color: var(--mc-green-soft); font: 700 1.05rem Georgia, serif; }
+.directions-grid p { margin: 0; color: #cdd7d3; line-height: 1.55; }

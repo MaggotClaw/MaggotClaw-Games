@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { BrowserSpeechPlayer } from "./speech";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { compareVersions, parseDoc, type ParsedDoc, type ProjectDocument } from "./projectDocs";
 import { describeDoc, resolveQuickOpen } from "./quickOpen";
@@ -59,6 +60,7 @@ export function ProjectExplorer({ onBack }: { onBack: () => void }) {
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<ParsedDoc | null>(null);
   const [content, setContent] = useState("");
+  const [contentHtml, setContentHtml] = useState<string | null>(null);
   const [contentBusy, setContentBusy] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[] | null>(null);
@@ -72,9 +74,14 @@ export function ProjectExplorer({ onBack }: { onBack: () => void }) {
   const [brainFilter, setBrainFilter] = useState("");
 
   useEffect(() => {
-    void invoke<ProjectDocument[]>("list_project_documents")
-      .then((list) => setDocs(list.map(parseDoc)))
-      .catch(() => setError("The local files could not be listed. Download the project first."));
+    void (async () => {
+      const list = await invoke<ProjectDocument[]>("list_project_documents");
+      const wordFiles = await invoke<string[]>("list_workspace_docx").catch(() => [] as string[]);
+      for (const relative of wordFiles) {
+        list.push({ dropboxPath: `local:${relative}`, localRelativePath: relative, revisionId: null, byteCount: 0, status: "downloaded" });
+      }
+      setDocs(list.map(parseDoc));
+    })().catch(() => setError("The local files could not be listed. Download the project first."));
   }, []);
 
   const downloaded = docs.filter((parsed) => parsed.doc.status === "downloaded");
@@ -149,12 +156,52 @@ export function ProjectExplorer({ onBack }: { onBack: () => void }) {
     setSelected(parsed);
     setHits(null);
     setContentBusy(true);
+    setContentHtml(null);
     try {
-      setContent(await invoke<string>("read_project_document", { localRelativePath: parsed.doc.localRelativePath }));
+      if (/\.docx$/i.test(parsed.fileName)) {
+        const bytes = await invoke<number[]>("read_project_document_bytes", { localRelativePath: parsed.doc.localRelativePath });
+        const buffer = new Uint8Array(bytes).buffer;
+        const mammoth = await import("mammoth/mammoth.browser");
+        setContent((await mammoth.extractRawText({ arrayBuffer: buffer })).value.trim());
+        setContentHtml((await mammoth.convertToHtml({ arrayBuffer: buffer })).value);
+      } else {
+        setContent(await invoke<string>("read_project_document", { localRelativePath: parsed.doc.localRelativePath }));
+      }
     } catch {
       setContent("This file could not be opened from the local workspace.");
     } finally {
       setContentBusy(false);
+    }
+  }
+
+  // Reads whatever text is highlighted in the viewer out loud with the same
+  // voice as Reader Mode. Reading nothing highlighted reads nothing.
+  const voice = useRef(new BrowserSpeechPlayer());
+  useEffect(() => () => voice.current.stop(), []);
+  const [speaking, setSpeaking] = useState(false);
+  function readSelection() {
+    if (speaking) { voice.current.stop(); setSpeaking(false); return; }
+    const text = window.getSelection()?.toString().trim();
+    if (!text) return;
+    setSpeaking(true);
+    voice.current.speak(text.slice(0, 4000), 1, () => setSpeaking(false), () => setSpeaking(false));
+  }
+
+  // Word files are sealed packages, so their text is pulled out once and kept
+  // in memory; after that, searching them costs nothing extra.
+  const docxTextCache = useRef(new Map<string, string>());
+  async function docxText(relative: string): Promise<string> {
+    const cached = docxTextCache.current.get(relative);
+    if (cached !== undefined) return cached;
+    try {
+      const bytes = await invoke<number[]>("read_project_document_bytes", { localRelativePath: relative });
+      const mammoth = await import("mammoth/mammoth.browser");
+      const text = (await mammoth.extractRawText({ arrayBuffer: new Uint8Array(bytes).buffer })).value;
+      docxTextCache.current.set(relative, text);
+      return text;
+    } catch {
+      docxTextCache.current.set(relative, "");
+      return "";
     }
   }
 
@@ -165,7 +212,18 @@ export function ProjectExplorer({ onBack }: { onBack: () => void }) {
     setSearchBusy(true);
     setSelected(null);
     try {
-      setHits(await invoke<SearchHit[]>("search_project_documents", { query: value }));
+      const textHits = await invoke<SearchHit[]>("search_project_documents", { query: value });
+      const needle = value.toLowerCase();
+      const wordDocs = docs.filter((parsed) => /\.docx$/i.test(parsed.fileName) && parsed.doc.status === "downloaded");
+      for (const parsed of wordDocs) {
+        const text = await docxText(parsed.doc.localRelativePath);
+        const count = text.toLowerCase().split(needle).length - 1;
+        if (!count) continue;
+        const line = text.split(/[\r\n]+/).find((candidate) => candidate.toLowerCase().includes(needle)) ?? "";
+        textHits.push({ localRelativePath: parsed.doc.localRelativePath, matchCount: count, snippet: line.trim().slice(0, 140) });
+      }
+      textHits.sort((left, right) => right.matchCount - left.matchCount);
+      setHits(textHits);
     } catch {
       setHits([]);
     } finally {
@@ -356,8 +414,11 @@ export function ProjectExplorer({ onBack }: { onBack: () => void }) {
           <div className="doc-viewer-head">
             <div><strong>{selected.title}</strong><small>{selected.fileName}</small></div>
             <span className="doc-version">{!contentBusy && `${wordCount(content).toLocaleString()} words`}{selected.version ? ` · v${selected.version}` : ""}</span>
+            <button className="text-button" onClick={readSelection} title="Highlight some text first, then press this to hear it">{speaking ? "■ Stop reading" : "🔊 Read highlighted"}</button>
           </div>
-          <pre>{contentBusy ? "Opening…" : content}</pre>
+          {contentHtml
+            ? <div className="doc-word" dangerouslySetInnerHTML={{ __html: contentHtml }} />
+            : <pre>{contentBusy ? "Opening…" : content}</pre>}
         </div> : <div className="explorer-hint">
           <h2>Your project, organized</h2>
           <p>Pick a file to read it, browse <strong>Chapters</strong> to see what's done, open the <strong>Codex</strong> for characters and places, or use <strong>Ask anything</strong> to find every mention of something — no AI needed.</p>

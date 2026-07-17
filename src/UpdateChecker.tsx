@@ -10,6 +10,7 @@ export function UpdateChecker({ configurable = false }: { configurable?: boolean
   const [result, setResult] = useState<UpdateResult | null>(null);
   const repo = getUpdateRepo();
   const [copied, setCopied] = useState(false);
+  const [installing, setInstalling] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -65,7 +66,13 @@ export function UpdateChecker({ configurable = false }: { configurable?: boolean
     {result?.state === "available" && <div className="update-available">
       <span className="update-status new">Update ready: version {result.info.version}</span>
       {result.info.url
-        ? <button className="primary tiny" onClick={() => void openDownload(result.info.url!)}>Download installer</button>
+        ? <button className="primary tiny" disabled={installing} onClick={() => {
+            setInstalling(true);
+            void import("@tauri-apps/api/core")
+              .then(({ invoke }) => invoke("download_and_install_update", { url: result.info.url }))
+              .catch(() => openDownload(result.info.url!))
+              .finally(() => setInstalling(false));
+          }}>{installing ? "Downloading…" : "Download & install"}</button>
         : <button className="primary tiny" onClick={() => void openDownload(result.info.page)}>Open release page</button>}
       {result.info.notes && <p className="update-notes">{result.info.notes.slice(0, 400)}</p>}
     </div>}

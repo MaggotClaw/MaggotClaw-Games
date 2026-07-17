@@ -1,4 +1,4 @@
-export type ProjectRole = "reader" | "contributor" | "editor" | "administrator";
+export type ProjectRole = "reader" | "contributor" | "reviewer" | "editor" | "support" | "administrator";
 export type ProjectAction = "download" | "review" | "propose" | "upload" | "manage";
 
 // Mapped to "82 Codex, Roles, Duties & Authority": readers/contributors (L1) may
@@ -8,33 +8,61 @@ export type ProjectAction = "download" | "review" | "propose" | "upload" | "mana
 const roleActions: Record<ProjectRole, ReadonlySet<ProjectAction>> = {
   reader: new Set(["download", "propose"]),
   contributor: new Set(["download", "propose"]),
+  reviewer: new Set(["download", "review", "propose"]),
   editor: new Set(["download", "review", "propose", "upload"]),
+  support: new Set(["download", "review", "propose", "manage"]),
   administrator: new Set(["download", "review", "propose", "upload", "manage"])
 };
 
 const ROLE_LABELS: Record<ProjectRole, string> = {
   reader: "Reader",
   contributor: "Contributor",
+  reviewer: "Reviewer",
   editor: "Editor / Maintainer",
+  support: "Technical Support",
   administrator: "Author / Owner"
 };
 
 // Ascending authority — used to order requestable upgrades and compare levels.
-export const ROLE_ORDER: ProjectRole[] = ["reader", "contributor", "editor", "administrator"];
+export const ROLE_ORDER: ProjectRole[] = ["reader", "contributor", "reviewer", "editor", "support", "administrator"];
 
 export function roleLabel(role: ProjectRole): string {
   return ROLE_LABELS[role] ?? role;
 }
 
-export function profileRole(profileName: string): ProjectRole {
+const ALL_ROLES: ProjectRole[] = ["reader", "contributor", "reviewer", "editor", "support", "administrator"];
+
+// The owner (or support) can temporarily see the app as a lower role to judge
+// what each kind of person experiences. Never changes the real stored role.
+export function getViewAs(): ProjectRole | null {
+  try {
+    const value = localStorage.getItem("mcg-view-as");
+    return (ALL_ROLES as string[]).includes(value ?? "") ? (value as ProjectRole) : null;
+  } catch { return null; }
+}
+
+export function setViewAs(role: ProjectRole | null): void {
+  try {
+    if (role) localStorage.setItem("mcg-view-as", role);
+    else localStorage.removeItem("mcg-view-as");
+  } catch { /* ignore */ }
+}
+
+export function realProfileRole(profileName: string): ProjectRole {
   // The local owner/author access for this machine.
   if (profileName === "Test Profile") return "administrator";
   const saved = localStorage.getItem(`mcg-profile-role:${profileName}`);
-  return saved === "reader" || saved === "contributor" || saved === "editor" || saved === "administrator"
-    ? saved
+  return (ALL_ROLES as string[]).includes(saved ?? "")
+    ? (saved as ProjectRole)
     // Everyone new starts as a Reader. Higher authority is granted by the owner,
     // never self-assigned (see the Roles & Authority and Approval Workflow codices).
     : "reader";
+}
+
+export function profileRole(profileName: string): ProjectRole {
+  const real = realProfileRole(profileName);
+  if (!canPerform(real, "manage")) return real;
+  return getViewAs() ?? real;
 }
 
 export function setProfileRole(profileName: string, role: ProjectRole): void {

@@ -259,6 +259,35 @@ async fn post_discord_bot_message(
     Ok(())
 }
 
+/// Downloads a GitHub release installer and launches it, so updating never
+/// leaves the app for a browser. GitHub hosts only.
+#[tauri::command]
+async fn download_and_install_update(url: String) -> Result<(), String> {
+    let parsed = url::Url::parse(&url).map_err(|_| "The download address is invalid.".to_string())?;
+    let host = parsed.host_str().unwrap_or("");
+    let allowed = host == "github.com" || host.ends_with(".githubusercontent.com");
+    if parsed.scheme() != "https" || !allowed {
+        return Err("Only GitHub download addresses are allowed.".to_string());
+    }
+    let response = reqwest::Client::new()
+        .get(parsed)
+        .timeout(Duration::from_secs(600))
+        .send()
+        .await
+        .map_err(|_| "The download could not be started.".to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("The download failed ({}).", response.status().as_u16()));
+    }
+    let bytes = response.bytes().await.map_err(|_| "The download was interrupted.".to_string())?;
+    let path = std::env::temp_dir().join("MaggotClaw-Games-update-setup.exe");
+    std::fs::write(&path, &bytes).map_err(|_| "The installer could not be saved.".to_string())?;
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", path.to_string_lossy().as_ref()])
+        .spawn()
+        .map(|_| ())
+        .map_err(|_| "The installer could not be started.".to_string())
+}
+
 #[tauri::command]
 async fn openai_transcribe(audio: Vec<u8>, mime_type: String) -> Result<String, String> {
     if audio.is_empty() {
@@ -416,6 +445,7 @@ pub fn run() {
             fetch_latest_release,
             open_url,
             post_discord_webhook,
+            download_and_install_update,
             fetch_discord_messages,
             post_discord_bot_message,
             has_openai_api_key,
@@ -443,6 +473,9 @@ pub fn run() {
             project_workspace::read_project_document,
             project_workspace::read_project_document_bytes,
             project_workspace::list_workspace_docx,
+            project_workspace::list_approved_uploads,
+            project_workspace::read_approved_upload,
+            project_workspace::archive_approved_upload,
             project_workspace::search_project_documents
         ])
         .build(tauri::generate_context!())

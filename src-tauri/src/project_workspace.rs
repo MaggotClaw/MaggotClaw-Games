@@ -399,6 +399,50 @@ pub fn list_workspace_docx() -> Result<Vec<String>, String> {
     Ok(found)
 }
 
+/// Text files waiting in 05 Approved Uploads. Only what the owner placed there.
+#[tauri::command]
+pub fn list_approved_uploads() -> Result<Vec<String>, String> {
+    let root = workspace_root()?.join("05 Approved Uploads");
+    let mut found = Vec::new();
+    let mut stack = vec![root.clone()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if let Ok(relative) = path.strip_prefix(&root) {
+                found.push(relative.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    found.sort();
+    Ok(found)
+}
+
+#[tauri::command]
+pub fn read_approved_upload(local_relative_path: String) -> Result<String, String> {
+    let root = workspace_root()?;
+    let relative = checked_relative(&local_relative_path)?;
+    let full = root.join("05 Approved Uploads").join(relative);
+    fs::read_to_string(&full)
+        .map_err(|_| "That approved file could not be read as text. Word and other binary files cannot be uploaded yet.".to_string())
+}
+
+/// After a successful upload the file moves to 06 Exports/Uploaded so the
+/// approved folder only ever holds work still waiting to go.
+#[tauri::command]
+pub fn archive_approved_upload(local_relative_path: String) -> Result<(), String> {
+    let root = workspace_root()?;
+    let relative = checked_relative(&local_relative_path)?;
+    let from = root.join("05 Approved Uploads").join(&relative);
+    let to = root.join("06 Exports").join("Uploaded").join(&relative);
+    if let Some(parent) = to.parent() {
+        fs::create_dir_all(parent).map_err(|_| "The uploaded-archive folder could not be created.".to_string())?;
+    }
+    fs::rename(&from, &to).map_err(|_| "The uploaded file could not be archived.".to_string())
+}
+
 /// The exact local original text of one downloaded file.
 #[tauri::command]
 pub fn read_project_document(local_relative_path: String) -> Result<String, String> {
