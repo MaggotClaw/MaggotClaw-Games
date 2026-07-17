@@ -19,7 +19,13 @@ export function readerCopies(docs: ProjectDocument[]): ParsedDoc[] {
     const parsed = parseDoc(doc);
     if (parsed.typeCode !== "R" || parsed.chapter == null) continue;
     const existing = byChapter.get(parsed.chapter);
-    if (!existing || compareVersions(parsed.version, existing.version) > 0) {
+    const isWord = (item: ParsedDoc) => /\.docx$/i.test(item.fileName);
+    // The author's styled Word copy of a chapter always beats the plain text
+    // one; otherwise the newest version wins.
+    const wins = !existing
+      || (isWord(parsed) && !isWord(existing))
+      || (isWord(parsed) === isWord(existing) && compareVersions(parsed.version, existing.version) > 0);
+    if (wins) {
       byChapter.set(parsed.chapter, parsed);
     }
   }

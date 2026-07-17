@@ -441,6 +441,8 @@ pub fn run() {
             project_workspace::open_project_workspace,
             project_workspace::list_project_documents,
             project_workspace::read_project_document,
+            project_workspace::read_project_document_bytes,
+            project_workspace::list_workspace_docx,
             project_workspace::search_project_documents
         ])
         .build(tauri::generate_context!())

@@ -14,6 +14,7 @@ export interface Segment {
 }
 
 export interface DocumentRecord {
+  html?: string;
   id: string;
   path: string;
   name: string;

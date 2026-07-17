@@ -360,6 +360,45 @@ fn checked_relative(local_relative_path: &str) -> Result<PathBuf, String> {
     Ok(relative.to_path_buf())
 }
 
+/// Raw bytes of one workspace file — used for Word documents, which the
+/// frontend renders itself. Read-only, path-checked, originals only.
+#[tauri::command]
+pub fn read_project_document_bytes(local_relative_path: String) -> Result<Vec<u8>, String> {
+    let root = workspace_root()?;
+    let relative = checked_relative(&local_relative_path)?;
+    let full = root.join("01 Originals").join(relative);
+    fs::read(&full)
+        .map_err(|_| "That project file could not be read from the local workspace.".to_string())
+}
+
+/// Word documents sitting in 01 Originals (dropped in by hand or synced later).
+/// They never appear in the text manifest, so the shelf asks for them here.
+#[tauri::command]
+pub fn list_workspace_docx() -> Result<Vec<String>, String> {
+    let root = workspace_root()?.join("01 Originals");
+    let mut found = Vec::new();
+    let mut stack = vec![root.clone()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("docx"))
+            {
+                if let Ok(relative) = path.strip_prefix(&root) {
+                    found.push(relative.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+    }
+    found.sort();
+    Ok(found)
+}
+
 /// The exact local original text of one downloaded file.
 #[tauri::command]
 pub fn read_project_document(local_relative_path: String) -> Result<String, String> {

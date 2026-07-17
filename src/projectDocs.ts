@@ -26,11 +26,11 @@ export function parseDoc(doc: ProjectDocument): ParsedDoc {
   const parts = doc.localRelativePath.split(/[\\/]/);
   const fileName = parts[parts.length - 1];
   const folder = parts.length > 1 ? parts[0] : "Main folder";
-  const versionMatch = fileName.match(/v(\d+(?:\.\d+)*)\.txt$/i);
+  const versionMatch = fileName.match(/v(\d+(?:\.\d+)*)\.(?:txt|docx)$/i);
   const version = versionMatch ? versionMatch[1] : null;
 
   const chap = fileName.match(
-    /^C(\d+)-(A|B|R|P\d+)\s+Chapter\s+\d+\s+(Blueprint|Development|Draft|Reader Copy)(?:\s*-\s*(.+?))?\s*v[\d.]+\.txt$/i
+    /^C(\d+)-(A|B|R|P\d+)\s+Chapter\s+\d+\s+(Blueprint|Development|Draft|Reader Copy)(?:\s*-\s*(.+?))?\s*v[\d.]+\.(?:txt|docx)$/i
   );
   if (chap) {
     const raw = chap[2].toUpperCase();
@@ -48,12 +48,12 @@ export function parseDoc(doc: ProjectDocument): ParsedDoc {
     return { doc, fileName, folder, chapter: null, typeCode: "master", typeLabel: "Master Codex", title: "Master Codex", version, draftPart: null };
   }
 
-  const codex = fileName.match(/^(\d+)\s+Codex,\s*(.+?)\s*v[\d.]+\.txt$/i);
+  const codex = fileName.match(/^(\d+)\s+Codex,\s*(.+?)\s*v[\d.]+\.(?:txt|docx)$/i);
   if (codex) {
     return { doc, fileName, folder, chapter: null, typeCode: "codex", typeLabel: "Codex", title: codex[2].trim(), version, draftPart: null };
   }
 
-  const title = fileName.replace(/\.txt$/i, "").replace(/\s*v[\d.]+$/i, "").replace(/^\(|\)$/g, "").trim();
+  const title = fileName.replace(/\.(txt|docx)$/i, "").replace(/\s*v[\d.]+$/i, "").replace(/^\(|\)$/g, "").trim();
   return { doc, fileName, folder, chapter: null, typeCode: "other", typeLabel: "Other", title, version, draftPart: null };
 }
 

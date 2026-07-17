@@ -24,6 +24,19 @@ type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-e
 function BrandLogo({ compact = false }: { compact?: boolean }) {
   return <img className={compact ? "brand-logo compact" : "brand-logo"} src="/maggotclaw-modern.png" alt="MaggotClaw Games" />;
 }
+
+// The hub banner: the MaggotClaw mark with the app version tucked in its corner.
+function BannerWithVersion() {
+  const [version, setVersion] = useState("");
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) { setVersion("dev"); return; }
+    void import("@tauri-apps/api/app").then(({ getVersion }) => getVersion()).then(setVersion).catch(() => undefined);
+  }, []);
+  return <div className="banner-block">
+    <img className="brand-logo banner" src="/maggotclaw-modern.png" alt="MaggotClaw Games" />
+    {version && <span className="banner-version">v{version}</span>}
+  </div>;
+}
 const USER_ID = "primary-reader";
 const DEMO_TEXT = `Chapter 1\n\nThe rain had worked at the roof all night. By morning, every board in the house seemed to remember it.\n\nSilas stood at the window and watched the road disappear into Mourning Bend. He had promised himself he would not go back. The promise felt thinner in daylight.`;
 const defaultSettings: ConnectionSettings = {
@@ -232,6 +245,12 @@ export function App() {
     setStatus("Reading your local chapters…");
     try {
       const docs = await invoke<ProjectDocument[]>("list_project_documents");
+      // Word files dropped into 01 Originals join the shelf as first-class
+      // chapters (and outrank the plain-text copy of the same chapter).
+      const wordFiles = await invoke<string[]>("list_workspace_docx").catch(() => [] as string[]);
+      for (const relative of wordFiles) {
+        docs.push({ dropboxPath: `local:${relative}`, localRelativePath: relative, revisionId: null, byteCount: 0, status: "downloaded" });
+      }
       const shelf = readerCopies(docs);
       setShelf(shelf);
       const open = shelf.filter((item) => isChapterUnlocked(item.chapter, role, unlockedChapters)).length;
@@ -251,14 +270,26 @@ export function App() {
     setLoading(true);
     setStatus("Opening chapter…");
     try {
-      const raw = await invoke<string>("read_project_document", { localRelativePath: copy.doc.localRelativePath });
-      const content = unwrapHardLines(raw);
+      let content: string;
+      let html: string | undefined;
+      if (/\.docx$/i.test(copy.fileName)) {
+        // The author's styled Word file: extract clean text for narration and
+        // real formatting for the read-myself page.
+        const bytes = await invoke<number[]>("read_project_document_bytes", { localRelativePath: copy.doc.localRelativePath });
+        const buffer = new Uint8Array(bytes).buffer;
+        const mammoth = await import("mammoth/mammoth.browser");
+        content = (await mammoth.extractRawText({ arrayBuffer: buffer })).value.trim();
+        html = (await mammoth.convertToHtml({ arrayBuffer: buffer })).value;
+      } else {
+        content = unwrapHardLines(await invoke<string>("read_project_document", { localRelativePath: copy.doc.localRelativePath }));
+      }
       const hash = await contentHash(content);
       await enterDocument({
         id: `${copy.doc.dropboxPath}:${copy.doc.revisionId || hash}`,
         path: copy.doc.dropboxPath,
         name: copy.fileName,
         content,
+        html,
         contentHash: hash,
         segments: segmentDocument(content),
         retrievedAt: new Date().toISOString()
@@ -652,7 +683,7 @@ export function App() {
 
   if (screen === "home") {
     return <main className="app-shell home-shell">
-      <header className="hero"><div><BrandLogo compact /></div><div className="header-actions"><UpdateChecker /><button className="settings-button" onClick={() => setScreen("settings")}>Settings</button><button className="profile-chip" onClick={() => setScreen("profile")}>{readerName}</button></div></header>
+      <header className="hero"><BannerWithVersion /><div className="header-actions"><button className="settings-button" onClick={() => setScreen("settings")}>Settings</button><button className="profile-chip" onClick={() => setScreen("profile")}>{readerName}</button></div></header>
       {readerName === "Test Profile" && <div className="test-mode-banner">TEST PROFILE — LOCAL ONLY — NOTHING IS SYNCHRONIZED</div>}
       <section className="welcome-strip">
         <span className="role-badge">{roleLabel(role)}</span>
@@ -664,7 +695,7 @@ export function App() {
         <button className="mode-card" onClick={() => setScreen("library")}><img className="mode-icon image-icon" src="/long-rot-icon.png" alt="The Long Rot" /><span><strong>Reader Mode</strong><small>Read or listen, save your place, and record comments.</small></span><span>→</span></button>
         <button className="mode-card voice-mode" onClick={() => setScreen("voice-targets")}><span className="mode-icon voice-mic-mark" aria-hidden="true" /><span><strong>Voice Companion</strong><small>Talk with Claude or Codex now. ChatGPT will be added later.</small></span><span>→</span></button>
         <button className="mode-card project-mode" onClick={openProjects}><img className="mode-icon image-icon" src="/mcg-social-circle.png" alt="MaggotClaw Games" /><span><strong>Projects</strong><small>{canPerform(role, "review") ? "Open a project, review its local files, and use the actions allowed for your role." : "Editing the project files needs approval from the owner."}</small></span><span>→</span></button>
-        <button className="mode-card chat-mode" onClick={() => setScreen("chat")}><span className="mode-icon chat-mark" aria-hidden="true">✉</span><span><strong>Messages</strong><small>Rooms and voice calls for readers, editors, and the author.</small></span><span>→</span></button>
+        <button className="mode-card chat-mode" onClick={() => setScreen("chat")}><span className="mode-icon chat-mark" aria-hidden="true" /><span><strong>Messages</strong><small>Rooms and voice calls for readers, editors, and the author.</small></span><span>→</span></button>
       </section>
     </main>;
   }
@@ -785,12 +816,14 @@ export function App() {
           <button className={readMyself ? "active" : ""} onClick={() => { player.current.stop(); setPlaying(false); setReadMyself(true); }}>Read myself</button>
         </div>
         {readMyself
-          ? <article className="reading-card self-read">
-              {Object.values(document.segments.reduce<Record<number, string[]>>((acc, segment) => {
-                (acc[segment.paragraphIndex] ??= []).push(segment.text);
-                return acc;
-              }, {})).map((sentences, index) => <p key={index}>{sentences.join(" ")}</p>)}
-            </article>
+          ? (document.html
+            ? <article className="reading-card self-read word-styled" dangerouslySetInnerHTML={{ __html: document.html }} />
+            : <article className="reading-card self-read">
+                {Object.values(document.segments.reduce<Record<number, string[]>>((acc, segment) => {
+                  (acc[segment.paragraphIndex] ??= []).push(segment.text);
+                  return acc;
+                }, {})).map((sentences, index) => <p key={index}>{sentences.join(" ")}</p>)}
+              </article>)
           : <article className="reading-card" aria-live="polite">
               <p className="context">{document.segments[segmentIndex - 1]?.text}</p>
               <p className="current-sentence">{current?.text || "This file has no readable text."}</p>
