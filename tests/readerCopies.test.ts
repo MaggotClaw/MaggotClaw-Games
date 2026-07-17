@@ -36,9 +36,10 @@ describe("reader copies", () => {
     expect(readerCopies([doc("C01-R Chapter 01 Reader Copy v1.0.txt", "needs-binary-download")])).toHaveLength(0);
   });
 
-  it("locks every chapter except the released ones for a reader", () => {
+  it("releases chapters one to four to a reader and locks the rest", () => {
     expect(isChapterUnlocked(1, "reader")).toBe(true);
-    expect(isChapterUnlocked(2, "reader")).toBe(false);
+    expect(isChapterUnlocked(4, "reader")).toBe(true);
+    expect(isChapterUnlocked(5, "reader")).toBe(false);
     expect(isChapterUnlocked(7, "contributor")).toBe(false);
   });
 

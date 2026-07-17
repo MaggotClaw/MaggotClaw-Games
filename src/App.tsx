@@ -16,8 +16,9 @@ import { isChapterUnlocked, loadUnlockedChapters, readerCopies } from "./readerC
 import type { ParsedDoc, ProjectDocument } from "./projectDocs";
 import { invoke } from "@tauri-apps/api/core";
 import { UpdateChecker } from "./UpdateChecker";
+import { ChatScreen } from "./ChatScreen";
 
-type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock";
+type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock" | "chat";
 
 function BrandLogo({ compact = false }: { compact?: boolean }) {
   return <img className={compact ? "brand-logo compact" : "brand-logo"} src="/maggotclaw-modern.png" alt="MaggotClaw Games" />;
@@ -591,6 +592,10 @@ export function App() {
     return <OwnerDashboard requests={requests} onDecide={decideRequest} onBack={() => setScreen("home")} owner={readerName} />;
   }
 
+  if (screen === "chat") {
+    return <ChatScreen role={role} name={readerName} onBack={() => setScreen("home")} />;
+  }
+
   if (screen === "home") {
     return <main className="app-shell home-shell">
       <header className="hero"><div><BrandLogo compact /></div><div className="header-actions"><UpdateChecker /><button className="settings-button" onClick={() => setScreen("settings")}>Settings</button><button className="profile-chip" onClick={() => setScreen("profile")}>{readerName}</button></div></header>
@@ -605,6 +610,7 @@ export function App() {
         <button className="mode-card" onClick={() => setScreen("library")}><img className="mode-icon image-icon" src="/long-rot-icon.png" alt="The Long Rot" /><span><strong>Reader Mode</strong><small>Read or listen, save your place, and record comments.</small></span><span>→</span></button>
         <button className="mode-card voice-mode" onClick={() => setScreen("voice-targets")}><span className="mode-icon voice-mic-mark" aria-hidden="true" /><span><strong>Voice Companion</strong><small>Talk with Claude or Codex now. ChatGPT will be added later.</small></span><span>→</span></button>
         <button className="mode-card project-mode" onClick={openProjects}><img className="mode-icon image-icon" src="/mcg-social-circle.png" alt="MaggotClaw Games" /><span><strong>Projects</strong><small>{canPerform(role, "review") ? "Open a project, review its local files, and use the actions allowed for your role." : "Editing the project files needs approval from the owner."}</small></span><span>→</span></button>
+        <button className="mode-card chat-mode" onClick={() => setScreen("chat")}><span className="mode-icon chat-mark" aria-hidden="true">✉</span><span><strong>Messages</strong><small>Rooms for readers, editors, and the author. Not connected yet.</small></span><span>→</span></button>
       </section>
     </main>;
   }
@@ -613,7 +619,7 @@ export function App() {
     return <main className="app-shell projects-list-shell">
       <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Main Menu</button><span className="eyebrow">PROJECTS</span><span>{readerName} · {role}</span></header>
       <section className="projects-heading"><h1>Your projects</h1><p>Select a project to open its local workspace and available actions.</p></section>
-      <section className="project-tiles"><button className="project-tile" onClick={openLongRotWorkspace}><img className="project-placeholder project-icon-image" src="/long-rot-icon.png" alt="The Long Rot" /><span><strong>The Long Rot</strong><small>Local workspace ready · Dropbox connection needs attention</small></span><span>Open →</span></button><button className="project-tile project-zero-tile" onClick={() => setScreen("project-zero")}><span className="project-placeholder project-zero-placeholder" aria-hidden="true">PZA</span><span><strong>Project Zero Author</strong><small>Project added · Local workspace and connection not configured yet</small></span><span>Open →</span></button></section>
+      <section className="project-tiles"><button className="project-tile" onClick={openLongRotWorkspace}><img className="project-placeholder project-icon-image" src="/long-rot-icon.png" alt="The Long Rot" /><span><strong>The Long Rot</strong><small>Local workspace ready · Dropbox connection needs attention</small></span><span>Open →</span></button><button className="project-tile project-zero-tile" onClick={() => setScreen("project-zero")}><img className="project-placeholder project-icon-image" src="/project-zero-icon.svg" alt="Project Zero Author" /><span><strong>Project Zero Author</strong><small>Project added · Local workspace and connection not configured yet</small></span><span>Open →</span></button></section>
     </main>;
   }
 

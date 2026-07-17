@@ -5,8 +5,9 @@
 import { canPerform, type ProjectRole } from "./permissions";
 import { compareVersions, parseDoc, type ParsedDoc, type ProjectDocument } from "./projectDocs";
 
-// Chapters a reader may open today. Everything else is listed but locked.
-export const DEFAULT_UNLOCKED_CHAPTERS: number[] = [1];
+// Chapters a reader may open today. Everything else is listed but locked, so a
+// reader can see the shape of the book without being told why.
+export const DEFAULT_UNLOCKED_CHAPTERS: number[] = [1, 2, 3, 4];
 
 const STORAGE_KEY = "mcg-unlocked-chapters";
 

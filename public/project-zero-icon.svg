@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Project Zero Author">
+  <defs>
+    <linearGradient id="pzaSilver" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="18%" stop-color="#e8eeec"/>
+      <stop offset="42%" stop-color="#7c8a86"/>
+      <stop offset="58%" stop-color="#dfe7e4"/>
+      <stop offset="78%" stop-color="#6d7a76"/>
+      <stop offset="100%" stop-color="#f2f7f5"/>
+    </linearGradient>
+    <radialGradient id="pzaBg" cx="38%" cy="30%" r="85%">
+      <stop offset="0%" stop-color="#16211e"/>
+      <stop offset="55%" stop-color="#0a1210"/>
+      <stop offset="100%" stop-color="#020504"/>
+    </radialGradient>
+    <linearGradient id="pzaNib" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f6faf9"/>
+      <stop offset="45%" stop-color="#94a29d"/>
+      <stop offset="100%" stop-color="#5d6a66"/>
+    </linearGradient>
+    <filter id="pzaGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="10" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="pzaSoft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+  </defs>
+
+  <!-- tile -->
+  <rect x="0" y="0" width="512" height="512" rx="104" fill="url(#pzaBg)"/>
+  <rect x="4" y="4" width="504" height="504" rx="100" fill="none" stroke="#2c8d75" stroke-width="3" opacity=".85"/>
+
+  <!-- turquoise bloom behind the zero -->
+  <ellipse cx="256" cy="262" rx="132" ry="140" fill="#00efb1" opacity=".18" filter="url(#pzaSoft)"/>
+
+  <!-- the zero: a heavy silver ring, slightly ovalised like a letter O -->
+  <ellipse cx="256" cy="262" rx="104" ry="126" fill="none" stroke="url(#pzaSilver)" stroke-width="30"/>
+  <ellipse cx="256" cy="262" rx="104" ry="126" fill="none" stroke="#00efb1" stroke-width="3" opacity=".55" filter="url(#pzaGlow)"/>
+
+  <!-- inner shadow so the ring reads as carved metal -->
+  <ellipse cx="256" cy="262" rx="88" ry="110" fill="none" stroke="#020504" stroke-width="4" opacity=".6"/>
+
+  <!-- the author's nib, slashing the zero like the Ø stroke -->
+  <g transform="rotate(-32 256 262)">
+    <path d="M256 112 L296 210 L256 410 L216 210 Z" fill="url(#pzaNib)"/>
+    <path d="M256 112 L296 210 L256 410 L216 210 Z" fill="none" stroke="#0a1210" stroke-width="3" opacity=".55"/>
+    <!-- nib slit + vent -->
+    <line x1="256" y1="250" x2="256" y2="410" stroke="#020504" stroke-width="6" opacity=".8"/>
+    <circle cx="256" cy="238" r="15" fill="#020504"/>
+    <circle cx="256" cy="238" r="15" fill="none" stroke="#00efb1" stroke-width="3" opacity=".95"/>
+    <!-- turquoise ink catching the light down the nib -->
+    <line x1="256" y1="268" x2="256" y2="398" stroke="#00efb1" stroke-width="2.5" opacity=".8" filter="url(#pzaGlow)"/>
+  </g>
+
+  <!-- ink drip, tying it to the Long Rot decay language -->
+  <path d="M243 404 q13 26 13 44 q0 20 -13 20 q-13 0 -13 -20 q0 -18 13 -44 Z" fill="#00efb1" opacity=".85"/>
+  <circle cx="243" cy="478" r="7" fill="#00efb1" opacity=".55"/>
+
+  <!-- scratches -->
+  <g stroke="#00efb1" stroke-linecap="round" opacity=".5">
+    <line x1="126" y1="150" x2="168" y2="120" stroke-width="4"/>
+    <line x1="352" y1="392" x2="392" y2="360" stroke-width="4"/>
+    <line x1="118" y1="352" x2="150" y2="376" stroke-width="3" opacity=".6"/>
+  </g>
+</svg>
