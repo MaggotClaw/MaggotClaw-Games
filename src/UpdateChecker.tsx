@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { checkForUpdates, downloadShareLink, getUpdateRepo, isValidRepo, openDownload, setUpdateRepo, type UpdateResult } from "./updates";
+import { checkForUpdates, downloadShareLink, getUpdateRepo, openDownload, type UpdateResult } from "./updates";
 
 // Small, self-contained "Check for updates" control. Shows the current version,
 // checks the configured GitHub release feed, and offers the download when a
@@ -8,7 +8,7 @@ export function UpdateChecker({ configurable = false }: { configurable?: boolean
   const [version, setVersion] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<UpdateResult | null>(null);
-  const [repo, setRepo] = useState(getUpdateRepo);
+  const repo = getUpdateRepo();
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -43,13 +43,6 @@ export function UpdateChecker({ configurable = false }: { configurable?: boolean
     }
   }
 
-  function saveRepo(next: string) {
-    setRepo(next);
-    setUpdateRepo(next);
-    setResult(null);
-    setCopied(false);
-  }
-
   async function copyShareLink(link: string) {
     try {
       await navigator.clipboard?.writeText(link);
@@ -76,16 +69,6 @@ export function UpdateChecker({ configurable = false }: { configurable?: boolean
         : <button className="primary tiny" onClick={() => void openDownload(result.info.page)}>Open release page</button>}
       {result.info.notes && <p className="update-notes">{result.info.notes.slice(0, 400)}</p>}
     </div>}
-
-    {configurable && <label className="update-repo">Update source (GitHub owner/repo)
-      <input
-        value={repo}
-        placeholder="e.g. your-name/the-long-rot"
-        onChange={(event) => saveRepo(event.target.value)}
-        autoComplete="off"
-      />
-      {repo && !isValidRepo(repo) && <small className="update-status warn">Use the form owner/repo.</small>}
-    </label>}
 
     {configurable && downloadShareLink(repo) && <div className="share-link">
       <span className="share-label">Shareable download link — send this to anyone:</span>

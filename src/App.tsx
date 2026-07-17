@@ -12,6 +12,9 @@ import { downloadProject, formatWorkspaceTime, initializeWorkspace, openWorkspac
 import { canPerform, profileRole, roleLabel, ROLE_ORDER, setProfileRole, type ProjectRole } from "./permissions";
 import { decideAccessRequest, pendingRequests, submitAccessRequest, type AccessRequest } from "./accessRequests";
 import { makeRequestCode, makeUnlockCode, parseRequestCode, parseUnlockCode, unlockMatchesProfile } from "./accessCodes";
+import { isChapterUnlocked, loadUnlockedChapters, readerCopies } from "./readerCopies";
+import type { ParsedDoc, ProjectDocument } from "./projectDocs";
+import { invoke } from "@tauri-apps/api/core";
 import { UpdateChecker } from "./UpdateChecker";
 
 type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock";
@@ -108,6 +111,8 @@ export function App() {
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [requests, setRequests] = useState<AccessRequest[]>(() => pendingRequests());
   const [requestCode, setRequestCode] = useState("");
+  const [shelf, setShelf] = useState<ParsedDoc[]>([]);
+  const [unlockedChapters] = useState<number[]>(() => loadUnlockedChapters());
   const refreshRequests = useCallback(() => setRequests(pendingRequests()), []);
 
   function openVoiceTarget(target: VoiceSettings["target"]) {
@@ -150,6 +155,14 @@ export function App() {
     void loadRecoverableComments().then((items) => setRecoverable(items[0] || null));
   }, []);
 
+  // The chapter shelf loads itself when Reader Mode opens, so it is never empty
+  // waiting on a Refresh press.
+  useEffect(() => {
+    if (screen !== "library" || !("__TAURI_INTERNALS__" in window)) return;
+    void refreshCopies();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen]);
+
   // The main hub listens for the companion window's request to open Settings.
   useEffect(() => {
     if (IS_COMPANION_WINDOW || !("__TAURI_INTERNALS__" in window)) return;
@@ -190,13 +203,17 @@ export function App() {
     );
   }, [rate]);
 
+  // The shelf is built from the downloaded local files, so reading works with no
+  // Dropbox connection at all.
   async function refreshCopies() {
     setLoading(true);
-    setStatus("Connecting to project files…");
+    setStatus("Reading your local chapters…");
     try {
-      const result = await client.listReaderCopies();
-      setCopies(result);
-      setStatus(result.length ? `${result.length} Reader Copies available` : "No Reader Copies found");
+      const docs = await invoke<ProjectDocument[]>("list_project_documents");
+      const shelf = readerCopies(docs);
+      setShelf(shelf);
+      const open = shelf.filter((item) => isChapterUnlocked(item.chapter, role, unlockedChapters)).length;
+      setStatus(shelf.length ? `${shelf.length} chapters · ${open} available to read` : "No chapters downloaded yet");
     } catch (error) {
       setStatus(`${message(error)} Nothing was changed.`);
     } finally {
@@ -204,26 +221,25 @@ export function App() {
     }
   }
 
-  async function openCopy(copy: ReaderCopy) {
+  async function openCopy(copy: ParsedDoc) {
+    if (!isChapterUnlocked(copy.chapter, role, unlockedChapters)) {
+      setStatus(`Chapter ${copy.chapter} is not released yet.`);
+      return;
+    }
     setLoading(true);
-    setStatus("Opening Reader Copy…");
+    setStatus("Opening chapter…");
     try {
-      const [content, revision] = await Promise.all([
-        client.readText(copy.path),
-        client.currentRevision(copy.path)
-      ]);
+      const content = await invoke<string>("read_project_document", { localRelativePath: copy.doc.localRelativePath });
       const hash = await contentHash(content);
-      const id = `${copy.path}:${revision || hash}`;
-      const record: DocumentRecord = {
-        id,
-        path: copy.path,
-        name: copy.name,
+      await enterDocument({
+        id: `${copy.doc.dropboxPath}:${copy.doc.revisionId || hash}`,
+        path: copy.doc.dropboxPath,
+        name: copy.fileName,
         content,
         contentHash: hash,
         segments: segmentDocument(content),
         retrievedAt: new Date().toISOString()
-      };
-      await enterDocument(record);
+      });
     } catch (error) {
       setStatus(`${message(error)} Nothing was changed.`);
     } finally {
@@ -450,6 +466,13 @@ export function App() {
   }
 
   async function openProjects() {
+    // Projects is the working area. A reader is offered the request instead of a
+    // door they cannot walk through.
+    if (!canPerform(role, "review")) {
+      setRequestCode("");
+      setScreen("request-access");
+      return;
+    }
     setScreen("projects");
   }
 
@@ -578,7 +601,11 @@ export function App() {
           ? <button className="owner-dash-button" onClick={openDashboard}>Owner Dashboard{requests.length > 0 && <span className="pending-badge">{requests.length}</span>}</button>
           : <span className="reader-note">You can read and comment right away. Need to edit? <button className="text-button inline" onClick={() => { setRequestCode(""); setScreen("request-access"); }}>Request access</button> · <button className="text-button inline" onClick={() => setScreen("unlock")}>Enter unlock code</button></span>}
       </section>
-      <section className="mode-grid"><button className="mode-card project-mode" onClick={openProjects}><img className="mode-icon image-icon" src="/mcg-social-circle.png" alt="MaggotClaw Games" /><span><strong>Projects</strong><small>Open a project, review its local files, and use the actions allowed for your role.</small></span><span>→</span></button><button className="mode-card" onClick={() => setScreen("library")}><span className="mode-icon">LR</span><span><strong>Reader Mode</strong><small>Read or listen, save your place, and record comments.</small></span><span>→</span></button><button className="mode-card voice-mode" onClick={() => setScreen("voice-targets")}><span className="mode-icon voice-mic-mark" aria-hidden="true" /><span><strong>Voice Companion</strong><small>Talk with Claude or Codex now. ChatGPT will be added later.</small></span><span>→</span></button></section>
+      <section className="mode-grid">
+        <button className="mode-card" onClick={() => setScreen("library")}><img className="mode-icon image-icon" src="/long-rot-icon.png" alt="The Long Rot" /><span><strong>Reader Mode</strong><small>Read or listen, save your place, and record comments.</small></span><span>→</span></button>
+        <button className="mode-card voice-mode" onClick={() => setScreen("voice-targets")}><span className="mode-icon voice-mic-mark" aria-hidden="true" /><span><strong>Voice Companion</strong><small>Talk with Claude or Codex now. ChatGPT will be added later.</small></span><span>→</span></button>
+        <button className="mode-card project-mode" onClick={openProjects}><img className="mode-icon image-icon" src="/mcg-social-circle.png" alt="MaggotClaw Games" /><span><strong>Projects</strong><small>{canPerform(role, "review") ? "Open a project, review its local files, and use the actions allowed for your role." : "Editing the project files needs approval from the owner."}</small></span><span>→</span></button>
+      </section>
     </main>;
   }
 
@@ -587,7 +614,6 @@ export function App() {
       <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Main Menu</button><span className="eyebrow">PROJECTS</span><span>{readerName} · {role}</span></header>
       <section className="projects-heading"><h1>Your projects</h1><p>Select a project to open its local workspace and available actions.</p></section>
       <section className="project-tiles"><button className="project-tile" onClick={openLongRotWorkspace}><img className="project-placeholder project-icon-image" src="/long-rot-icon.png" alt="The Long Rot" /><span><strong>The Long Rot</strong><small>Local workspace ready · Dropbox connection needs attention</small></span><span>Open →</span></button><button className="project-tile project-zero-tile" onClick={() => setScreen("project-zero")}><span className="project-placeholder project-zero-placeholder" aria-hidden="true">PZA</span><span><strong>Project Zero Author</strong><small>Project added · Local workspace and connection not configured yet</small></span><span>Open →</span></button></section>
-      <p className="project-icon-note">The Long Rot now shows its final project artwork. The PZA placeholder will be replaced when Project Zero Author art is added.</p>
     </main>;
   }
 
@@ -642,13 +668,12 @@ export function App() {
 
   if (screen === "comments") {
     return <main className="app-shell comments-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("library")}>← Reader Copies</button><span className="eyebrow">MY COMMENTS</span><span>{readerName}</span></header>
-      <section className="comments-heading"><div><h1>Saved comments</h1><p>{savedComments.length} saved safely on this device.</p></div><button onClick={exportComments} disabled={!savedComments.length}>Export index</button></section>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("library")}>← Chapters</button><span className="eyebrow">MY COMMENTS</span><span>{readerName}</span></header>
+      <section className="comments-heading"><div><h1>Saved Comments</h1><p>{savedComments.length} saved safely on this device.</p></div><button onClick={exportComments} disabled={!savedComments.length}>Export index</button></section>
       <section className="comments-list">
         {savedComments.length === 0 && <div className="empty-state"><strong>No comments yet</strong><p>Comments you confirm while reading will appear here.</p></div>}
         {savedComments.map((item) => <SavedCommentCard key={item.id} comment={item} />)}
       </section>
-      <footer className="safe-status">No Reader Copy or official project file was changed.</footer>
     </main>;
   }
 
@@ -722,26 +747,37 @@ export function App() {
   return (
     <main className="app-shell">
       <header className="hero">
-        <div><BrandLogo compact /><h1>Reader Mode</h1><p>Choose a Reader Copy and continue where you left off.</p></div>
-        <div className="header-actions"><button className="settings-button" onClick={openSavedComments}>My Comments</button><button className="settings-button" onClick={() => setScreen("settings")}>Connection</button><button className="profile-chip" onClick={() => setScreen("profile")}>{readerName}</button></div>
+        <div><BrandLogo compact /><h1>Reader Mode</h1><p>Choose a chapter and continue where you left off.</p></div>
+        <div className="header-actions"><button className="settings-button" onClick={openSavedComments}>My Comments</button><button className="settings-button" onClick={() => setScreen("settings")}>Settings</button><button className="profile-chip" onClick={() => setScreen("profile")}>{readerName}</button></div>
       </header>
       <section className="library-heading">
-        <div><h2>Reader Copies</h2><p>{status}</p></div>
+        <div><h2>Chapters</h2><p>{status}</p></div>
         <button className="refresh" onClick={refreshCopies} disabled={loading}>{loading ? "Loading…" : "Refresh"}</button>
       </section>
       <button className="text-button mode-back" onClick={() => setScreen("home")}>← Main Menu</button>
       {recoverable && <section className="recovery-banner"><div><strong>Unfinished comment found</strong><p>Your recording and reading position are safe on this device.</p></div><button onClick={resumeRecoverable}>Recover</button></section>}
       <section className="copy-grid">
-        {copies.map((copy) => (
-          <button className="copy-card" key={copy.path} onClick={() => openCopy(copy)}>
-            <span className="book-mark">LR</span><span><strong>{cleanTitle(copy.name)}</strong><small>Open Reader Copy</small></span><span aria-hidden="true">→</span>
-          </button>
-        ))}
-        <button className="copy-card demo" onClick={openDemo}>
+        {shelf.map((copy) => {
+          const open = isChapterUnlocked(copy.chapter, role, unlockedChapters);
+          return <button
+            className={`copy-card ${open ? "" : "locked"}`}
+            key={copy.doc.localRelativePath}
+            onClick={() => void openCopy(copy)}
+            disabled={!open}
+            title={open ? "Open this chapter" : "Not released yet"}
+          >
+            <img className="book-mark image-mark" src="/long-rot-icon.png" alt="" aria-hidden="true" />
+            <span>
+              <strong>Chapter {String(copy.chapter).padStart(2, "0")}{copy.title.startsWith("Chapter") ? "" : ` — ${copy.title}`}</strong>
+              <small>{open ? `Read now · v${copy.version ?? "?"}` : "Locked — not released yet"}</small>
+            </span>
+            <span aria-hidden="true">{open ? "→" : "🔒"}</span>
+          </button>;
+        })}
+        {shelf.length === 0 && <button className="copy-card demo" onClick={openDemo}>
           <span className="book-mark">01</span><span><strong>Sample Reader Copy</strong><small>Try without connecting</small></span><span aria-hidden="true">→</span>
-        </button>
+        </button>}
       </section>
-      <footer className="safe-status">No project files can be changed from this reader.</footer>
     </main>
   );
 }
@@ -899,7 +935,8 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
   function updateVoice(changes: Partial<VoiceSettings>) { setVoice((current) => ({ ...current, ...changes })); }
   function saveAll() { saveVoiceSettings(profile, voice); onSave({ endpoint: endpoint.trim(), bearerToken }); }
   return <main className="app-shell settings-panel">
-    <BrandLogo compact /><p className="eyebrow">PROFILE SETTINGS</p><h1>Voice Companion</h1>
+    <button className="text-button mode-back" onClick={onCancel}>← Back</button>
+    <BrandLogo compact /><p className="eyebrow">Profile settings</p><h1>Voice Companion</h1>
     <p>These settings are saved for {profile} on this computer.</p>
     <label>Talk to<select value={voice.target} onChange={(event) => updateVoice({ target: event.target.value as VoiceSettings["target"] })}><option value="auto">Auto (whichever is open)</option><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
     <label>Send after silence<input type="number" min="0.5" max="30" step="0.5" value={voice.silenceSeconds} onChange={(event) => updateVoice({ silenceSeconds: Number(event.target.value) })} /></label>
