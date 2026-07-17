@@ -6,7 +6,8 @@
 // here or pasted into Settings by the owner without a rebuild.
 
 export const DEFAULT_DISCORD_INVITE = "";
-export const DEFAULT_REQUEST_WEBHOOK = "";
+export const DEFAULT_REQUESTS_CHANNEL = "1210102876547055668";
+export const DEFAULT_REQUEST_WEBHOOK = "https://discord.com/api/webhooks/1527522590636249158/qvNLNfNvWPeunVaIrSnghDpWScbINXuzVO36MVkTcQFilbZvDeG19H3J0eLeLDbd-gpC";
 
 export function getDiscordName(profile: string): string {
   try {
@@ -63,7 +64,7 @@ export function setBotToken(token: string): void {
   try { localStorage.setItem("mcg-discord-bot-token", token.trim()); } catch { /* ignore */ }
 }
 export function getRequestsChannelId(): string {
-  try { return (localStorage.getItem("mcg-discord-requests-channel") || "").trim(); } catch { return ""; }
+  try { return (localStorage.getItem("mcg-discord-requests-channel") || DEFAULT_REQUESTS_CHANNEL).trim(); } catch { return DEFAULT_REQUESTS_CHANNEL; }
 }
 export function setRequestsChannelId(id: string): void {
   try { localStorage.setItem("mcg-discord-requests-channel", id.trim()); } catch { /* ignore */ }
