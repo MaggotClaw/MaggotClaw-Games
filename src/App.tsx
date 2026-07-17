@@ -109,9 +109,9 @@ async function openCompanionWindow(): Promise<void> {
     // Let dragged-in text reach the page itself, so dropping a highlighted
     // passage onto the bar reads it aloud.
     dragDropEnabled: false,
-    // Wide enough that the extra companion-only Close (✕) clears the oval's
-    // rounded right end instead of being clipped by it.
-    width: 690,
+    // Sized to hug the buttons: mic almost touching the left curve, Close (✕)
+    // right at the rounded end. Must match applyCompact in TalkScreen.
+    width: 406,
     height: 96,
     resizable: true,
     decorations: false,

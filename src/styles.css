@@ -256,7 +256,10 @@ kbd { padding: 2px 7px; color: #2b241d; background: #fffaf0; border: 1px solid #
 .voice-floater.is-listening .main-mic { animation: mic-pulse .72s ease-in-out infinite alternate; }
 .voice-floater .stop-control { color: #fff; }
 /* Companion adds a Close (✕) column; widen end padding so it clears the oval. */
-.voice-floater.companion { grid-template-columns: 38px 26px 40px 52px repeat(6, 26px); justify-content: flex-start; gap: 8px; padding-left: 16px; padding-right: 46px; }
+/* Tight fit: the mic hugs the left curve and the Close (✕) sits right at the
+   rounded right end. The window is sized to exactly this content (see
+   openCompanionWindow and applyCompact — all three must agree). */
+.voice-floater.companion { grid-template-columns: 38px 26px 40px 52px repeat(6, 26px); justify-content: flex-start; gap: 6px; padding-left: 8px; padding-right: 12px; }
 
 /* ---- Project Explorer ---- */
 .explorer-shell { display: flex; flex-direction: column; height: 100vh; gap: 14px; padding: 18px 22px; }
