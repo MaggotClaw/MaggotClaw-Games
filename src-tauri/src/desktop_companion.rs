@@ -29,17 +29,20 @@ impl Target {
         }
     }
 
+    // Matched as case-insensitive substrings: the apps rename these buttons
+    // between versions ("Copy" → "Copy message" → "Copy response"), and an
+    // exact match going stale left the companion waiting forever.
     fn copy_button_names(self) -> &'static [&'static str] {
         match self {
-            Target::Claude => &["Copy message", "Copy response", "Copy"],
-            Target::Codex => &["Copy"],
+            Target::Claude => &["copy"],
+            Target::Codex => &["copy"],
         }
     }
 
     fn stop_button_names(self) -> &'static [&'static str] {
         match self {
-            Target::Claude => &["Stop response", "Stop generating", "Stop"],
-            Target::Codex => &["Stop", "Stop generating"],
+            Target::Claude => &["stop"],
+            Target::Codex => &["stop"],
         }
     }
 }
@@ -190,9 +193,8 @@ fn matching_buttons(
                     button
                         .get_name()
                         .map(|name| {
-                            names
-                                .iter()
-                                .any(|candidate| name.eq_ignore_ascii_case(candidate))
+                            let lower = name.to_ascii_lowercase();
+                            names.iter().any(|candidate| lower.contains(candidate))
                         })
                         .unwrap_or(false)
                 })

@@ -35,6 +35,9 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
   const transcriptRef = useRef("");
   const sawBusy = useRef(false);
   const waitingStarted = useRef(0);
+  const sentWords = useRef("");
+  const baselineResponseText = useRef("");
+  const fallbackTick = useRef(0);
   const playbackCycle = useRef(0);
   const segmentsRef = useRef<ResponsePlaybackSegment[]>([]);
   const liveDraftInFlight = useRef(false);
@@ -208,6 +211,24 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
           if (latest.trim()) {
             window.clearInterval(timer);
             beginReply(latest);
+            return;
+          }
+        }
+        // Self-rescue: if the buttons we watch were renamed by an app update,
+        // neither signal above ever fires. After 15 quiet seconds, peek at the
+        // latest copyable text every ~6 seconds — if it is new, that IS the
+        // reply, so read it instead of sitting silent.
+        const waited = Date.now() - waitingStarted.current;
+        if (!responseState.busy && waited > 15000) {
+          fallbackTick.current += 1;
+          if (fallbackTick.current % 5 === 0) {
+            const latest = (await adapter.readCopiedResponse().catch(() => "")).trim();
+            if (latest && latest !== baselineResponseText.current && latest !== sentWords.current) {
+              window.clearInterval(timer);
+              beginReply(latest);
+              return;
+            }
+            setStatus(`Still waiting for ${targetName} — press ▶ to read the reply if it looks finished.`);
           }
         }
         if (Date.now() - waitingStarted.current > 10 * 60 * 1000) {
@@ -330,6 +351,13 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
       }
       if (!adapter.sendMessage || !adapter.responseState) throw new Error("Automatic Send requires the installed Windows companion.");
       baselineResponseCount.current = (await adapter.responseState()).completedResponseCount;
+      // Remember what the latest copyable text is BEFORE sending, so the
+      // self-rescue check can tell an old response from the new one.
+      sentWords.current = words;
+      fallbackTick.current = 0;
+      baselineResponseText.current = baselineResponseCount.current > 0
+        ? (await adapter.readCopiedResponse().catch(() => "")).trim()
+        : "";
       await adapter.sendMessage(words);
       sawBusy.current = false;
       waitingStarted.current = Date.now();
@@ -400,6 +428,19 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
     } else speakAt(segmentIndex);
   }
 
+  // The escape hatch while waiting: grab whatever the latest reply is and read
+  // it now, without waiting for the automatic detection.
+  async function forceReadReply() {
+    setStatus("Reading the latest reply…");
+    try {
+      const latest = (await adapter.readCopiedResponse()).trim();
+      if (latest) beginReply(latest);
+      else setStatus("There is no finished reply to read yet.");
+    } catch (error) {
+      setStatus(message(error));
+    }
+  }
+
   // Highlight text anywhere, drag it onto the bar, and she reads it aloud —
   // same voice, same pause/skip controls as a reply.
   function readDroppedText(text: string) {
@@ -463,7 +504,7 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
     <span className={`voice-wave ${listening && audioLevel <= 3 ? "no-mic-sound" : ""}`} aria-label={listening ? `Microphone level ${audioLevel}` : "Voice waveform"}>{waveHeights.map((height, index) => <i key={index} style={listening ? { height: `${Math.max(3, Math.round(height * liveScale))}px` } : undefined} />)}</span>
     <span className="countdown-display">{secondsRemaining.toFixed(1)}s</span>
     <button className="icon-control send-control" aria-label="Send now" title="Send now" disabled={!listening} onClick={finishAndSend}>➤</button>
-    <button className="icon-control" aria-label={playing ? "Pause reading" : "Continue reading"} title={playing ? "Pause" : "Play"} disabled={!reading} onClick={pauseOrContinue}>{playing ? "Ⅱ" : "▶"}</button>
+    <button className="icon-control" aria-label={playing ? "Pause reading" : "Continue reading"} title={state === "waiting" ? "Read the reply now" : playing ? "Pause" : "Play"} disabled={!reading && state !== "waiting"} onClick={() => { if (state === "waiting") void forceReadReply(); else pauseOrContinue(); }}>{playing ? "Ⅱ" : "▶"}</button>
     <button className="icon-control" aria-label="Skip reply" title="Skip reply" disabled={!reading} onClick={skipReply}>≫</button>
     <button className="icon-control stop-control" aria-label="Stop everything" title="Stop everything" disabled={state === "idle"} onClick={stopEverything}>■</button>
     <button className="icon-control" aria-label="Settings" title="Settings" onClick={onSettings}>⚙</button>
