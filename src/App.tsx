@@ -32,6 +32,7 @@ import { latestProgressReports } from "./ChatScreen";
 import { auditForAI, auditProse, humanMakerSharedWithEditors, setHumanMakerSharedWithEditors, type AuditReport } from "./humanMaker";
 import { OkGoButton } from "./OkGoButton";
 import { applySettings, collectSettings, describeBundle } from "./settingsFile";
+import { outstandingTasks, readerLinksPublished, setReaderLinksPublished, setSettingsBackedUp, setSharingWorks, settingsBackedUp, sharingWorks, tasksHeadline, type SetupTask } from "./setupTasks";
 import { WalkthroughWindow } from "./WalkthroughWindow";
 import { loadPeople, parseProfileMessage, publishPeople, removePerson, savePeople, sortedPeople, upsertPerson, type Person } from "./people";
 import { addFeedback, diagnosticsReport, FEEDBACK_AREAS, feedbackMessage, loadErrors, loadFeedback, loadUsage, markFeedbackSent, noteUsage, setShareDiagnostics, shareDiagnostics, watchForErrors } from "./feedback";
@@ -45,7 +46,7 @@ import { recordJoin } from "./contacts";
 import { EMPTY_READER_PROFILE, hasProfilePin, isValidPin, loadReaderProfile, readerProfileSummary, saveReaderProfile, setNickname, setProfilePin, type ReaderProfile } from "./profileInfo";
 import { ReadSelectionButton } from "./ReadSelectionButton";
 
-type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "workspace-files" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock" | "chat" | "directions" | "idea" | "human-maker" | "claude-access" | "people" | "feedback";
+type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "workspace-files" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock" | "chat" | "directions" | "idea" | "human-maker" | "claude-access" | "people" | "feedback" | "things-to-do";
 
 function BrandLogo({ compact = false }: { compact?: boolean }) {
   return <img className={compact ? "brand-logo compact" : "brand-logo"} src="/maggotclaw-modern.png" alt="MaggotClaw Games" />;
@@ -318,6 +319,18 @@ export function App() {
   const documentRef = useRef<DocumentRecord | null>(null);
   const client = useMemo(() => new LongRotMcpClient(settings), [settings]);
   const role = profileRole(readerName);
+  const setupTasks = useMemo<SetupTask[]>(() => outstandingTasks({
+    isOwner: canPerform(role, "manage"),
+    hasProjectKeys: Boolean(getDropboxCreds()),
+    sharingWorks: sharingWorks(),
+    readerLinksPublished: readerLinksPublished(),
+    hasMessaging: messagingConnected(),
+    hasCatalog: readerLinksConfigured(),
+    filesDownloaded: workspace?.downloadedFiles ?? 0,
+    releasedChapters: unlockedChapters.length,
+    settingsBackedUp: settingsBackedUp(),
+    peopleCount: people.length
+  }), [role, workspace, unlockedChapters, people]);
 
   useEffect(() => {
     indexRef.current = segmentIndex;
@@ -1319,6 +1332,13 @@ export function App() {
         </button>}
       </section>
       {readerName === "Test Profile" && <div className="test-mode-banner">TEST PROFILE — LOCAL ONLY — NOTHING IS SYNCHRONIZED</div>}
+      {setupTasks.length > 0 && <section className={setupTasks.some((t) => t.urgent) ? "todo-strip urgent" : "todo-strip"}>
+        <div>
+          <strong>{tasksHeadline(setupTasks)}</strong>
+          <small>{setupTasks[0].title} — {setupTasks[0].why}</small>
+        </div>
+        <button className="primary" onClick={() => setScreen("things-to-do")}>Show Me</button>
+      </section>}
       {discordWaiting > 0 && canPerform(role, "manage") && <section className="welcome-strip">
         <span className="reader-note"><strong>{discordWaiting} Access Request{discordWaiting === 1 ? " Is" : "s Are"} Waiting On Discord.</strong> <button className="text-button inline" onClick={openDashboard}>Open The Owner Dashboard</button></span>
       </section>}
@@ -1400,6 +1420,27 @@ export function App() {
 
   if (screen === "project-explorer") {
     return <ProjectExplorer onBack={() => setScreen("project-workspace")} />;
+  }
+
+  if (screen === "things-to-do") {
+    return <main className="app-shell project-shell">
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">THINGS TO DO</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <section className="projects-heading"><h1>{setupTasks.length ? tasksHeadline(setupTasks) : "Nothing Left To Do"}</h1><p>{setupTasks.length ? "Each one opens the guide that walks you through it." : "Everything is set up. This page will tell you if that ever changes."}</p></section>
+      <section className="comments-list">
+        {setupTasks.map((task) => <article key={task.id} className={task.urgent ? "tell-card high" : "tell-card low"}>
+          <div className="comment-meta"><span>{task.urgent ? "Needed now" : "When you get a moment"}</span></div>
+          <h2 style={{ margin: "4px 0" }}>{task.title}</h2>
+          <p>{task.why}</p>
+          <div className="request-actions">
+            <button className="primary" onClick={() => {
+              if (task.guide && "__TAURI_INTERNALS__" in window) { void openWalkthroughWindow(); return; }
+              if (task.screen) { if (task.screen === "settings") settingsReturn.current = "things-to-do"; setScreen(task.screen as Screen); }
+            }}>{task.guide ? "Show Me How" : "Take Me There"}</button>
+          </div>
+        </article>)}
+        {setupTasks.length === 0 && <div className="empty-state"><strong>All set</strong><p>Nothing is waiting.</p></div>}
+      </section>
+    </main>;
   }
 
   if (screen === "people") {
@@ -2018,6 +2059,8 @@ function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: Proj
     try {
       await publishAccessMap(client).catch(() => undefined);
       await publishReaderLinks(client, creds, (progress) => setNote(progress.stage));
+      setSharingWorks(true);
+      setReaderLinksPublished(true);
       setNote("Reader Links published. Copy Messaging Key in Messages now carries read-only book downloads for friends.");
     } catch (error) {
       setNote(`${error instanceof Error ? error.message : "Reader Links could not be published."} Nothing readers already have was changed.`);
@@ -2617,7 +2660,7 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
       <button onClick={() => {
         void import("@tauri-apps/api/core")
           .then(({ invoke }) => invoke<string>("export_settings", { contents: JSON.stringify(collectSettings(), null, 1) }))
-          .then((where) => setSettingsNote(`Saved to ${where}. Keep it private — it holds your keys.`))
+          .then((where) => { setSettingsBackedUp(true); setSettingsNote(`Saved to ${where}. Keep it private — it holds your keys.`); })
           .catch(() => setSettingsNote("The settings file could not be saved."));
       }}>Export My Settings</button>
       <button onClick={() => {

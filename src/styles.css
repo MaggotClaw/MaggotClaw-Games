@@ -669,3 +669,11 @@ select option { background: #0b1210; color: var(--mc-white); }
 .who-chip { padding: 5px 11px; font-size: .78rem; }
 .dash-section label { display: flex; flex-direction: column; gap: 8px; }
 .dash-section textarea { max-width: 560px; min-height: 40px; height: 44px; margin-top: 6px; }
+
+/* Things still to do — a calm warning that takes you to the fix. */
+.todo-strip { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 8px 0; padding: 12px 16px; background: #101a17; border: 1px solid #2c8d75; border-left-width: 4px; border-radius: 12px; }
+.todo-strip.urgent { background: #1b1410; border-color: #ffb072; }
+.todo-strip strong { display: block; color: var(--mc-green-soft, #7fd9c4); }
+.todo-strip.urgent strong { color: #ffb072; }
+.todo-strip small { color: var(--mc-muted, #9aa7a2); }
+.todo-strip button { padding: 9px 16px; color: #00140e; background: var(--mc-green, #00efb1); border: 0; border-radius: 999px; font-weight: 800; white-space: nowrap; cursor: pointer; }

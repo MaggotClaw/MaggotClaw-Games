@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { clampStep, findWalkthrough, progressLine, WALKTHROUGHS, walkthroughsFor } from "../src/walkthrough";
 import { diagnosticsReport, feedbackMessage } from "../src/feedback";
+import { outstandingTasks, tasksHeadline } from "../src/setupTasks";
 
 describe("walkthroughs", () => {
   it("hides the owner's guides from everyone else", () => {
@@ -65,5 +66,56 @@ describe("feedback", () => {
     const report = diagnosticsReport("1.4.0", {}, []);
     expect(report).toContain("nothing recorded yet");
     expect(report).toContain("No problems recorded");
+  });
+});
+
+
+const base = {
+  isOwner: false, hasProjectKeys: false, sharingWorks: false, readerLinksPublished: false,
+  hasMessaging: false, hasCatalog: false, filesDownloaded: 0, releasedChapters: 0,
+  settingsBackedUp: false, peopleCount: 0
+};
+
+describe("things still to do", () => {
+  it("tells a brand-new owner to connect the files first, and nothing further", () => {
+    const tasks = outstandingTasks({ ...base, isOwner: true });
+    expect(tasks[0].id).toBe("project-keys");
+    expect(tasks[0].urgent).toBe(true);
+    expect(tasks.some((t) => t.id === "reader-links")).toBe(false);
+  });
+
+  it("raises the sharing problem only once the keys are in", () => {
+    const tasks = outstandingTasks({ ...base, isOwner: true, hasProjectKeys: true });
+    expect(tasks.some((t) => t.id === "dropbox-sharing")).toBe(true);
+    expect(tasks.find((t) => t.id === "dropbox-sharing")?.guide).toBe("dropbox-sharing");
+  });
+
+  it("asks for reader links once sharing works", () => {
+    const tasks = outstandingTasks({ ...base, isOwner: true, hasProjectKeys: true, sharingWorks: true });
+    expect(tasks.some((t) => t.id === "reader-links")).toBe(true);
+    expect(tasks.some((t) => t.id === "dropbox-sharing")).toBe(false);
+  });
+
+  it("goes quiet for an owner who has finished everything", () => {
+    const tasks = outstandingTasks({
+      isOwner: true, hasProjectKeys: true, sharingWorks: true, readerLinksPublished: true,
+      hasMessaging: true, hasCatalog: true, filesDownloaded: 170, releasedChapters: 4,
+      settingsBackedUp: true, peopleCount: 3
+    });
+    expect(tasks).toEqual([]);
+    expect(tasksHeadline(tasks)).toBe("");
+  });
+
+  it("tells a new reader to paste their key, then to fetch the book", () => {
+    expect(outstandingTasks(base)[0].id).toBe("key");
+    const withKey = outstandingTasks({ ...base, hasCatalog: true });
+    expect(withKey.some((t) => t.id === "get-book")).toBe(true);
+    expect(withKey.some((t) => t.id === "key")).toBe(false);
+  });
+
+  it("says plainly when something is actually broken", () => {
+    expect(tasksHeadline(outstandingTasks({ ...base, isOwner: true }))).toContain("Before This Works");
+    const gentle = outstandingTasks({ ...base, isOwner: true, hasProjectKeys: true, sharingWorks: true, readerLinksPublished: true, filesDownloaded: 5, releasedChapters: 2, peopleCount: 1 });
+    expect(tasksHeadline(gentle)).toContain("Left To Set Up");
   });
 });
