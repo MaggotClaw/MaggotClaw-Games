@@ -70,6 +70,8 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
       // window was created with or it undoes the fit.
       safe(() => appWindow.setSize(new LogicalSize(companion ? 406 : 566, 96)));
       safe(() => appWindow.setAlwaysOnTop(true));
+      // Above full-screen programs too, not just ordinary windows.
+      safe(() => appWindow.setVisibleOnAllWorkspaces(true));
     };
     applyCompact();
     let ticks = 0;
@@ -90,16 +92,18 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
     };
   }, []);
 
+  // The bar stays above EVERYTHING, always — a browser, a document, anything.
+  // It used to hand back always-on-top whenever the AI program wasn't in front,
+  // which is why other windows could cover it. Windows also quietly clears the
+  // topmost flag when other programs grab it, so re-assert on a slow timer.
   useEffect(() => {
-    if (!("__TAURI_INTERNALS__" in window) || !adapter.targetForeground) return;
+    if (!("__TAURI_INTERNALS__" in window)) return;
     const appWindow = getCurrentWindow();
-    const timer = window.setInterval(() => {
-      void adapter.targetForeground!().then((targetActive) => {
-        void appWindow.setAlwaysOnTop(document.hasFocus() || targetActive);
-      }).catch(() => undefined);
-    }, 900);
+    const keepOnTop = () => { void appWindow.setAlwaysOnTop(true).catch(() => undefined); };
+    keepOnTop();
+    const timer = window.setInterval(keepOnTop, 2000);
     return () => window.clearInterval(timer);
-  }, [adapter]);
+  }, []);
 
   useEffect(() => () => {
     playbackCycle.current += 1;

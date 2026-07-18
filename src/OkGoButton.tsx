@@ -22,6 +22,17 @@ export function OkGoButton({ readerName, onClose }: { readerName: string; onClos
 
   useEffect(() => () => { if (timer.current) window.clearInterval(timer.current); }, []);
 
+  // Stays above everything. Windows can quietly clear the topmost flag when
+  // another program grabs it, so keep re-asserting.
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    const appWindow = getCurrentWindow();
+    const keepOnTop = () => { void appWindow.setAlwaysOnTop(true).catch(() => undefined); };
+    keepOnTop();
+    const keeper = window.setInterval(keepOnTop, 2000);
+    return () => window.clearInterval(keeper);
+  }, []);
+
   function cancel(reason = "Called off. Nothing was sent.") {
     if (timer.current) { window.clearInterval(timer.current); timer.current = 0; }
     setPhase("ready");
