@@ -32,7 +32,7 @@ import { latestProgressReports } from "./ChatScreen";
 import { auditForAI, auditProse, humanMakerSharedWithEditors, setHumanMakerSharedWithEditors, type AuditReport } from "./humanMaker";
 import { OkGoButton } from "./OkGoButton";
 import { recordJoin } from "./contacts";
-import { hasProfilePin, isValidPin, setNickname, setProfilePin } from "./profileInfo";
+import { EMPTY_READER_PROFILE, hasProfilePin, isValidPin, loadReaderProfile, readerProfileSummary, saveReaderProfile, setNickname, setProfilePin, type ReaderProfile } from "./profileInfo";
 import { ReadSelectionButton } from "./ReadSelectionButton";
 
 type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "workspace-files" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock" | "chat" | "directions" | "idea" | "human-maker";
@@ -805,7 +805,7 @@ export function App() {
     setStatus("Settings saved on this device");
   }
 
-  function saveProfile(info: { name: string; discordName?: string; wantedRole?: ProjectRole; nickname?: string; pin?: string; readingSpeed?: number }) {
+  function saveProfile(info: { name: string; discordName?: string; wantedRole?: ProjectRole; nickname?: string; pin?: string; readingSpeed?: number; details?: ReaderProfile }) {
     const clean = info.name.trim();
     if (!clean) return;
     const discordName = info.discordName ?? "";
@@ -813,6 +813,16 @@ export function App() {
     localStorage.setItem("long-rot-reader-name", clean);
     if (discordName.trim()) setDiscordName(clean, discordName);
     if (info.nickname?.trim()) setNickname(clean, info.nickname);
+    // Their answers stay on their machine, and go to the author once so he
+    // knows who is reading his book.
+    if (info.details) {
+      const known = loadReaderProfile(clean);
+      saveReaderProfile(clean, info.details);
+      const changed = JSON.stringify(known) !== JSON.stringify(info.details);
+      if (changed && Object.values(info.details).some((value) => value.trim())) {
+        void sendRequestToDiscord(readerProfileSummary(clean, roleLabel(wantedRole), info.details));
+      }
+    }
     if (info.pin && isValidPin(info.pin)) void setProfilePin(clean, info.pin);
     if (info.readingSpeed) {
       const voiceNow = loadVoiceSettings(clean);
@@ -1404,7 +1414,7 @@ ${item.transcriptionConfirmed}`;
   );
 }
 
-function Profile({ initial, onContinue }: { initial: string; onContinue: (info: { name: string; discordName: string; wantedRole: ProjectRole; nickname: string; pin: string; readingSpeed: number }) => void }) {
+function Profile({ initial, onContinue }: { initial: string; onContinue: (info: { name: string; discordName: string; wantedRole: ProjectRole; nickname: string; pin: string; readingSpeed: number; details: ReaderProfile }) => void }) {
   const [name, setName] = useState(initial);
   // A returning person's saved details come back with them — revisiting this
   // screen must never silently reset anything.
@@ -1417,11 +1427,15 @@ function Profile({ initial, onContinue }: { initial: string; onContinue: (info: 
     const saved = initial ? loadVoiceSettings(initial).speechRate : 1;
     return [0.8, 1, 1.2, 1.4].includes(saved) ? saved : 1;
   });
+  const [step, setStep] = useState(1);
+  const [details, setDetails] = useState<ReaderProfile>(() => initial ? loadReaderProfile(initial) : { ...EMPTY_READER_PROFILE });
+  const set = (changes: Partial<ReaderProfile>) => setDetails((current) => ({ ...current, ...changes }));
   const options: Array<{ value: ProjectRole; label: string; hint: string }> = [
     { value: "reader", label: "Reader", hint: "Read and comment — starts right now" },
     { value: "contributor", label: "Contributor", hint: "Suggest and propose changes — needs approval" },
     { value: "reviewer", label: "Reviewer", hint: "Review reader feedback and proposals — needs approval" },
-    { value: "editor", label: "Editor / Maintainer", hint: "Edit and maintain the project — needs approval" },
+    { value: "editor", label: "Editor", hint: "Work on the book itself — needs approval" },
+    { value: "manager", label: "Editor / Manager", hint: "Work on the book and approve other people — needs approval" },
     { value: "support", label: "Technical Support", hint: "Keep the machinery running — needs approval" }
   ];
   // A returning profile already has its PIN; a brand-new one sets it here.
@@ -1431,53 +1445,122 @@ function Profile({ initial, onContinue }: { initial: string; onContinue: (info: 
   return <main className="app-shell profile-screen">
     <BrandLogo />
     <div className="love-banner" role="status">Whatever you do, don't forget… <strong>MaggotClaw Loves You!!!</strong></div>
-    <p>A few quick things and you're in. Everyone starts as a <strong>Reader</strong> — anything more goes to the owner for approval, and you can read while you wait.</p>
+    <div className="step-row" aria-label={`Step ${step} of 3`}>
+      {[1, 2, 3].map((n) => <span key={n} className={n === step ? "step-dot on" : n < step ? "step-dot done" : "step-dot"}>{n}</span>)}
+    </div>
 
-    <label>1. Your name<input autoFocus value={name} onChange={(event) => setName(event.target.value)} /></label>
+    {step === 1 && <>
+      <p><strong>Who are you?</strong> Everyone starts as a Reader — anything more goes to MaggotClaw for approval, and you can read while you wait.</p>
 
-    <label>2. What should we call you? (optional)
-      <input value={nickname} placeholder="A nickname, if you like one better" onChange={(event) => setNicknameState(event.target.value)} />
-    </label>
+      <label>Your name<input autoFocus value={name} onChange={(event) => setName(event.target.value)} /></label>
+      <label>What should we call you? (optional)
+        <input value={nickname} placeholder="A nickname, if you like one better" onChange={(event) => setNicknameState(event.target.value)} />
+      </label>
+      <label>Email address
+        <input type="email" value={details.email} placeholder="so MaggotClaw can reach you" onChange={(event) => set({ email: event.target.value })} />
+      </label>
+      <label>Phone (optional)
+        <input value={details.phone} placeholder="only if you want texts about new chapters" onChange={(event) => set({ phone: event.target.value })} />
+      </label>
+      <label>What state or part of the world are you in?
+        <input value={details.where} placeholder="Louisiana, Ontario, Yorkshire…" onChange={(event) => set({ where: event.target.value })} />
+      </label>
+      <label>Your Discord name (for team messages)
+        <input value={discordName} placeholder="Leave blank if you don't have one yet" onChange={(event) => setDiscord(event.target.value)} />
+      </label>
+      <button className="text-button" onClick={() => { void openDiscordWindow(); }}>Open Discord to sign in or create an account →</button>
 
-    <fieldset className="role-picker"><legend>3. What do you want to do here?</legend>
-      {options.map((option) => <label key={option.value} className={wantedRole === option.value ? "role-option picked" : "role-option"}>
-        <input type="radio" name="wanted-role" value={option.value} checked={wantedRole === option.value} onChange={() => setWantedRole(option.value)} />
-        <span className="role-bubble" aria-hidden="true" />
-        <span><strong>{option.label}</strong><small>{option.hint}</small></span>
-      </label>)}
-    </fieldset>
+      <button className="continue-profile" disabled={!name.trim()} onClick={() => setStep(2)}>Next</button>
+    </>}
 
-    <label>4. Your Discord name (for team messages)
-      <input value={discordName} placeholder="Leave blank if you don't have one yet" onChange={(event) => setDiscord(event.target.value)} />
-    </label>
-    <button className="text-button" onClick={() => { void openDiscordWindow(); }}>Open Discord to sign in or create an account →</button>
+    {step === 2 && <>
+      <p><strong>What do you read?</strong> This tells MaggotClaw whose eyes he's getting. Answer what you like and skip the rest.</p>
 
-    <label>5. How fast should the narrator read to you?
-      <select value={readingSpeed} onChange={(event) => setReadingSpeed(Number(event.target.value))}>
-        <option value="0.8">Slower</option><option value="1">Normal</option><option value="1.2">Faster</option><option value="1.4">Much Faster</option>
-      </select>
-    </label>
+      <label>What do you usually read?
+        <textarea rows={2} value={details.reads} placeholder="Horror, southern gothic, history, true crime, whatever's around…" onChange={(event) => set({ reads: event.target.value })} />
+      </label>
+      <label>Favourite authors
+        <input value={details.authors} placeholder="Who do you always come back to?" onChange={(event) => set({ authors: event.target.value })} />
+      </label>
+      <label>Have you read for a writer before?
+        <select value={details.betaBefore} onChange={(event) => set({ betaBefore: event.target.value })}>
+          <option value="">— Choose one —</option>
+          <option>No, this is my first time</option>
+          <option>A little</option>
+          <option>Yes, plenty</option>
+        </select>
+      </label>
+      <label>How much do you usually read in a week?
+        <select value={details.pace} onChange={(event) => set({ pace: event.target.value })}>
+          <option value="">— Choose one —</option>
+          <option>A few pages when I can</option>
+          <option>An hour or two</option>
+          <option>Several hours</option>
+          <option>I read constantly</option>
+        </select>
+      </label>
+      <label>Do you prefer being read to, or reading it yourself?
+        <select value={details.prefers} onChange={(event) => set({ prefers: event.target.value })}>
+          <option value="">— Choose one —</option>
+          <option>Read to me</option>
+          <option>I'll read it myself</option>
+          <option>Both, depending on the day</option>
+        </select>
+      </label>
+      <label>Anything you would rather not read? (this book is dark)
+        <input value={details.avoid} placeholder="Tell MaggotClaw now and he'll warn you" onChange={(event) => set({ avoid: event.target.value })} />
+      </label>
+      <label>Who invited you?
+        <input value={details.invitedBy} onChange={(event) => set({ invitedBy: event.target.value })} />
+      </label>
 
-    {pinAlreadySet
-      ? <p className="board-hint">Your recovery PIN is already saved for this name.</p>
-      : <>
-          <label>6. Pick a four-digit PIN
-            <input inputMode="numeric" maxLength={4} value={pin} placeholder="1234" onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))} />
-          </label>
-          <label>Type the PIN again
-            <input inputMode="numeric" maxLength={4} value={pinAgain} onChange={(event) => setPinAgain(event.target.value.replace(/\D/g, ""))} />
-          </label>
-          <small className="board-hint">Your name and PIN together identify you if you ever move to a new computer. The PIN itself is never stored or shared.</small>
-          <small className="board-hint">So MaggotClaw can cheer you on, the app shares how far you have read — never your comments until you choose to send them.</small>
-          {pinProblem && <p className="update-status warn">{pinProblem}</p>}
-        </>}
+      <div className="form-actions"><button onClick={() => setStep(1)}>← Back</button><button className="continue-profile" onClick={() => setStep(3)}>Next</button></div>
+    </>}
 
-    <button className="continue-profile" disabled={!name.trim() || !pinOk} onClick={() => {
-      // "Test Profile" is the local test identity with full owner controls —
-      // nobody should wander into it by accident.
-      if (name.trim() === "Test Profile" && !window.confirm("Test Profile is the local test identity with full owner controls on this computer. Is that really what you want?")) return;
-      onContinue({ name, discordName, wantedRole, nickname, pin, readingSpeed });
-    }}>Get Started</button>
+    {step === 3 && <>
+      <p><strong>How you'll use it.</strong> Last few.</p>
+
+      <label>What do you want to do here?
+        <select value={wantedRole} onChange={(event) => setWantedRole(event.target.value as ProjectRole)}>
+          {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+      </label>
+      <small className="board-hint">{options.find((o) => o.value === wantedRole)?.hint}</small>
+
+      <label>How fast should the narrator read to you?
+        <select value={readingSpeed} onChange={(event) => setReadingSpeed(Number(event.target.value))}>
+          <option value="0.8">Slower</option><option value="1">Normal</option><option value="1.2">Faster</option><option value="1.4">Much Faster</option>
+        </select>
+      </label>
+
+      <label>Anything else MaggotClaw should know? (optional)
+        <textarea rows={2} value={details.notes} onChange={(event) => set({ notes: event.target.value })} />
+      </label>
+
+      {pinAlreadySet
+        ? <p className="board-hint">Your recovery PIN is already saved for this name.</p>
+        : <>
+            <label>Pick a four-digit PIN
+              <input inputMode="numeric" maxLength={4} value={pin} placeholder="1234" onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))} />
+            </label>
+            <label>Type the PIN again
+              <input inputMode="numeric" maxLength={4} value={pinAgain} onChange={(event) => setPinAgain(event.target.value.replace(/\D/g, ""))} />
+            </label>
+            <small className="board-hint">Your name and PIN together identify you if you ever move to a new computer. The PIN itself is never stored or shared.</small>
+            {pinProblem && <p className="update-status warn">{pinProblem}</p>}
+          </>}
+      <small className="board-hint">So MaggotClaw can cheer you on, the app shares how far you have read — never your comments until you choose to send them.</small>
+
+      <div className="form-actions">
+        <button onClick={() => setStep(2)}>← Back</button>
+        <button className="continue-profile" disabled={!name.trim() || !pinOk} onClick={() => {
+          // "Test Profile" is the local test identity with full owner controls —
+          // nobody should wander into it by accident.
+          if (name.trim() === "Test Profile" && !window.confirm("Test Profile is the local test identity with full owner controls on this computer. Is that really what you want?")) return;
+          onContinue({ name, discordName, wantedRole, nickname, pin, readingSpeed, details });
+        }}>Get Started</button>
+      </div>
+    </>}
   </main>;
 }
 // One project file in its own window: full text (or Word formatting), with
@@ -2139,7 +2222,7 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
     {isOwner && <>
       <hr/><p className="eyebrow">View the app as someone else</p>
       <fieldset className="role-picker compact"><legend>See every screen the way they see it. Click your name on the main page to come back.</legend>
-        {(["administrator", "editor", "reviewer", "contributor", "reader", "support"] as ProjectRole[]).map((option) => <label key={option} className={(viewAs ?? "administrator") === option ? "role-option picked" : "role-option"}>
+        {(["administrator", "support", "manager", "editor", "reviewer", "contributor", "reader"] as ProjectRole[]).map((option) => <label key={option} className={(viewAs ?? "administrator") === option ? "role-option picked" : "role-option"}>
           <input type="radio" name="view-as" checked={(viewAs ?? "administrator") === option} onChange={() => { setViewAs(option === "administrator" ? null : option); window.location.reload(); }} />
           <span className="role-bubble" aria-hidden="true" />
           <span><strong>{roleLabel(option)}</strong></span>

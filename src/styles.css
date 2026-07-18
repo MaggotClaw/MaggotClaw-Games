@@ -59,6 +59,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .chat-rooms li button:hover { border-color: var(--mc-green, #00efb1); }
 .chat-rooms li button.active { background: #14241f; border-color: var(--mc-green, #00efb1); }
 .chat-inline-form { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: #0d1614; border: 1px solid #1e2c28; border-radius: 9px; }
+.step-row { display: flex; gap: 10px; justify-content: center; margin: 4px 0 10px; }
+.step-dot { width: 30px; height: 30px; display: grid; place-items: center; color: var(--mc-muted, #9aa7a2); background: #0d1614; border: 1px solid #2c3a35; border-radius: 50%; font-weight: 800; font-size: .85rem; }
+.step-dot.on { color: #00140e; background: var(--mc-green, #00efb1); border-color: var(--mc-green, #00efb1); }
+.step-dot.done { color: var(--mc-green-soft, #7fd9c4); border-color: #2c8d75; }
+
 /* The OK GO button — floats over Claude, dragged anywhere, counts down. */
 html:has(.okgo-shell), body:has(.okgo-shell), body:has(.okgo-shell) #root { width: 100%; height: 100%; overflow: hidden; background: transparent; }
 .okgo-shell { width: calc(100vw - 10px); height: calc(100vh - 10px); margin: 5px; display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: linear-gradient(180deg, #101614f5, #030706fa); border: 1px solid #315a50; border-radius: 20px; box-shadow: inset 0 1px #ffffff18, 0 4px 12px #000a; cursor: move; user-select: none; -webkit-user-select: none; }

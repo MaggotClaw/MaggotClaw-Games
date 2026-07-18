@@ -23,6 +23,7 @@ export const ACCESS_LEVEL_LABELS: Array<{ value: FileAccessLevel; label: string 
   { value: "contributor", label: "Contributor And Up" },
   { value: "reviewer", label: "Reviewer And Up" },
   { value: "editor", label: "Editor And Up" },
+  { value: "manager", label: "Editor / Manager And Up" },
   { value: "support", label: "Support And Owner" },
   { value: "administrator", label: "Owner Only" },
   { value: "excluded", label: "Not Needed In App" }

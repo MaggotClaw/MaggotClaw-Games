@@ -31,7 +31,7 @@ export const CHAT_ROOMS: ChatRoom[] = [
   { id: "owner", name: "Owner only", purpose: "Private notes and admin matters.", minRole: "administrator" }
 ];
 
-const ROLE_RANK: Record<ProjectRole, number> = { reader: 0, contributor: 1, reviewer: 2, editor: 3, support: 4, administrator: 5 };
+const ROLE_RANK: Record<ProjectRole, number> = { reader: 0, contributor: 1, reviewer: 2, editor: 3, manager: 4, support: 5, administrator: 6 };
 
 export function visibleRooms(role: ProjectRole): ChatRoom[] {
   return CHAT_ROOMS.filter((room) => ROLE_RANK[role] >= ROLE_RANK[room.minRole]);

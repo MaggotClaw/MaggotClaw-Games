@@ -1,4 +1,4 @@
-export type ProjectRole = "reader" | "contributor" | "reviewer" | "editor" | "support" | "administrator";
+export type ProjectRole = "reader" | "contributor" | "reviewer" | "editor" | "manager" | "support" | "administrator";
 export type ProjectAction = "download" | "review" | "propose" | "upload" | "manage";
 
 // Mapped to "82 Codex, Roles, Duties & Authority": readers/contributors (L1) may
@@ -9,7 +9,9 @@ const roleActions: Record<ProjectRole, ReadonlySet<ProjectAction>> = {
   reader: new Set(["download", "propose"]),
   contributor: new Set(["download", "propose"]),
   reviewer: new Set(["download", "review", "propose"]),
+  // An editor works on the book; a manager also approves people.
   editor: new Set(["download", "review", "propose", "upload"]),
+  manager: new Set(["download", "review", "propose", "upload", "manage"]),
   support: new Set(["download", "review", "propose", "manage"]),
   administrator: new Set(["download", "review", "propose", "upload", "manage"])
 };
@@ -18,19 +20,20 @@ const ROLE_LABELS: Record<ProjectRole, string> = {
   reader: "Reader",
   contributor: "Contributor",
   reviewer: "Reviewer",
-  editor: "Editor / Manager",
+  editor: "Editor",
+  manager: "Editor / Manager",
   support: "Technical Support",
   administrator: "Author / Owner"
 };
 
 // Ascending authority — used to order requestable upgrades and compare levels.
-export const ROLE_ORDER: ProjectRole[] = ["reader", "contributor", "reviewer", "editor", "support", "administrator"];
+export const ROLE_ORDER: ProjectRole[] = ["reader", "contributor", "reviewer", "editor", "manager", "support", "administrator"];
 
 export function roleLabel(role: ProjectRole): string {
   return ROLE_LABELS[role] ?? role;
 }
 
-const ALL_ROLES: ProjectRole[] = ["reader", "contributor", "reviewer", "editor", "support", "administrator"];
+const ALL_ROLES: ProjectRole[] = [...ROLE_ORDER];
 
 // The owner (or support) can temporarily see the app as a lower role to judge
 // what each kind of person experiences. Never changes the real stored role.
