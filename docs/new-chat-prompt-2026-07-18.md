@@ -11,6 +11,14 @@ Continue the MaggotClaw Games Windows app. Do not restart the design.
 - Local workspace: `Documents\MaggotClaw Games\<Project Name>`
 - Bridge (now optional): `C:\Users\QinOt\the-long-rot-mcp` — the app talks to
   Dropbox directly once the project keys are saved
+- **Hosted bridge — LIVE, do not forget this exists:**
+  `https://maggotclaw-games-long-rot-mcp.onrender.com/mcp`, on Render, OAuth
+  via Auth0 (scope `mcp:tools`). Verified up on 2026-07-18: `/health` 200,
+  `/mcp` 401, discovery correct. This is what lets **claude.ai add MaggotClaw
+  as a custom connector** — Claude reaching the project files with nothing
+  running on the PC. Config: `the-long-rot-mcp/render.yaml`. Deploys from
+  branch `remote-mcp` with auto-deploy OFF, so the running code may be older
+  than the local checkout; free plan sleeps when idle.
 - GitHub: `MaggotClaw/MaggotClaw-Games` (still PUBLIC — see Decisions)
 - Settings backup: `Documents\MaggotClaw Games Settings Backup.json`
 

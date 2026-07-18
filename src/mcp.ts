@@ -84,6 +84,20 @@ export class LongRotMcpClient {
     return this.callTool("read_dropbox_text_file", { path });
   }
 
+  // Word documents and other binaries download straight to disk in Rust — the
+  // bytes never pass through here. Only the direct Dropbox connection can do
+  // it; the bridge has no binary tool, so callers fall back to skipping.
+  canDownloadBinaries(): boolean {
+    return Boolean(this.direct());
+  }
+
+  async downloadBinary(path: string, revisionId: string | null): Promise<{ localRelativePath: string }> {
+    const creds = this.direct();
+    if (!creds) throw new Error("Word and other document files need the direct Dropbox connection.");
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<{ localRelativePath: string }>("download_project_binary_file", { creds, dropboxPath: path, revisionId });
+  }
+
   async currentRevision(path: string): Promise<string | null> {
     const creds = this.direct();
     if (creds) {

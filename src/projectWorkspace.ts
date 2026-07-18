@@ -26,6 +26,28 @@ const TEXT_EXTENSIONS = new Set([
   "log", "ini", "toml"
 ]);
 
+// Documents worth having on the reader's machine. Anything outside both lists
+// (images, video, archives) stays skipped: downloading it would cost time and
+// disk for something the app cannot show anyway.
+const DOCUMENT_EXTENSIONS = new Set(["docx", "doc", "rtf", "odt", "pdf"]);
+
+// Only Word documents can have their words pulled out for the AI Context copy.
+const isWordDocument = (name: string) => /\.docx$/i.test(name);
+
+// Extracts the readable prose from a downloaded .docx and files it in
+// "03 AI Context", so a Word chapter is as usable by Claude as a text one.
+// A failure here never fails the download — the document itself is already safe.
+async function writeWordAiContext(dropboxPath: string, localRelativePath: string): Promise<void> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const bytes = await invoke<number[]>("read_project_document_bytes", { localRelativePath });
+    const mammoth = await import("mammoth/mammoth.browser");
+    const buffer = new Uint8Array(bytes).buffer;
+    const text = (await mammoth.extractRawText({ arrayBuffer: buffer })).value.trim();
+    if (text) await invoke("save_project_ai_context", { dropboxPath, content: text });
+  } catch { /* the document downloaded; only its AI copy is missing */ }
+}
+
 export function workspaceStatus(): Promise<WorkspaceStatus> {
   return invoke("project_workspace_status");
 }
@@ -77,9 +99,31 @@ export async function downloadProject(
       const extension = file.name.includes(".") ? file.name.split(".").pop()!.toLowerCase() : "";
       // Files with no extension are almost always plain text notes.
       if (extension && !TEXT_EXTENSIONS.has(extension)) {
-        await invoke("record_project_binary_file", { dropboxPath: file.path });
-        skipped += 1;
-        onProgress({ stage: `Skipped ${file.name}; binary download support is not available yet`, completed, total: files.length, skipped });
+        if (!DOCUMENT_EXTENSIONS.has(extension)) {
+          // Pictures, video, archives: nothing the app can show, so they are
+          // noted and left on Dropbox rather than filling up the machine.
+          await invoke("record_project_binary_file", { dropboxPath: file.path });
+          skipped += 1;
+          onProgress({ stage: `Left ${file.name} on Dropbox; the app cannot open that kind of file`, completed, total: files.length, skipped });
+          continue;
+        }
+        if (!client.canDownloadBinaries()) {
+          await invoke("record_project_binary_file", { dropboxPath: file.path });
+          skipped += 1;
+          onProgress({ stage: `Skipped ${file.name}; Word documents need the direct Dropbox connection`, completed, total: files.length, skipped });
+          continue;
+        }
+        const documentRevision = await client.currentRevision(file.path);
+        if (documentRevision && known.get(file.path) === documentRevision) {
+          unchanged += 1;
+          onProgress({ stage: `${file.name} is already current`, completed, total: files.length, skipped });
+          continue;
+        }
+        onProgress({ stage: `Downloading ${file.name}`, completed, total: files.length, skipped });
+        const saved = await client.downloadBinary(file.path, documentRevision);
+        if (isWordDocument(file.name)) await writeWordAiContext(file.path, saved.localRelativePath);
+        completed += 1;
+        onProgress({ stage: `Saved ${file.name}`, completed, total: files.length, skipped });
         continue;
       }
       const revisionBefore = await client.currentRevision(file.path);
@@ -125,7 +169,7 @@ export async function downloadProject(
   }
 
   const parts = [`${completed} saved`, `${unchanged} already current`];
-  if (skipped) parts.push(`${skipped} waiting on binary support`);
+  if (skipped) parts.push(`${skipped} left on Dropbox`);
   if (retired) parts.push(`${retired} removed on Dropbox (tucked into Backups)`);
   if (withheld) parts.push(`${withheld} not needed for your role`);
   if (failures.length) parts.push(`${failures.length} had problems: ${failures[0]}${failures.length > 1 ? "…" : ""}`);

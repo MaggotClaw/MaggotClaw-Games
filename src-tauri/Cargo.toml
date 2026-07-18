@@ -1,6 +1,6 @@
 [package]
 name = "maggotclaw-games"
-version = "0.6.7"
+version = "1.6.0-beta"
 description = "Windows reader, feedback, and voice companion for MaggotClaw Games"
 authors = ["Maggot Claw"]
 edition = "2021"

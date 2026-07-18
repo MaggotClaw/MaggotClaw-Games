@@ -310,6 +310,88 @@ pub fn save_project_text_file(
     Ok(record)
 }
 
+/// Downloads a Word document (or any other non-text project file) straight from
+/// Dropbox into "01 Originals". The bytes never travel through the front end,
+/// so a large chapter costs one download instead of a download plus a bloated
+/// JSON round trip.
+///
+/// There is no "03 AI Context" copy here: a .docx is a zip, not readable prose.
+/// The front end extracts the words afterwards and calls
+/// `save_project_ai_context`, which is what keeps Word chapters usable by Claude.
+#[tauri::command]
+pub async fn download_project_binary_file(
+    creds: crate::dropbox::DropboxCreds,
+    dropbox_path: String,
+    revision_id: Option<String>,
+) -> Result<WorkspaceFile, String> {
+    let root = initialize()?;
+    let relative = safe_relative_path(&dropbox_path)?;
+    let original = root.join("01 Originals").join(&relative);
+    let content = crate::dropbox::download_bytes(&creds, &dropbox_path).await?;
+    let mut hasher = Sha256::new();
+    hasher.update(&content);
+    let content_hash = format!("{:x}", hasher.finalize());
+    let mut manifest = load_manifest(&root)?;
+
+    // Same courtesy the text path gives: the previous copy is kept before the
+    // new one lands, so a bad overwrite is always recoverable locally.
+    if original.exists() {
+        let old = fs::read(&original)
+            .map_err(|_| "The existing local original could not be backed up.".to_string())?;
+        let mut old_hasher = Sha256::new();
+        old_hasher.update(&old);
+        if format!("{:x}", old_hasher.finalize()) != content_hash {
+            let backup = root
+                .join("07 Backups")
+                .join(timestamp())
+                .join("01 Originals")
+                .join(&relative);
+            write_copy(&backup, &old)?;
+        }
+    }
+
+    write_copy(&original, &content)?;
+
+    let record = WorkspaceFile {
+        dropbox_path: dropbox_path.clone(),
+        local_relative_path: relative.display().to_string(),
+        revision_id,
+        content_hash,
+        downloaded_at: timestamp(),
+        byte_count: content.len(),
+        status: "downloaded".to_string(),
+    };
+    manifest
+        .files
+        .retain(|item| item.dropbox_path != dropbox_path);
+    manifest.files.push(record.clone());
+    manifest
+        .files
+        .sort_by(|left, right| left.dropbox_path.cmp(&right.dropbox_path));
+    manifest.last_download_at = Some(timestamp());
+    manifest.upload_enabled = false;
+    save_manifest(&root, &manifest)?;
+    Ok(record)
+}
+
+/// Writes the "03 AI Context" copy for a file whose readable text had to be
+/// extracted elsewhere (Word documents). Text files get theirs written during
+/// `save_project_text_file`; this is the same job for the binary path.
+#[tauri::command]
+pub fn save_project_ai_context(dropbox_path: String, content: String) -> Result<(), String> {
+    let root = initialize()?;
+    let relative = safe_relative_path(&dropbox_path)?;
+    let ai_relative = PathBuf::from(format!("{}.md", relative.display()));
+    let ai_copy = root.join("03 AI Context").join(&ai_relative);
+    let heading = relative
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("Project file");
+    let ai_content =
+        format!("# {heading}\n\n<!-- Source: {dropbox_path} | Extracted from a Word document -->\n\n{content}");
+    write_copy(&ai_copy, ai_content.as_bytes())
+}
+
 #[tauri::command]
 pub fn record_project_binary_file(dropbox_path: String) -> Result<WorkspaceFile, String> {
     let root = initialize()?;

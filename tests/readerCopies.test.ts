@@ -77,3 +77,38 @@ describe("reader copies", () => {
     expect(isChapterUnlocked(2, "reader", [1, 3])).toBe(false);
   });
 });
+
+describe("the owner's chosen reader copy", () => {
+  const textCopy = doc("C01-R Chapter 01 Reader Copy - The Bounty v3.0.txt");
+  const wordCopy = doc("C01-R Chapter 01 Reader Copy - The Bounty v1.0.docx");
+
+  it("opens the chosen file even when another version is newer", () => {
+    const list = readerCopies([textCopy, wordCopy], { 1: wordCopy.dropboxPath });
+    expect(list).toHaveLength(1);
+    expect(list[0].fileName).toMatch(/\.docx$/);
+  });
+
+  it("falls back to the automatic rule when a chapter has no pick", () => {
+    const list = readerCopies([textCopy, wordCopy], {});
+    expect(list[0].version).toBe("3.0");
+  });
+
+  it("never hides a chapter when the pick points at a missing file", () => {
+    const list = readerCopies([textCopy], { 1: "/The Long Rot/gone.docx" });
+    expect(list).toHaveLength(1);
+    expect(list[0].version).toBe("3.0");
+  });
+
+  it("leaves other chapters on the automatic rule", () => {
+    const two = doc("C02-R Chapter 02 Reader Copy - The Blackwood v2.0.txt");
+    const list = readerCopies([textCopy, wordCopy, two], { 1: wordCopy.dropboxPath });
+    expect(list.map((d) => d.chapter)).toEqual([1, 2]);
+    expect(list[1].version).toBe("2.0");
+  });
+
+  it("ignores a pick for a file that is not downloaded", () => {
+    const pending = doc("C01-R Chapter 01 Reader Copy - The Bounty v1.0.docx", "needs-binary-download");
+    const list = readerCopies([textCopy, pending], { 1: pending.dropboxPath });
+    expect(list[0].version).toBe("3.0");
+  });
+});

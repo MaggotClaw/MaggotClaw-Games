@@ -107,6 +107,20 @@ export const WALKTHROUGHS: Walkthrough[] = [
     ]
   },
   {
+    id: "claude-connector",
+    name: "Putting MaggotClaw In Claude's Menu",
+    forOwner: true,
+    why: "Claude reads and writes your project files itself, from anywhere, with nothing running on this computer.",
+    steps: [
+      { say: "Your project already has its own server online. This puts it in Claude's own menu, so Claude can open your chapters and codices without you pasting anything. About five minutes.", screen: "home" },
+      { say: "I have opened Claude's settings. Go to Connectors, then press Add Custom Connector.", open: "https://claude.ai/settings/connectors" },
+      { say: "Paste this as the server address. It is already on your clipboard.", copy: "https://maggotclaw-games-long-rot-mcp.onrender.com/mcp", heads: "Name it MaggotClaw Games so you recognise it later." },
+      { say: "It will ask you to sign in. Use the Auth0 details saved in Bitwarden under Auth0 – The Long Rot MCP – Claude.", heads: "Never type your Dropbox password or keys into Claude. It does not need them — the server holds them." },
+      { say: "When it says Connected, start a fresh chat and ask Claude to list your chapters. If it answers with real filenames, it is working.", heads: "The first request after a quiet spell takes about thirty seconds — the server wakes up. That is normal." },
+      { say: "From now on Claude can read the codices and your chapters directly. Anything that changes the book still waits for your OK GO.", screen: "home" }
+    ]
+  },
+  {
     id: "voice-companion",
     name: "Talking To The AI",
     forOwner: false,

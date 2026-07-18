@@ -494,6 +494,8 @@ pub fn run() {
             project_workspace::project_workspace_status,
             project_workspace::save_project_text_file,
             project_workspace::record_project_binary_file,
+            project_workspace::download_project_binary_file,
+            project_workspace::save_project_ai_context,
             project_workspace::open_project_workspace,
             project_workspace::list_project_documents,
             project_workspace::read_project_document,

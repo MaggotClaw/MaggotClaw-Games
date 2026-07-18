@@ -13,13 +13,19 @@ export const DEFAULT_UNLOCKED_CHAPTERS: number[] = [1, 2, 3, 4];
 
 const STORAGE_KEY = "mcg-unlocked-chapters";
 
-// One entry per chapter, newest version wins, in chapter order.
-export function readerCopies(docs: ProjectDocument[]): ParsedDoc[] {
+// One entry per chapter, in chapter order.
+//
+// `picks` is the owner's explicit choice of which file readers open for a
+// chapter. A pick always wins, whatever its version or format — that is the
+// point of choosing. Chapters with no pick fall back to the automatic rule.
+export function readerCopies(docs: ProjectDocument[], picks: Record<number, string> = {}): ParsedDoc[] {
   const byChapter = new Map<number, ParsedDoc>();
+  const chosen = new Map<number, ParsedDoc>();
   for (const doc of docs) {
     if (doc.status !== "downloaded") continue;
     const parsed = parseDoc(doc);
     if (parsed.typeCode !== "R" || parsed.chapter == null) continue;
+    if (picks[parsed.chapter] === doc.dropboxPath) chosen.set(parsed.chapter, parsed);
     const existing = byChapter.get(parsed.chapter);
     const isWord = (item: ParsedDoc) => /\.docx$/i.test(item.fileName);
     // The newest version always wins, whatever its format — an old Word file
@@ -33,6 +39,10 @@ export function readerCopies(docs: ProjectDocument[]): ParsedDoc[] {
       byChapter.set(parsed.chapter, parsed);
     }
   }
+  // The owner's pick replaces the automatic winner — but only when that file is
+  // really here. A pick left pointing at a renamed or undownloaded file must
+  // never make the chapter vanish off the shelf; it quietly reverts instead.
+  for (const [chapter, parsed] of chosen) byChapter.set(chapter, parsed);
   return [...byChapter.values()].sort((a, b) => (a.chapter ?? 0) - (b.chapter ?? 0));
 }
 

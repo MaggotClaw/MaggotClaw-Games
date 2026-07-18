@@ -20,6 +20,7 @@ export interface AccessRequest {
   createdAt: string;
   decidedAt?: string;
   decidedBy?: string;
+  dismissedAt?: string;    // set aside by the owner — still pending, just out of the queue
 }
 
 const STORAGE_KEY = "mcg-access-requests";
@@ -35,8 +36,15 @@ export function addRequest(list: AccessRequest[], request: AccessRequest): Acces
 
 export function pending(list: AccessRequest[]): AccessRequest[] {
   return list
-    .filter((r) => r.status === "pending")
+    .filter((r) => r.status === "pending" && !r.dismissedAt)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+// The owner presses the X: not approved, not denied, nothing goes back to the
+// person — the request just leaves the queue. Asking again makes a fresh
+// request (addRequest drops the old pending one), so it returns undismissed.
+export function dismissRequest(list: AccessRequest[], id: string, dismissedAt: string): AccessRequest[] {
+  return list.map((r) => (r.id === id && r.status === "pending" ? { ...r, dismissedAt } : r));
 }
 
 // Resolve one request. Returns the updated list plus, when approved, the role
@@ -103,4 +111,8 @@ export function decideAccessRequest(id: string, approve: boolean, decidedBy: str
 
 export function pendingRequests(): AccessRequest[] {
   return pending(loadRequests());
+}
+
+export function dismissAccessRequest(id: string): void {
+  save(dismissRequest(loadRequests(), id, new Date().toISOString()));
 }

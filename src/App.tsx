@@ -8,19 +8,22 @@ import { ProjectExplorer } from "./ProjectExplorer";
 import { deleteComment, loadDocument, loadPosition, loadRecoverableComments, loadSavedComments, saveComment, saveDocument, savePosition } from "./storage";
 import type { ConnectionSettings, DocumentRecord, ReaderComment } from "./types";
 import { loadVoiceSettings, saveVoiceSettings, type VoiceSettings } from "./voiceSettings";
+import { createConversationAdapter } from "./desktopConversation";
 import { downloadProject, formatWorkspaceTime, initializeWorkspace, openWorkspace, workspaceStatus, type DownloadProgress, type WorkspaceStatus } from "./projectWorkspace";
 import { canPerform, profileRole, realProfileRole, getViewAs, setViewAs, roleLabel, ROLE_ORDER, setProfileRole, type ProjectRole } from "./permissions";
-import { decideAccessRequest, pendingRequests, submitAccessRequest, type AccessRequest } from "./accessRequests";
+import { decideAccessRequest, dismissAccessRequest, pendingRequests, submitAccessRequest, type AccessRequest } from "./accessRequests";
 import { makeRequestCode, makeUnlockCode, parseRequestCode, parseUnlockCode, unlockMatchesProfile } from "./accessCodes";
 import { fetchSharedReleases, isChapterUnlocked, loadUnlockedChapters, publishReleases, readerCopies, saveUnlockedChapters } from "./readerCopies";
 import { listenForNativeSpeech, NativeTranscriptAssembler, startNativeDictation, stopNativeDictation } from "./nativeSpeech";
-import type { ParsedDoc, ProjectDocument } from "./projectDocs";
+import { parseDoc, type ParsedDoc, type ProjectDocument } from "./projectDocs";
 import { invoke } from "@tauri-apps/api/core";
 import { UpdateChecker } from "./UpdateChecker";
 import { ChatScreen } from "./ChatScreen";
 import { getDiscordName, setDiscordName, getRequestWebhook, setRequestWebhook, isDiscordWebhook, requestAnnouncement, sendRequestToDiscord, fetchDiscordRequests, postUnlockToDiscord, postUnlockDecline, postRoleGrant, fetchRoleGrants, markMessageHandled, discordReadingConfigured, getBotToken, setBotToken, getRequestsChannelId, setRequestsChannelId, getRelayChannelId, setRelayChannelId, messagingConnected, type DiscordRequestMessage } from "./discordLink";
 import { checkProjectSync, syncNote } from "./startupSync";
 import { ACCESS_LEVEL_LABELS, fetchSharedAccessMap, loadAccessMap, publishAccessMap, setFileAccess, type FileAccessMap } from "./fileAccess";
+import { fetchSharedChapterFiles, loadChapterFiles, publishChapterFiles, setChapterFile, type ChapterFileMap } from "./chapterFiles";
+import { changesFor, fetchSharedChangeLog, loadChangeLog, noteChange, KEPT_PER_FILE, type ChangeLogMap } from "./changeLog";
 import { getNickname } from "./profileInfo";
 import { downloadProjectViaLinks, fetchCatalog, getCatalogUrl, publishReaderLinks, readerLinksConfigured } from "./readerLinks";
 import { loadPronunciations, savePronunciations, type Pronunciation } from "./pronunciation";
@@ -668,7 +671,7 @@ export function App() {
       for (const relative of wordFiles) {
         docs.push({ dropboxPath: `local:${relative}`, localRelativePath: relative, revisionId: null, byteCount: 0, status: "downloaded" });
       }
-      const shelf = readerCopies(docs);
+      const shelf = readerCopies(docs, loadChapterFiles());
       setShelf(shelf);
       const open = shelf.filter((item) => isChapterUnlocked(item.chapter, role, unlockedChapters)).length;
       setStatus(shelf.length ? `${shelf.length} chapters · ${open} available to read` : "No chapters downloaded yet");
@@ -1078,7 +1081,15 @@ export function App() {
     // name can appear under Direct Messages at the right level.
     if (approve && request) recordJoin(request.name, "", request.requestedRole);
     refreshRequests();
-    setStatus(approve ? "Access granted. The reader's role has been raised." : "Request declined. Nothing was changed for that reader.");
+    setStatus(approve ? "Access granted. The reader's role has been raised." : "Request denied. Nothing was changed for that reader.");
+  }
+
+  // The X: set aside, not decided. Nothing goes back to the person; if they ask
+  // again the fresh request replaces this one and reappears here.
+  function dismissRequest(id: string) {
+    dismissAccessRequest(id);
+    refreshRequests();
+    setStatus("Set aside. Nobody was told — it returns if they ask again.");
   }
 
   function sendAccessRequest(requestedRole: ProjectRole, reason: string) {
@@ -1129,8 +1140,12 @@ export function App() {
       for (const relative of files) {
         try {
           const content = await invoke<string>("read_approved_upload", { localRelativePath: relative });
-          await client.writeText(`${activeProject().dropboxRoot}/${relative}`, content);
+          const dropboxPath = `${activeProject().dropboxRoot}/${relative}`;
+          await client.writeText(dropboxPath, content);
           await invoke("archive_approved_upload", { localRelativePath: relative });
+          // The log writes itself from who is signed in — nobody is asked to
+          // explain a change they just made.
+          await noteChange(client, dropboxPath, readerName);
           sent += 1;
           setStatus(`Uploaded ${relative} (${sent}/${files.length})`);
         } catch (error) {
@@ -1254,7 +1269,7 @@ export function App() {
         if (ideaListening) { commentDictationActive.current = false; setIdeaListening(false); void stopNativeDictation().catch(() => undefined); }
         setScreen("home");
       }}>← Back</button>
-      <BrandLogo compact /><p className="eyebrow">NOTE TO SELF</p><h1>Catch The Idea</h1>
+      <BrandLogo compact /><p className="eyebrow">Note To Self</p><h1>Catch The Idea</h1>
       <p>Speak or type it. It lands dated in 02 Working Files → Ideas — never touching the book until you promote it.</p>
       <label>The idea<textarea rows={8} value={ideaText} placeholder="Speak, or type here…" onChange={(event) => setIdeaText(event.target.value)} /></label>
       <div className="form-actions">
@@ -1292,7 +1307,7 @@ export function App() {
   }
 
   if (screen === "dashboard") {
-    return <OwnerDashboard requests={requests} onDecide={decideRequest} onBack={() => setScreen("home")} client={client} onReleasesChanged={setUnlockedChapters} />;
+    return <OwnerDashboard requests={requests} onDecide={decideRequest} onDismiss={dismissRequest} onBack={() => setScreen("home")} client={client} onReleasesChanged={setUnlockedChapters} />;
   }
 
   if (screen === "chat") {
@@ -1331,6 +1346,9 @@ export function App() {
           ? <button className="pill-button chip" onClick={() => { setViewAs(null); window.location.reload(); }}>Viewing as {roleLabel(role)} — back</button>
           : <button className="pill-button chip" onClick={() => setScreen("profile")}>{readerName || "Start Here"}</button>}
         {"__TAURI_INTERNALS__" in window && <button className="pill-button chip" onClick={() => { setIdeaText(""); setScreen("idea"); }}>Note To Self</button>}
+        {/* Deciding who downloads what, and which file readers open, is
+            everyday owner work — it does not belong three screens deep. */}
+        {canPerform(role, "manage") && <button className="pill-button chip" onClick={() => setScreen("workspace-files")}>Project Files</button>}
         {/* The author's own bench — owner-only unless he shares it with editors. */}
         {(canPerform(role, "manage") || (humanMakerSharedWithEditors() && canPerform(role, "upload"))) &&
           <button className="pill-button chip" onClick={() => setScreen("human-maker")}>Human Maker</button>}
@@ -1368,7 +1386,7 @@ export function App() {
 
   if (screen === "projects") {
     return <main className="app-shell projects-list-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">PROJECTS</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Projects</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
       <section className="projects-heading"><h1>Your Projects</h1><p>Select a project to open its local workspace and available actions.</p></section>
       <section className="project-tiles">
         {projectList.map((project) => {
@@ -1411,8 +1429,8 @@ export function App() {
 
   if (screen === "project-zero") {
     return <main className="app-shell project-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("projects")}>← Back</button><span className="eyebrow">PROJECT ZERO AUTHOR</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
-      <section className="project-heading"><div><p className="eyebrow">PROJECT ADDED</p><h1>Project Zero Author</h1><p>This project is selectable. Its local filing structure and remote source still need to be configured.</p></div></section>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("projects")}>← Back</button><span className="eyebrow">Project Zero Author</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <section className="project-heading"><div><p className="eyebrow">Project Added</p><h1>Project Zero Author</h1><p>This project is selectable. Its local filing structure and remote source still need to be configured.</p></div></section>
       <section className="workspace-card"><div><span>Local workspace</span><strong>Not prepared</strong><small>No Project Zero Author files have been created or changed.</small></div><div><span>Remote files</span><strong>Not connected</strong><small>No Dropbox location or other source has been assigned.</small></div><div><span>Project actions</span><strong>Safely locked</strong><small>Download and upload stay unavailable until the project source is explicitly configured.</small></div></section>
       <section className="workspace-actions"><button disabled>Prepare Workspace</button><button disabled>Download or Update</button>{canPerform(role, "review") && <button disabled>Review Changes</button>}{canPerform(role, "upload") && <button disabled>Upload Approved</button>}</section>
       <footer className="safe-status">Project Zero Author has been added to the app. Nothing was synchronized.</footer>
@@ -1421,7 +1439,7 @@ export function App() {
 
   if (screen === "project-review") {
     return <main className="app-shell project-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("project-workspace")}>← Back</button><span className="eyebrow">REVIEW QUEUE</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("project-workspace")}>← Back</button><span className="eyebrow">Review Queue</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
       <section className="projects-heading"><h1>Proposed Changes</h1><p>Nothing is waiting for review yet. Future AI and human drafts will appear here before anything can be approved for upload.</p></section>
       <section className="empty-state"><strong>No proposed changes</strong><p>Dropbox remains unchanged.</p></section>
     </main>;
@@ -1433,7 +1451,7 @@ export function App() {
 
   if (screen === "things-to-do") {
     return <main className="app-shell project-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">THINGS TO DO</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Things To Do</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
       <section className="projects-heading"><h1>{setupTasks.length ? tasksHeadline(setupTasks) : "Nothing Left To Do"}</h1><p>{setupTasks.length ? "Each one opens the guide that walks you through it." : "Everything is set up. This page will tell you if that ever changes."}</p></section>
       <section className="comments-list">
         {setupTasks.map((task) => <article key={task.id} className={task.urgent ? "tell-card high" : "tell-card low"}>
@@ -1454,7 +1472,7 @@ export function App() {
 
   if (screen === "people") {
     return <main className="app-shell project-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">PEOPLE</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">People</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
       <section className="projects-heading"><h1>Your People</h1><p>Everyone in the circle, what they told you when they joined, and how to reach them.</p></section>
 
       <section className="form-actions">
@@ -1526,7 +1544,7 @@ export function App() {
   if (screen === "feedback") {
     const mine = loadFeedback();
     return <main className="app-shell project-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">TELL MAGGOTCLAW</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Tell MaggotClaw</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
       <section className="projects-heading"><h1>What Do You Think?</h1><p>Rate a part of the app, send an idea, or report a problem. Nothing leaves this computer until you press send.</p></section>
 
       <section className="dash-section">
@@ -1572,7 +1590,7 @@ export function App() {
   if (screen === "claude-access") {
     const waiting = claudeLog.filter((r) => r.state === "waiting");
     return <main className="app-shell project-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">CLAUDE</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Claude</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
       <section className="projects-heading"><h1>Claude's Hands</h1><p>What Claude is allowed to do inside the app, everything it has done, and anything waiting on your OK GO.</p></section>
 
       <section className="dash-section">
@@ -1627,8 +1645,8 @@ export function App() {
 
   if (screen === "project-workspace") {
     return <main className="app-shell project-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("projects")}>← Back</button><span className="eyebrow">LOCAL PROJECT WORKSPACE</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
-      <section className="project-heading"><div><p className="eyebrow">THE LONG ROT</p><h1>Project Workspace</h1><p>Dropbox stays the shared source. The AI works from safe copies on this computer.</p></div></section>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("projects")}>← Back</button><span className="eyebrow">Local Project Workspace</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <section className="project-heading"><div><p className="eyebrow">The Long Rot</p><h1>Project Workspace</h1><p>Dropbox stays the shared source. The AI works from safe copies on this computer.</p></div></section>
       <section className="workspace-card">
         <div><span>Local workspace</span><strong>{workspace?.initialized ? "Ready" : "Not prepared yet"}</strong><small>{workspace?.workspacePath || "The standard MaggotClaw Games Projects folder will be used."}</small></div>
         <div><span>Files downloaded</span><strong>{workspace?.downloadedFiles || 0}</strong><small>{workspace?.pendingBinaryFiles || 0} Word, PDF, image, or other binary files waiting for expanded MCP download support.<br/>Last completed file save: {formatWorkspaceTime(workspace?.lastDownloadAt || null)}{syncMessage ? <><br/>{syncMessage}</> : null}<br/><button className="text-button inline" onClick={() => setScreen("workspace-files")} disabled={!workspace?.downloadedFiles}>View The File List →</button></small></div>
@@ -1697,7 +1715,7 @@ ${item.transcriptionConfirmed}`;
   if (screen === "comment" && comment) {
     const recording = comment.status === "recording";
     return <main className="app-shell comment-shell">
-      <header className="topbar"><span className="eyebrow">READER COMMENT</span><span className="status-dot">Saved on this device</span></header>
+      <header className="topbar"><span className="eyebrow">Reader Comment</span><span className="status-dot">Saved on this device</span></header>
       <section className="comment-heading">
         <p>{recording ? "Reading paused" : "Confirm your comment"}</p>
         <h1>{recording ? "Listening…" : "Did I capture that correctly?"}</h1>
@@ -2037,6 +2055,8 @@ function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: Proj
   const isOwner = canPerform(role, "manage");
   const [docs, setDocs] = useState<ProjectDocument[]>([]);
   const [access, setAccess] = useState<FileAccessMap>(loadAccessMap);
+  const [picks, setPicks] = useState<ChapterFileMap>(loadChapterFiles);
+  const [changes, setChanges] = useState<ChangeLogMap>(loadChangeLog);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -2047,13 +2067,24 @@ function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: Proj
     // Start from the shared ratings so this machine can never publish an
     // empty or stale map over the real one.
     void fetchSharedAccessMap(client).then(({ map }) => setAccess(map)).catch(() => undefined);
+    void fetchSharedChapterFiles(client).then(setPicks).catch(() => undefined);
+    void fetchSharedChangeLog(client).then(setChanges).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Which chapter this file could stand in for, if any. Only a Reader Copy is
+  // offered — a blueprint or a draft is never what a reader opens.
+  const chapterOf = (file: ProjectDocument): number | null => {
+    const parsed = parseDoc(file);
+    return parsed.typeCode === "R" ? parsed.chapter : null;
+  };
   async function publish() {
     setBusy(true);
     try {
       await publishAccessMap(client);
-      setNote("File Access Published — every machine now downloads by these ratings.");
+      // The picks travel with the ratings: one Publish, one consistent story
+      // on every machine about what downloads and what readers open.
+      await publishChapterFiles(client);
+      setNote("File Access Published — every machine now downloads by these ratings and opens the chapters you chose.");
     } catch (error) {
       setNote(error instanceof Error && error.message.includes("no ratings yet")
         ? error.message
@@ -2080,7 +2111,7 @@ function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: Proj
   }
   const levelLabel = (path: string) => ACCESS_LEVEL_LABELS.find((l) => l.value === (access[path] ?? "reader"))?.label ?? "Reader And Up";
   return <main className="app-shell project-shell">
-    <header className="topbar"><button className="text-button" onClick={onBack}>← Back</button><span className="eyebrow">DOWNLOADED FILES</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+    <header className="topbar"><button className="text-button" onClick={onBack}>← Back</button><span className="eyebrow">Downloaded Files</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
     <section className="projects-heading"><h1>Every File On This Computer</h1><p>{isOwner
       ? "Rate each file with the lowest role that needs it. People only download what their role calls for, so their AI stays focused. Publish to share the ratings with every machine."
       : "The files your role downloads. The owner decides which files each role needs."}</p></section>
@@ -2096,10 +2127,29 @@ function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: Proj
         <div className="comment-meta"><span>{file.status === "downloaded" ? "Downloaded" : "Waiting For Binary Support"}</span><span>{file.byteCount ? `${Math.max(1, Math.round(file.byteCount / 1024))} KB` : ""}</span></div>
         <h2>{file.localRelativePath}</h2>
         {isOwner
-          ? <label>Who needs this file<select value={access[file.dropboxPath] ?? "reader"} onChange={(event) => setAccess(setFileAccess(file.dropboxPath, event.target.value as FileAccessMap[string]))}>
-              {ACCESS_LEVEL_LABELS.map((level) => <option key={level.value} value={level.value}>{level.label}</option>)}
-            </select></label>
+          ? <>
+              <label>Who needs this file<select value={access[file.dropboxPath] ?? "reader"} onChange={(event) => setAccess(setFileAccess(file.dropboxPath, event.target.value as FileAccessMap[string]))}>
+                {ACCESS_LEVEL_LABELS.map((level) => <option key={level.value} value={level.value}>{level.label}</option>)}
+              </select></label>
+              {/* Only a Reader Copy of a chapter can BE the chapter people open. */}
+              {chapterOf(file) != null && <label className="check-setting">
+                <input
+                  type="checkbox"
+                  checked={picks[chapterOf(file)!] === file.dropboxPath}
+                  onChange={(event) => setPicks(setChapterFile(chapterOf(file)!, event.target.checked ? file.dropboxPath : ""))}
+                /> This is what readers open for Chapter {chapterOf(file)}
+              </label>}
+            </>
           : <small>{levelLabel(file.dropboxPath)}</small>}
+        {/* A working tool for people who change things — readers just read. */}
+        {canPerform(role, "review") && changesFor(changes, file.dropboxPath).length > 0 && <div className="change-log">
+          <span className="eyebrow">Last {Math.min(KEPT_PER_FILE, changesFor(changes, file.dropboxPath).length)} Changes</span>
+          {changesFor(changes, file.dropboxPath).map((change) => <div key={`${change.who}-${change.at}`} className="change-line">
+            <strong>{change.who}</strong>
+            <time>{new Date(change.at).toLocaleString()}</time>
+            {change.note && <em>"{change.note}"</em>}
+          </div>)}
+        </div>}
       </article>)}
     </section>
   </main>;
@@ -2110,6 +2160,14 @@ function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: Proj
 // mechanical tell in his numbering — then hands the findings to the AI for the
 // Ok Go rewrite.
 function HumanMakerScreen({ readerName, role, onBack }: { readerName: string; role: ProjectRole; onBack: () => void }) {
+  // Defaults to whichever AI he normally talks to, but can be redirected for
+  // one audit without disturbing that setting.
+  const [sendTo, setSendTo] = useState<"claude" | "codex">(() => {
+    // "auto" is a valid everyday setting but means nothing here — the audit
+    // has to name where it is going, so fall back to Claude.
+    const target = loadVoiceSettings(localStorage.getItem("long-rot-reader-name") || "local").target;
+    return target === "codex" ? "codex" : "claude";
+  });
   const [docs, setDocs] = useState<ProjectDocument[]>([]);
   const [chosen, setChosen] = useState("");
   const [text, setText] = useState("");
@@ -2157,6 +2215,25 @@ function HumanMakerScreen({ readerName, role, onBack }: { readerName: string; ro
     }
   }
 
+  // Straight into the AI's own window — the same plumbing the OK GO button and
+  // the Talk screen already use, so no copying and pasting. The passage still
+  // waits for OK GO before anything is rewritten.
+  async function sendToAI() {
+    if (!report) return;
+    const brief = auditForAI(report, chosen ? chosen.split("/").pop()! : "this passage");
+    setBusy(true);
+    try {
+      const adapter = createConversationAdapter(sendTo);
+      if (!adapter.sendMessage) throw new Error("This computer cannot type into another program.");
+      await adapter.sendMessage(brief);
+      setNote(`Audit sent to ${sendTo === "codex" ? "Codex" : "Claude"}. Say Ok Go there for the humanizing pass.`);
+    } catch (error) {
+      setNote(`${message(error)} The audit was not sent — use Copy Audit instead.`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const grouped = report
     ? [...new Map(report.findings.map((f) => [f.category, report.findings.filter((x) => x.category === f.category)])).entries()]
     : [];
@@ -2164,7 +2241,7 @@ function HumanMakerScreen({ readerName, role, onBack }: { readerName: string; ro
   return <main className="app-shell project-shell">
     <header className="topbar">
       <button className="text-button" onClick={onBack}>← Back</button>
-      <span className="eyebrow">HUMAN MAKER</span>
+      <span className="eyebrow">Human Maker</span>
       <span className="who-chip">{readerName} · {roleLabel(role)}</span>
     </header>
     <section className="projects-heading">
@@ -2196,7 +2273,16 @@ function HumanMakerScreen({ readerName, role, onBack }: { readerName: string; ro
       </label>
       <div className="form-actions">
         <button className="primary" disabled={busy || !text.trim()} onClick={runAudit}>{busy ? "Opening…" : "Run The Audit"}</button>
-        {report && <button onClick={() => void copyForAI()}>Copy Audit For The Rewrite</button>}
+        {report && <>
+          <button className="primary" onClick={() => void sendToAI()} disabled={busy}>Send Audit To {sendTo === "codex" ? "Codex" : "Claude"}</button>
+          {/* Sending somewhere else this once must not change the everyday
+              choice in Settings, so this picker is its own thing. */}
+          <label className="send-target">Send to<select value={sendTo} onChange={(event) => setSendTo(event.target.value as "claude" | "codex")}>
+            <option value="claude">Claude</option>
+            <option value="codex">Codex</option>
+          </select></label>
+          <button onClick={() => void copyForAI()}>Copy Audit Instead</button>
+        </>}
       </div>
       {note && <p className="board-hint">{note}</p>}
     </section>
@@ -2267,7 +2353,7 @@ function RequestAccess({ role, code, onSend, onCancel }: { role: ProjectRole; co
 
   if (code) {
     return <main className="app-shell settings-panel">
-      <BrandLogo compact /><p className="eyebrow">REQUEST ACCESS</p><h1>Send this to the owner</h1>
+      <BrandLogo compact /><p className="eyebrow">Request Access</p><h1>Send this to the owner</h1>
       <p>Copy the code below and send it to the owner any way you like — text, email, chat. They approve it and send you back an unlock code.</p>
       <CodeBox label="Your request code" code={code} hint="Send it to the owner, then use “Enter unlock code” when they reply." />
       <div className="form-actions"><button className="primary" onClick={onCancel}>Done</button></div>
@@ -2275,7 +2361,7 @@ function RequestAccess({ role, code, onSend, onCancel }: { role: ProjectRole; co
   }
 
   return <main className="app-shell settings-panel">
-    <BrandLogo compact /><p className="eyebrow">REQUEST ACCESS</p><h1>Ask For More Access</h1>
+    <BrandLogo compact /><p className="eyebrow">Request Access</p><h1>Ask For More Access</h1>
     <p>You are a <strong>{roleLabel(role)}</strong>. Your request goes to the owner for approval — access is never granted automatically.</p>
     <label>Access you're requesting<select value={requested} onChange={(event) => setRequested(event.target.value as ProjectRole)}>
       {options.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
@@ -2289,7 +2375,7 @@ function RedeemUnlock({ name, onRedeem, onCancel }: { name: string; onRedeem: (c
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   return <main className="app-shell settings-panel">
-    <BrandLogo compact /><p className="eyebrow">UNLOCK ACCESS</p><h1>Enter your unlock code</h1>
+    <BrandLogo compact /><p className="eyebrow">Unlock Access</p><h1>Enter your unlock code</h1>
     <p>Paste the unlock code the owner sent you. It was issued to <strong>{name}</strong>.</p>
     <label>Unlock code<textarea rows={3} value={code} placeholder="MCG-KEY-…" onChange={(event) => { setCode(event.target.value); setError(""); }} /></label>
     {error && <p className="update-status warn">{error}</p>}
@@ -2297,7 +2383,7 @@ function RedeemUnlock({ name, onRedeem, onCancel }: { name: string; onRedeem: (c
   </main>;
 }
 
-function OwnerDashboard({ requests, onDecide, onBack, client, onReleasesChanged }: { requests: AccessRequest[]; onDecide: (id: string, approve: boolean) => void; onBack: () => void; client: LongRotMcpClient; onReleasesChanged: (released: number[]) => void }) {
+function OwnerDashboard({ requests, onDecide, onDismiss, onBack, client, onReleasesChanged }: { requests: AccessRequest[]; onDecide: (id: string, approve: boolean) => void; onDismiss: (id: string) => void; onBack: () => void; client: LongRotMcpClient; onReleasesChanged: (released: number[]) => void }) {
   const [pasted, setPasted] = useState("");
   const [incoming, setIncoming] = useState<ReturnType<typeof parseRequestCode>>(null);
   const [codeError, setCodeError] = useState("");
@@ -2442,6 +2528,9 @@ function OwnerDashboard({ requests, onDecide, onBack, client, onReleasesChanged 
             {inbox.map((item) => {
               const parsed = parseRequestCode(item.code);
               return <div key={item.messageId} className="request-card">
+                {/* Nothing is decided — it comes back on the next Check Discord. */}
+                <button className="request-dismiss" title="Not now — close this" aria-label={`Close the request from ${parsed?.name ?? item.author}`}
+                  onClick={() => setInbox(inbox.filter((other) => other.messageId !== item.messageId))}>✕</button>
                 <div className="request-who"><strong>{parsed?.name ?? item.author}</strong><span>{parsed ? `${roleLabel(parsed.currentRole)} → ${roleLabel(parsed.requestedRole)}` : "unreadable request"}</span></div>
                 {parsed?.reason && <p className="request-reason">"{parsed.reason}"</p>}
                 <time>{item.sentAt ? new Date(item.sentAt).toLocaleString() : ""} · via Discord ({item.author})</time>
@@ -2449,7 +2538,7 @@ function OwnerDashboard({ requests, onDecide, onBack, client, onReleasesChanged 
                   <label>Make them<select value={grantRoles[item.messageId] ?? parsed?.requestedRole ?? "reader"} onChange={(event) => setGrantRoles({ ...grantRoles, [item.messageId]: event.target.value as ProjectRole })}>
                     {ROLE_ORDER.filter((r) => r !== "administrator").map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
                   </select></label>
-                  <button onClick={() => void decideDiscordRequest(item, false)}>Decline</button>
+                  <button className="danger" onClick={() => void decideDiscordRequest(item, false)}>Deny</button>
                   <button className="primary" onClick={() => void decideDiscordRequest(item, true)}>Approve</button>
                 </div>
               </div>;
@@ -2466,13 +2555,16 @@ function OwnerDashboard({ requests, onDecide, onBack, client, onReleasesChanged 
       <div className="form-actions"><button className="primary" disabled={!pasted.trim()} onClick={readCode}>Read code</button></div>
 
       {incoming && !granted && <div className="request-card">
+        {/* Clears the card and the box, ready for the next code. */}
+        <button className="request-dismiss" title="Not now — close this" aria-label={`Close the request from ${incoming.name}`}
+          onClick={() => { setIncoming(null); setPasted(""); setPastedRole(null); }}>✕</button>
         <div className="request-who"><strong>{incoming.name}</strong><span>{roleLabel(incoming.currentRole)} → {roleLabel(incoming.requestedRole)}</span></div>
         {incoming.reason && <p className="request-reason">"{incoming.reason}"</p>}
         <div className="request-actions">
           <label>Make them<select value={pastedRole ?? incoming.requestedRole} onChange={(event) => setPastedRole(event.target.value as ProjectRole)}>
             {ROLE_ORDER.filter((r) => r !== "administrator").map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
           </select></label>
-          <button onClick={() => { setIncoming(null); setPasted(""); setPastedRole(null); }}>Decline</button>
+          <button className="danger" onClick={() => { setIncoming(null); setPasted(""); setPastedRole(null); }}>Deny</button>
           <button className="primary" onClick={() => {
             const role = pastedRole ?? incoming.requestedRole;
             recordJoin(incoming.name, "", role);
@@ -2495,10 +2587,11 @@ function OwnerDashboard({ requests, onDecide, onBack, client, onReleasesChanged 
       {requests.length === 0
         ? <div className="empty-state"><strong>Nothing waiting</strong><p>When someone requests more access, it appears here.</p></div>
         : <ul className="request-list">{requests.map((r) => <li key={r.id} className="request-card">
+            <button className="request-dismiss" title="Not now — close this" aria-label={`Close the request from ${r.name}`} onClick={() => onDismiss(r.id)}>✕</button>
             <div className="request-who"><strong>{r.name}</strong><span>{roleLabel(r.currentRole)} → {roleLabel(r.requestedRole)}</span></div>
             {r.reason && <p className="request-reason">"{r.reason}"</p>}
             <time>{new Date(r.createdAt).toLocaleString()}</time>
-            <div className="request-actions"><button onClick={() => onDecide(r.id, false)}>Decline</button><button className="primary" onClick={() => onDecide(r.id, true)}>Approve</button></div>
+            <div className="request-actions"><button className="danger" onClick={() => onDecide(r.id, false)}>Deny</button><button className="primary" onClick={() => onDecide(r.id, true)}>Approve</button></div>
           </li>)}</ul>}
     </section>
 
@@ -2671,24 +2764,25 @@ function Settings({ initial, onSave, onCancel, onRequestAccess, onEnterCode }: {
     <label className="check-setting"><input type="checkbox" checked={voice.skipContentBoxes} onChange={(event) => updateVoice({ skipContentBoxes: event.target.checked })} /> Skip code and output boxes</label>
     <label className="check-setting"><input type="checkbox" checked={voice.includeStoryContext} onChange={(event) => updateVoice({ includeStoryContext: event.target.checked })} /> Send story context with my words (who mentioned names are, from the codex)</label>
     {isOwner && <>
-      <hr/><p className="eyebrow">View the app as someone else</p>
-      <fieldset className="role-picker compact"><legend>See every screen the way they see it. Click your name on the main page to come back.</legend>
-        {(["administrator", "support", "manager", "editor", "reviewer", "contributor", "reader"] as ProjectRole[]).map((option) => <label key={option} className={(viewAs ?? "administrator") === option ? "role-option picked" : "role-option"}>
-          <input type="radio" name="view-as" checked={(viewAs ?? "administrator") === option} onChange={() => { setViewAs(option === "administrator" ? null : option); window.location.reload(); }} />
-          <span className="role-bubble" aria-hidden="true" />
-          <span><strong>{roleLabel(option)}</strong></span>
-        </label>)}
-      </fieldset>
+      <hr/><p className="eyebrow">View The App As Someone Else</p>
+      <label>View the app as<select value={viewAs ?? "administrator"} onChange={(event) => {
+        const option = event.target.value as ProjectRole;
+        setViewAs(option === "administrator" ? null : option);
+        window.location.reload();
+      }}>
+        {(["administrator", "support", "manager", "editor", "reviewer", "contributor", "reader"] as ProjectRole[]).map((option) => <option key={option} value={option}>{roleLabel(option)}</option>)}
+      </select></label>
+      <p className="board-hint">See every screen the way they see it. Click your name on the main page to come back.</p>
     </>}
     {!isOwner && <>
-      <hr/><p className="eyebrow">Your access</p>
+      <hr/><p className="eyebrow">Your Access</p>
       <p className="board-hint">You are a {roleLabel(realProfileRole(profile))}. Ask MaggotClaw for more and your app unlocks itself once he approves — there is nothing to copy or paste.</p>
       <div className="form-actions">
         <button className="primary" onClick={onRequestAccess}>Ask For More Access</button>
         <button onClick={onEnterCode}>I Was Sent A Code</button>
       </div>
     </>}
-    <hr/><p className="eyebrow">Your settings</p>
+    <hr/><p className="eyebrow">Your Settings</p>
     <p className="board-hint">Windows ties settings to the app's identity, so an update can leave them out of reach. This carries them across — and to a new computer.</p>
     <div className="form-actions">
       <button onClick={() => {
@@ -2717,7 +2811,7 @@ function Settings({ initial, onSave, onCancel, onRequestAccess, onEnterCode }: {
       <hr/><p className="eyebrow">Owner — Human Maker</p>
       <label className="check-setting"><input type="checkbox" checked={shareHumanMaker} onChange={(event) => { setShareHumanMaker(event.target.checked); setHumanMakerSharedWithEditors(event.target.checked); }} /> Let editors use the Human Maker too</label>
       <small className="board-hint">Off by default — the prose bench is yours alone. Turn it on to hand it to a trusted editor.</small>
-      <hr/><p className="eyebrow">Owner — access requests via Discord</p>
+      <hr/><p className="eyebrow">Owner — Access Requests Via Discord</p>
       <label>Discord webhook for the requests channel
         <input value={webhook} placeholder="https://discord.com/api/webhooks/…" onChange={(event) => setWebhook(event.target.value)} autoComplete="off" />
       </label>
@@ -2733,7 +2827,7 @@ function Settings({ initial, onSave, onCancel, onRequestAccess, onEnterCode }: {
         <input value={relayChannel} placeholder="Uses the requests channel unless you set one" onChange={(event) => setRelayChannelState(event.target.value)} autoComplete="off" />
       </label>
       <small className="board-hint">These Discord details are stored when you press Save — Cancel leaves them untouched.</small>
-      <hr/><p className="eyebrow">Owner — project files (Dropbox)</p>
+      <hr/><p className="eyebrow">Owner — Project Files (Dropbox)</p>
       <p className="board-hint">With these keys saved, the app reads and writes the project files itself — the bridge no longer needs to be running, here or on anyone else's computer. Copy Messaging Key in Messages carries them to your friends.</p>
       <div className="form-actions"><button onClick={() => void importFromBridge()}>Import From The Bridge</button></div>
       <label>Dropbox app key
@@ -2752,7 +2846,7 @@ function Settings({ initial, onSave, onCancel, onRequestAccess, onEnterCode }: {
     {/* Technical plumbing stays with the owner and technical support — a
         reader can only break their own downloads with it. */}
     {canPerform(realProfileRole(profile), "manage") && <>
-      <hr/><p className="eyebrow">ADVANCED CONNECTION</p>
+      <hr/><p className="eyebrow">Advanced Connection</p>
       <label>Connection address<input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} /></label>
       {endpoint.trim() !== defaultSettings.endpoint && <button className="text-button" onClick={() => setEndpoint(defaultSettings.endpoint)}>Reset To The Standard Address</button>}
       <label>Temporary bearer credential<input type="password" value={bearerToken} onChange={(event) => setBearerToken(event.target.value)} autoComplete="off" /></label>

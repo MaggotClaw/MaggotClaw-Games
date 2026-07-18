@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addRequest, applyDecision, pending, type AccessRequest } from "../src/accessRequests";
+import { addRequest, applyDecision, dismissRequest, pending, type AccessRequest } from "../src/accessRequests";
 
 function req(over: Partial<AccessRequest>): AccessRequest {
   return {
@@ -52,5 +52,29 @@ describe("access-request queue", () => {
     const list = [req({ id: "a", status: "approved" })];
     const { grant } = applyDecision(list, "a", true, "Owner", "2026-07-15T14:00:00Z");
     expect(grant).toBeUndefined();
+  });
+
+  it("setting a request aside hides it from the queue without deciding it", () => {
+    const list = dismissRequest([req({ id: "a" })], "a", "2026-07-15T14:00:00Z");
+    expect(list[0].status).toBe("pending");
+    expect(list[0].dismissedAt).toBe("2026-07-15T14:00:00Z");
+    expect(pending(list)).toHaveLength(0);
+  });
+
+  it("a set-aside request can still be approved later", () => {
+    const aside = dismissRequest([req({ id: "a", requestedRole: "editor" })], "a", "2026-07-15T14:00:00Z");
+    const { grant } = applyDecision(aside, "a", true, "Owner", "2026-07-15T15:00:00Z");
+    expect(grant).toEqual({ name: "Alex", role: "editor" });
+  });
+
+  it("asking again brings a set-aside person back into the queue", () => {
+    const aside = dismissRequest([req({ id: "a" })], "a", "2026-07-15T14:00:00Z");
+    const list = addRequest(aside, req({ id: "b", createdAt: "2026-07-15T16:00:00Z" }));
+    expect(pending(list).map((r) => r.id)).toEqual(["b"]);
+  });
+
+  it("leaves other people's requests alone when one is set aside", () => {
+    const list = dismissRequest([req({ id: "a" }), req({ id: "b", name: "Sam" })], "a", "2026-07-15T14:00:00Z");
+    expect(pending(list).map((r) => r.id)).toEqual(["b"]);
   });
 });

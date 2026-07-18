@@ -125,15 +125,19 @@ pub async fn dropbox_list_folder(
     Ok(entries)
 }
 
-#[tauri::command]
-pub async fn dropbox_read_text(creds: DropboxCreds, path: String) -> Result<String, String> {
-    let token = access_token(&creds).await?;
+/// Downloads a file from Dropbox as raw bytes. Text and binary files travel the
+/// same way — only what the caller does with the bytes differs, so Word files
+/// and chapters share one download path.
+pub(crate) async fn download_bytes(creds: &DropboxCreds, path: &str) -> Result<Vec<u8>, String> {
+    let token = access_token(creds).await?;
     let arg = serde_json::json!({ "path": path }).to_string();
     let response = reqwest::Client::new()
         .post("https://content.dropboxapi.com/2/files/download")
         .bearer_auth(token)
         .header("Dropbox-API-Arg", arg)
-        .timeout(Duration::from_secs(60))
+        // A Word chapter is far larger than a text one; give it room without
+        // letting a stalled connection hang the whole Update.
+        .timeout(Duration::from_secs(180))
         .send()
         .await
         .map_err(|_| "Dropbox could not be reached.".to_string())?;
@@ -141,10 +145,16 @@ pub async fn dropbox_read_text(creds: DropboxCreds, path: String) -> Result<Stri
     if !status.is_success() {
         return Err(friendly(status.as_u16()));
     }
-    let bytes = response
+    response
         .bytes()
         .await
-        .map_err(|_| "The file could not be read from Dropbox.".to_string())?;
+        .map(|bytes| bytes.to_vec())
+        .map_err(|_| "The file could not be read from Dropbox.".to_string())
+}
+
+#[tauri::command]
+pub async fn dropbox_read_text(creds: DropboxCreds, path: String) -> Result<String, String> {
+    let bytes = download_bytes(&creds, &path).await?;
     Ok(String::from_utf8_lossy(&bytes).to_string())
 }
 
