@@ -353,6 +353,43 @@ pub fn save_idea_note(content: String) -> Result<String, String> {
     Ok(format!("02 Working Files/Ideas/{name}"))
 }
 
+/// Writes a file anywhere inside the local workspace. Used by the app and by
+/// Claude's requests; the path is checked so nothing can be written outside
+/// the project folder.
+#[tauri::command]
+pub fn write_workspace_file(local_relative_path: String, content: String) -> Result<(), String> {
+    let root = initialize()?;
+    let relative = checked_relative(&local_relative_path)?;
+    write_copy(&root.join(relative), content.as_bytes())
+}
+
+/// Moves a file within the workspace, keeping a backup of anything it would
+/// replace. Nothing is ever destroyed.
+#[tauri::command]
+pub fn move_workspace_file(from_relative: String, to_relative: String) -> Result<(), String> {
+    let root = initialize()?;
+    let from = root.join(checked_relative(&from_relative)?);
+    let to = root.join(checked_relative(&to_relative)?);
+    if !from.exists() {
+        return Err("That file is not in the local workspace.".to_string());
+    }
+    if to.exists() {
+        let existing =
+            fs::read(&to).map_err(|_| "The file already there could not be backed up.".to_string())?;
+        let backup = root
+            .join("07 Backups")
+            .join("Replaced")
+            .join(timestamp())
+            .join(checked_relative(&to_relative)?);
+        write_copy(&backup, &existing)?;
+    }
+    if let Some(parent) = to.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|_| "The destination folder could not be created.".to_string())?;
+    }
+    fs::rename(&from, &to).map_err(|_| "That file could not be moved.".to_string())
+}
+
 #[tauri::command]
 pub fn open_project_workspace() -> Result<(), String> {
     let root = initialize()?;

@@ -31,11 +31,16 @@ import { postRelayMessage } from "./discordLink";
 import { latestProgressReports } from "./ChatScreen";
 import { auditForAI, auditProse, humanMakerSharedWithEditors, setHumanMakerSharedWithEditors, type AuditReport } from "./humanMaker";
 import { OkGoButton } from "./OkGoButton";
+import {
+  ACTIONS_DROPBOX_PATH, actionLog, claudeAccessOn, claudeInstructions, describeAction,
+  handledIds, logAction, markHandled, needsOkGo, parseActions, setClaudeAccess,
+  updateLogState, type ActionRecord, type ClaudeAction
+} from "./claudeActions";
 import { recordJoin } from "./contacts";
 import { EMPTY_READER_PROFILE, hasProfilePin, isValidPin, loadReaderProfile, readerProfileSummary, saveReaderProfile, setNickname, setProfilePin, type ReaderProfile } from "./profileInfo";
 import { ReadSelectionButton } from "./ReadSelectionButton";
 
-type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "workspace-files" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock" | "chat" | "directions" | "idea" | "human-maker";
+type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "workspace-files" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock" | "chat" | "directions" | "idea" | "human-maker" | "claude-access";
 
 function BrandLogo({ compact = false }: { compact?: boolean }) {
   return <img className={compact ? "brand-logo compact" : "brand-logo"} src="/maggotclaw-modern.png" alt="MaggotClaw Games" />;
@@ -235,6 +240,8 @@ export function App() {
   const [ideaText, setIdeaText] = useState("");
   const [ideaListening, setIdeaListening] = useState(false);
   const [sleepMinutes, setSleepMinutes] = useState(0);
+  const [claudeLog, setClaudeLog] = useState<ActionRecord[]>(actionLog);
+  const [claudeOn, setClaudeOn] = useState(claudeAccessOn);
   const sleepDeadline = useRef(0);
   const lastStopAt = useRef(0);
   const [shelf, setShelf] = useState<ParsedDoc[]>([]);
@@ -374,6 +381,107 @@ export function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readerName]);
+
+  // ---- Claude's hands ------------------------------------------------------
+  // Carry out one request. Anything that touches the book itself is not run
+  // here — it is queued for OK GO by the poller below.
+  const runClaudeAction = useCallback(async (action: ClaudeAction): Promise<string> => {
+    switch (action.kind) {
+      case "open_screen": {
+        const allowed: Screen[] = ["home", "library", "reader", "settings", "projects", "project-workspace", "project-explorer", "human-maker", "chat", "dashboard", "idea", "comments", "workspace-files", "directions"];
+        const wanted = action.screen as Screen;
+        if (!allowed.includes(wanted)) throw new Error(`There is no screen called ${action.screen}.`);
+        if (wanted === "settings") settingsReturn.current = "home";
+        setScreen(wanted);
+        return `Opened ${wanted}.`;
+      }
+      case "set_setting": {
+        const current = loadVoiceSettings(readerName || "local");
+        const numeric = ["speechRate", "silenceSeconds", "addSeconds"];
+        const flags = ["readRepliesAutomatically", "listenAfterReading", "skipContentBoxes", "includeStoryContext"];
+        if (numeric.includes(action.setting!)) {
+          const value = Number(action.value);
+          if (!Number.isFinite(value)) throw new Error("That setting needs a number.");
+          saveVoiceSettings(readerName || "local", { ...current, [action.setting!]: value });
+          if (action.setting === "speechRate") setRate(value);
+        } else if (flags.includes(action.setting!)) {
+          saveVoiceSettings(readerName || "local", { ...current, [action.setting!]: Boolean(action.value) });
+        } else {
+          throw new Error(`${action.setting} is not a setting Claude can change.`);
+        }
+        return `${action.setting} is now ${String(action.value)}.`;
+      }
+      case "add_pronunciation": {
+        const next = [...loadPronunciations().filter((p) => p.say.toLowerCase() !== action.say!.toLowerCase()), { say: action.say!, as: action.as! }];
+        savePronunciations(next);
+        return `The narrator now says "${action.say}" as "${action.as}".`;
+      }
+      case "make_note": {
+        const saved = await invoke<string>("save_idea_note", { content: action.text });
+        return `Saved ${saved}.`;
+      }
+      case "new_file": {
+        await invoke("write_workspace_file", { localRelativePath: action.path, content: action.text ?? "" });
+        return `Wrote ${action.path}.`;
+      }
+      case "say": {
+        player.current.speak(action.text!.slice(0, 2000), rate, () => undefined, () => undefined);
+        return "Read aloud.";
+      }
+      case "move_file": {
+        await invoke("move_workspace_file", { fromRelative: action.path, toRelative: action.to });
+        return `Moved ${action.path} to ${action.to}.`;
+      }
+      case "release_chapters": {
+        const next = [...new Set([...loadUnlockedChapters(), ...(action.chapters ?? [])])].sort((a, b) => a - b);
+        saveUnlockedChapters(next);
+        setUnlockedChapters(next);
+        await publishReleases(client).catch(() => undefined);
+        return `Released chapters ${next.join(", ")}.`;
+      }
+      case "propose_edit": {
+        const original = await invoke<string>("read_project_document", { localRelativePath: action.path });
+        if (!original.includes(action.find!)) throw new Error("That passage was not found in the file, so nothing was changed.");
+        const updated = original.replace(action.find!, action.replace!);
+        await invoke("write_workspace_file", { localRelativePath: `01 Originals/${action.path!.replace(/^01 Originals\//, "")}`, content: updated });
+        return `Rewrote a passage in ${action.path}.`;
+      }
+      default:
+        throw new Error("Claude asked for something this app does not know how to do.");
+    }
+  }, [readerName, rate, client]);
+
+  // Watch Dropbox for Claude's action file.
+  useEffect(() => {
+    if (IS_COMPANION_WINDOW || IS_OKGO_WINDOW || DOC_WINDOW_PATH || FILE_WINDOW_PATH) return;
+    if (!("__TAURI_INTERNALS__" in window) || !readerName) return;
+    let stopped = false;
+    const poll = async () => {
+      if (stopped || !claudeAccessOn()) return;
+      try {
+        const actions = parseActions(await client.readText(ACTIONS_DROPBOX_PATH));
+        const handled = handledIds();
+        for (const action of actions) {
+          if (handled.has(action.id)) continue;
+          markHandled(action.id);
+          if (needsOkGo(action.kind)) {
+            setClaudeLog(logAction(action, "waiting", "Waiting for your OK GO."));
+            setStatus(`Claude is asking to ${describeAction(action).toLowerCase()} — press OK GO on the Claude screen.`);
+            continue;
+          }
+          try {
+            const note = await runClaudeAction(action);
+            setClaudeLog(logAction(action, "done", note));
+          } catch (error) {
+            setClaudeLog(logAction(action, "failed", message(error)));
+          }
+        }
+      } catch { /* no action file yet, or the bridge is off */ }
+    };
+    void poll();
+    const timer = window.setInterval(() => { void poll(); }, 8000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [readerName, client, runClaudeAction]);
 
   // Listening stats tick while narration plays; the sleep timer watches the
   // same clock and puts the book down gently when time is up.
@@ -1137,6 +1245,9 @@ export function App() {
           <button className="pill-button chip" onClick={() => setScreen("human-maker")}>Human Maker</button>}
         {"__TAURI_INTERNALS__" in window && canPerform(role, "propose") &&
           <button className="pill-button chip" onClick={() => { void openOkGoWindow(); }}>OK GO Button</button>}
+        {canPerform(role, "manage") && <button className="pill-button chip" onClick={() => setScreen("claude-access")}>
+          Claude{claudeLog.some((r) => r.state === "waiting") && <span className="pending-badge">{claudeLog.filter((r) => r.state === "waiting").length}</span>}
+        </button>}
       </section>
       {readerName === "Test Profile" && <div className="test-mode-banner">TEST PROFILE — LOCAL ONLY — NOTHING IS SYNCHRONIZED</div>}
       {discordWaiting > 0 && canPerform(role, "manage") && <section className="welcome-strip">
@@ -1185,6 +1296,54 @@ export function App() {
 
   if (screen === "project-explorer") {
     return <ProjectExplorer onBack={() => setScreen("project-workspace")} />;
+  }
+
+  if (screen === "claude-access") {
+    const waiting = claudeLog.filter((r) => r.state === "waiting");
+    return <main className="app-shell project-shell">
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">CLAUDE</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <section className="projects-heading"><h1>Claude's Hands</h1><p>What Claude is allowed to do inside the app, everything it has done, and anything waiting on your OK GO.</p></section>
+
+      <section className="dash-section">
+        <label className="check-setting"><input type="checkbox" checked={claudeOn} onChange={(event) => { setClaudeOn(event.target.checked); setClaudeAccess(event.target.checked); }} /> Let Claude act inside this app</label>
+        <p className="board-hint">When this is on, the app checks Dropbox every few seconds for Claude's requests. Opening screens, changing settings, teaching the narrator, saving notes and new files happen straight away. Rewrites, file moves, and chapter releases wait for your OK GO below.</p>
+        <div className="form-actions"><button className="primary" onClick={() => { void navigator.clipboard?.writeText(claudeInstructions()).then(() => setStatus("Instructions copied — paste them to Claude.")).catch(() => undefined); }}>Copy The Instructions For Claude</button></div>
+      </section>
+
+      <section className="dash-section">
+        <h2>Waiting For Your OK GO <span className="pending-badge">{waiting.length}</span></h2>
+        {waiting.length === 0
+          ? <div className="empty-state"><strong>Nothing waiting</strong><p>Anything Claude asks that would change the book itself appears here first.</p></div>
+          : waiting.map((record) => <article key={record.action.id} className="request-card">
+              <div className="request-who"><strong>{describeAction(record.action)}</strong><span>{new Date(record.at).toLocaleString()}</span></div>
+              {record.action.why && <p className="request-reason">"{record.action.why}"</p>}
+              {record.action.kind === "propose_edit" && <div className="diff-box">
+                <div className="diff-side was"><span>Was</span><p>{record.action.find}</p></div>
+                <div className="diff-side becomes"><span>Becomes</span><p>{record.action.replace}</p></div>
+              </div>}
+              <div className="request-actions">
+                <button onClick={() => { setClaudeLog(updateLogState(record.action.id, "declined", "You declined it. Nothing was changed.")); }}>Decline</button>
+                <button className="primary" onClick={() => {
+                  void runClaudeAction(record.action)
+                    .then((note) => setClaudeLog(updateLogState(record.action.id, "approved", note)))
+                    .catch((error) => setClaudeLog(updateLogState(record.action.id, "failed", message(error))));
+                }}>OK GO</button>
+              </div>
+            </article>)}
+      </section>
+
+      <section className="dash-section">
+        <h2>Everything Claude Has Done</h2>
+        {claudeLog.length === 0
+          ? <div className="empty-state"><strong>Nothing yet</strong><p>Turn the switch on, hand Claude the instructions, and its work shows up here.</p></div>
+          : <ul className="request-list">{claudeLog.slice(0, 60).map((record) => <li key={record.action.id + record.at} className="request-card">
+              <div className="request-who"><strong>{describeAction(record.action)}</strong><span className={record.state === "failed" ? "update-status warn" : "update-status ok"}>{record.state}</span></div>
+              <p className="request-reason">{record.note}</p>
+              <time>{new Date(record.at).toLocaleString()}</time>
+            </li>)}</ul>}
+      </section>
+      <footer className="safe-status">{status}</footer>
+    </main>;
   }
 
   if (screen === "human-maker") {

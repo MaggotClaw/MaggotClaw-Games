@@ -499,6 +499,8 @@ pub fn run() {
             project_workspace::archive_approved_upload,
             project_workspace::retire_project_file,
             project_workspace::save_idea_note,
+            project_workspace::write_workspace_file,
+            project_workspace::move_workspace_file,
             project_workspace::search_project_documents,
             dropbox::dropbox_list_folder,
             dropbox::dropbox_read_text,

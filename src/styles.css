@@ -59,6 +59,15 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .chat-rooms li button:hover { border-color: var(--mc-green, #00efb1); }
 .chat-rooms li button.active { background: #14241f; border-color: var(--mc-green, #00efb1); }
 .chat-inline-form { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: #0d1614; border: 1px solid #1e2c28; border-radius: 9px; }
+.diff-box { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
+.diff-side { padding: 10px 12px; background: #0a100e; border: 1px solid #24352f; border-radius: 9px; }
+.diff-side span { display: block; margin-bottom: 6px; font: 800 .68rem system-ui; text-transform: uppercase; letter-spacing: .08em; }
+.diff-side p { margin: 0; color: var(--mc-white, #f2f6f4); font: .92rem/1.5 Georgia, serif; }
+.diff-side.was { border-left: 3px solid #ff8b6b; }
+.diff-side.was span { color: #ff8b6b; }
+.diff-side.becomes { border-left: 3px solid var(--mc-green, #00efb1); }
+.diff-side.becomes span { color: var(--mc-green, #00efb1); }
+@media (max-width: 700px) { .diff-box { grid-template-columns: 1fr; } }
 .step-row { display: flex; gap: 10px; justify-content: center; margin: 4px 0 10px; }
 .step-dot { width: 30px; height: 30px; display: grid; place-items: center; color: var(--mc-muted, #9aa7a2); background: #0d1614; border: 1px solid #2c3a35; border-radius: 50%; font-weight: 800; font-size: .85rem; }
 .step-dot.on { color: #00140e; background: var(--mc-green, #00efb1); border-color: var(--mc-green, #00efb1); }
