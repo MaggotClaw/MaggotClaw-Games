@@ -109,6 +109,17 @@ export function threadKeyFor(message: RelayChatMessage, viewerName: string, view
   return null;
 }
 
+// Reading-progress reports travel as lines in a hidden "progress" room; the
+// Owner Dashboard shows the latest line per person.
+export function latestProgressReports(): Array<{ author: string; text: string; at: string }> {
+  const thread = loadThread("room:progress");
+  const latest = new Map<string, LocalMessage>();
+  for (const message of thread) latest.set(message.author.toLowerCase(), message);
+  return [...latest.values()]
+    .map((m) => ({ author: m.author, text: m.text, at: m.at }))
+    .sort((a, b) => b.at.localeCompare(a.at));
+}
+
 export function ChatScreen({ role, name, onBack, onOpenDiscord }: { role: ProjectRole; name: string; onBack: () => void; onOpenDiscord?: () => void }) {
   const rooms = useMemo(() => visibleRooms(role), [role]);
   const isOwner = canPerform(role, "manage");

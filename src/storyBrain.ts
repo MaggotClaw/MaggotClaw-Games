@@ -130,6 +130,28 @@ export function parseRegistry(text: string): StoryBrain {
 }
 
 // A one-line summary such as "6 carriers · 17 characters · 9 locations".
+// Pure: the canon entities whose names appear in a piece of text — the raw
+// material for a story-context block the Voice Companion sends to the AI.
+export function entitiesMentioned(brain: StoryBrain, text: string, limit = 6): RegistryEntity[] {
+  const lower = ` ${text.toLowerCase()} `;
+  const found: RegistryEntity[] = [];
+  for (const entity of brain.entities) {
+    if (found.length >= limit) break;
+    if (entity.kind === "rule" || entity.kind === "document") continue;
+    const names = [entity.name, ...entity.aliases, entity.searchTerm].filter((n) => n && n.length >= 3);
+    if (names.some((name) => lower.includes(` ${name.toLowerCase()} `) || lower.includes(` ${name.toLowerCase()},`) || lower.includes(` ${name.toLowerCase()}.`))) {
+      found.push(entity);
+    }
+  }
+  return found;
+}
+
+export function storyContextBlock(entities: RegistryEntity[]): string {
+  if (!entities.length) return "";
+  const lines = entities.map((e) => `- ${e.name} (${e.id}, ${e.category})`);
+  return `[Story context — canon identities for names mentioned:\n${lines.join("\n")}\nUse the codex files for details; do not invent conflicting facts.]\n\n`;
+}
+
 export function brainHeadline(brain: StoryBrain): string {
   const people = brain.entities.filter((e) => e.kind === "person").length;
   const places = brain.entities.filter((e) => e.kind === "location").length;

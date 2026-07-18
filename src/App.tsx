@@ -23,11 +23,17 @@ import { checkProjectSync, syncNote } from "./startupSync";
 import { ACCESS_LEVEL_LABELS, fetchSharedAccessMap, loadAccessMap, publishAccessMap, setFileAccess, type FileAccessMap } from "./fileAccess";
 import { getNickname } from "./profileInfo";
 import { downloadProjectViaLinks, fetchCatalog, getCatalogUrl, publishReaderLinks, readerLinksConfigured } from "./readerLinks";
+import { loadPronunciations, savePronunciations, type Pronunciation } from "./pronunciation";
+import { addListeningSeconds, listeningLine, loadListeningStats, recordChapterFinished } from "./listeningStats";
+import { loadChapterQuestions, questionsForChapter, saveChapterQuestions } from "./chapterQuestions";
+import { loadScheduledReleases, saveScheduledReleases } from "./readerCopies";
+import { postRelayMessage } from "./discordLink";
+import { latestProgressReports } from "./ChatScreen";
 import { recordJoin } from "./contacts";
 import { hasProfilePin, isValidPin, setNickname, setProfilePin } from "./profileInfo";
 import { ReadSelectionButton } from "./ReadSelectionButton";
 
-type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "workspace-files" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock" | "chat" | "directions";
+type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "workspace-files" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock" | "chat" | "directions" | "idea";
 
 function BrandLogo({ compact = false }: { compact?: boolean }) {
   return <img className={compact ? "brand-logo compact" : "brand-logo"} src="/maggotclaw-modern.png" alt="MaggotClaw Games" />;
@@ -196,6 +202,11 @@ export function App() {
   const [discordWaiting, setDiscordWaiting] = useState(0);
   const [commentsSending, setCommentsSending] = useState(false);
   const [commentsNote, setCommentsNote] = useState("");
+  const [ideaText, setIdeaText] = useState("");
+  const [ideaListening, setIdeaListening] = useState(false);
+  const [sleepMinutes, setSleepMinutes] = useState(0);
+  const sleepDeadline = useRef(0);
+  const lastStopAt = useRef(0);
   const [shelf, setShelf] = useState<ParsedDoc[]>([]);
   const [readMyself, setReadMyself] = useState(false);
   const [unlockedChapters, setUnlockedChapters] = useState<number[]>(() => loadUnlockedChapters());
@@ -334,6 +345,29 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readerName]);
 
+  // Listening stats tick while narration plays; the sleep timer watches the
+  // same clock and puts the book down gently when time is up.
+  useEffect(() => {
+    if (!playing) return;
+    const timer = window.setInterval(() => {
+      addListeningSeconds(readerName || "local", 5);
+      if (sleepDeadline.current && Date.now() > sleepDeadline.current) {
+        player.current.stop();
+        setPlaying(false);
+        sleepDeadline.current = 0;
+        setSleepMinutes(0);
+        setStatus("Sleep Timer — your place is saved. Goodnight.");
+      }
+    }, 5000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing]);
+
+  // Idea dictation mirrors the live transcript into the note.
+  useEffect(() => {
+    if (screen === "idea" && ideaListening) setIdeaText(liveTranscript);
+  }, [liveTranscript, screen, ideaListening]);
+
   // Comment dictation: the helper's words stream into the live transcript and
   // keep the silence countdown honest while a comment is being recorded.
   useEffect(() => {
@@ -359,10 +393,27 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [screen, comment?.status]);
 
+  // A finished chapter counts toward the listening stats and (with consent
+  // wording shown at onboarding) tells the author how far this reader is.
+  const reportProgress = useCallback((percent: number) => {
+    const active = documentRef.current;
+    if (!active || !readerName || !messagingConnected() || canPerform(profileRole(readerName), "manage")) return;
+    const text = `${cleanTitle(active.name)} · ${Math.min(100, Math.max(0, Math.round(percent)))}%`;
+    try {
+      if (localStorage.getItem("mcg-progress-last") === text) return;
+      localStorage.setItem("mcg-progress-last", text);
+    } catch { /* ignore */ }
+    void postRelayMessage({ room: "progress", author: readerName, text });
+  }, [readerName]);
+
   const speakAt = useCallback((index: number, activeDocument = documentRef.current) => {
     if (!activeDocument || !activeDocument.segments[index]) {
       setPlaying(false);
       setStatus("Finished");
+      if (activeDocument && activeDocument.segments.length > 0 && index >= activeDocument.segments.length) {
+        recordChapterFinished(readerName || "local");
+        reportProgress(100);
+      }
       return;
     }
     setSegmentIndex(index);
@@ -377,7 +428,7 @@ export function App() {
         setStatus("Speech playback needs attention");
       }
     );
-  }, [rate]);
+  }, [rate, readerName, reportProgress]);
 
   // The shelf is built from the downloaded local files, so reading works with no
   // Dropbox connection at all.
@@ -466,8 +517,10 @@ export function App() {
     const position = await loadPosition(USER_ID, chosen.id);
     documentRef.current = chosen;
     setDocument(chosen);
-    setSegmentIndex(Math.min(position?.segmentIndex || 0, Math.max(0, chosen.segments.length - 1)));
-    setStatus(position ? "Position restored" : "Ready to read");
+    // Audiobook-style resume: start one sentence back so the scene re-forms.
+    const restored = Math.min(position?.segmentIndex || 0, Math.max(0, chosen.segments.length - 1));
+    setSegmentIndex(Math.max(0, restored - (restored > 0 ? 1 : 0)));
+    setStatus(position ? "Position restored — starting one sentence back for context" : "Ready to read");
     setScreen("reader");
   }
 
@@ -476,6 +529,7 @@ export function App() {
     if (playing && !player.current.paused) {
       player.current.pause();
       setPlaying(false);
+      lastStopAt.current = Date.now();
       setStatus("Paused — position saved");
       return;
     }
@@ -483,6 +537,15 @@ export function App() {
       player.current.resume();
       setPlaying(true);
       setStatus("Reading");
+      return;
+    }
+    // Coming back after a real break: step one sentence back so the thread of
+    // the scene re-forms, the way audiobooks rewind a few seconds.
+    const awayMinutes = lastStopAt.current ? (Date.now() - lastStopAt.current) / 60000 : 0;
+    if (awayMinutes > 5 && segmentIndex > 0) {
+      const from = segmentIndex - 1;
+      setSegmentIndex(from);
+      speakAt(from, document);
       return;
     }
     speakAt(segmentIndex, document);
@@ -497,17 +560,21 @@ export function App() {
   }
 
   function closeReader() {
+    if (document?.segments.length) {
+      reportProgress(((segmentIndex + 1) / document.segments.length) * 100);
+    }
     if (DOC_WINDOW_PATH) { void closeCurrentWindow(); return; }
     player.current.stop();
     setPlaying(false);
+    lastStopAt.current = Date.now();
     documentRef.current = null;
     setDocument(null);
     setScreen("library");
     setStatus("Position saved on this device");
   }
 
-  async function startComment() {
-    if (!document) return;
+  async function startComment(category = "General Comment") {
+    if (!document || !document.segments.length) return;
     player.current.stop();
     setPlaying(false);
     const anchor = document.segments[segmentIndex];
@@ -530,7 +597,7 @@ export function App() {
       audioMimeType: "",
       transcriptionOriginal: "",
       transcriptionConfirmed: "",
-      category: "General Comment",
+      category,
       status: "recording",
       silenceAllowanceSeconds: 5,
       createdAt: now,
@@ -569,6 +636,39 @@ export function App() {
       setComment(failed);
       setStatus(`${message(error)} You can type the comment instead. Your reading position is safe.`);
     }
+  }
+
+  // One tap, no interruption: a reaction anchored to the current sentence,
+  // saved as a comment with no audio, sent with the normal Submit.
+  async function quickReaction(label: string) {
+    if (!document || !document.segments.length) return;
+    const anchor = document.segments[segmentIndex];
+    const now = new Date().toISOString();
+    await saveComment({
+      id: crypto.randomUUID(),
+      userId: USER_ID,
+      readerName,
+      documentId: document.id,
+      filePath: document.path,
+      exactFilename: document.name,
+      contentHash: document.contentHash,
+      segmentIndex,
+      paragraphIndex: anchor.paragraphIndex,
+      sentenceIndex: anchor.sentenceIndex,
+      charStart: anchor.charStart,
+      charEnd: anchor.charEnd,
+      anchorText: anchor.text,
+      audio: null,
+      audioMimeType: "",
+      transcriptionOriginal: label,
+      transcriptionConfirmed: label,
+      category: `Reaction — ${label}`,
+      status: "saved",
+      silenceAllowanceSeconds: 0,
+      createdAt: now,
+      updatedAt: now
+    });
+    setStatus(`${label} — noted right here. It goes to MaggotClaw with your next Submit.`);
   }
 
   async function finishComment() {
@@ -903,6 +1003,41 @@ export function App() {
     return <Settings initial={settings} onSave={saveSettings} onCancel={() => setScreen(settingsReturn.current)} />;
   }
 
+  if (screen === "idea") {
+    return <main className="app-shell settings-panel">
+      <button className="text-button mode-back" onClick={() => {
+        if (ideaListening) { commentDictationActive.current = false; setIdeaListening(false); void stopNativeDictation().catch(() => undefined); }
+        setScreen("home");
+      }}>← Back</button>
+      <BrandLogo compact /><p className="eyebrow">NOTE TO SELF</p><h1>Catch The Idea</h1>
+      <p>Speak or type it. It lands dated in 02 Working Files → Ideas — never touching the book until you promote it.</p>
+      <label>The idea<textarea rows={8} value={ideaText} placeholder="Speak, or type here…" onChange={(event) => setIdeaText(event.target.value)} /></label>
+      <div className="form-actions">
+        {"__TAURI_INTERNALS__" in window && <button onClick={() => {
+          if (ideaListening) {
+            commentDictationActive.current = false;
+            setIdeaListening(false);
+            void stopNativeDictation().catch(() => undefined);
+            setStatus("Stopped listening — tidy the words, then Save.");
+          } else {
+            commentDictation.current.reset();
+            setLiveTranscript(ideaText);
+            commentDictationActive.current = true;
+            setIdeaListening(true);
+            void startNativeDictation().catch(() => { commentDictationActive.current = false; setIdeaListening(false); setStatus("The microphone could not start — type the idea instead."); });
+          }
+        }}>{ideaListening ? "■ Stop Listening" : "🎤 Speak The Idea"}</button>}
+        <button className="primary" disabled={!ideaText.trim()} onClick={() => {
+          if (ideaListening) { commentDictationActive.current = false; setIdeaListening(false); void stopNativeDictation().catch(() => undefined); }
+          void invoke<string>("save_idea_note", { content: ideaText })
+            .then((saved) => { setIdeaText(""); setScreen("home"); setStatus(`Idea saved — ${saved}`); })
+            .catch((error) => setStatus(message(error)));
+        }}>Save Idea</button>
+      </div>
+      <footer className="safe-status">{status}</footer>
+    </main>;
+  }
+
   if (screen === "request-access") {
     return <RequestAccess role={role} code={requestCode} onSend={sendAccessRequest} onCancel={() => { setRequestCode(""); setScreen("home"); }} />;
   }
@@ -939,6 +1074,7 @@ export function App() {
 
   if (screen === "home") {
     return <main className="app-shell home-shell">
+      <span className="who-chip home-corner">{readerName || "Guest"} · {roleLabel(role)}</span>
       <header className="hero"><BannerWithVersion /></header>
       <section className="home-toolbar">
         {canPerform(role, "manage") && <button className="pill-button chip" onClick={openDashboard}>Owner Dashboard{(requests.length + discordWaiting) > 0 && <span className="pending-badge">{requests.length + discordWaiting}</span>}</button>}
@@ -947,7 +1083,7 @@ export function App() {
         {getViewAs()
           ? <button className="pill-button chip" onClick={() => { setViewAs(null); window.location.reload(); }}>Viewing as {roleLabel(role)} — back</button>
           : <button className="pill-button chip" onClick={() => setScreen("profile")}>{readerName || "Start Here"}</button>}
-        <span className="who-chip">{readerName || "Guest"} · {roleLabel(role)}</span>
+        {"__TAURI_INTERNALS__" in window && <button className="pill-button chip" onClick={() => { setIdeaText(""); setScreen("idea"); }}>Note To Self</button>}
       </section>
       {readerName === "Test Profile" && <div className="test-mode-banner">TEST PROFILE — LOCAL ONLY — NOTHING IS SYNCHRONIZED</div>}
       {discordWaiting > 0 && canPerform(role, "manage") && <section className="welcome-strip">
@@ -1131,10 +1267,14 @@ ${item.transcriptionConfirmed}`;
               <p className="current-sentence">{current?.text || "This file has no readable text."}</p>
               <p className="context">{document.segments[segmentIndex + 1]?.text}</p>
             </article>}
+        <section className="reaction-row" aria-label="Quick reactions">
+          {["Loved It", "Confused", "Scared", "Bored"].map((label) =>
+            <button key={label} disabled={!document.segments.length} onClick={() => void quickReaction(label)}>{label}</button>)}
+        </section>
         <section className="primary-controls" aria-label="Reading controls">
           <button className="control secondary" onClick={() => moveBy(-1)}>Previous</button>
           <button className="control primary" onClick={togglePlayback}>{playing ? "Pause" : "Continue"}</button>
-          <button className="control comment" onClick={startComment} disabled={!document.segments.length}>Comment</button>
+          <button className="control comment" onClick={() => void startComment()} disabled={!document.segments.length}>Comment</button>
         </section>
         <section className="secondary-controls">
           <button onClick={() => { player.current.stop(); speakAt(segmentIndex); }}>Repeat Sentence</button>
@@ -1150,7 +1290,24 @@ ${item.transcriptionConfirmed}`;
               <option value="0.8">Slower</option><option value="1">Normal</option><option value="1.2">Faster</option>
             </select>
           </label>
+          <label>Sleep
+            <select value={sleepMinutes} onChange={(event) => {
+              const minutes = Number(event.target.value);
+              setSleepMinutes(minutes);
+              sleepDeadline.current = minutes ? Date.now() + minutes * 60000 : 0;
+              setStatus(minutes ? `Sleep Timer set — she stops in ${minutes} minutes and saves your place.` : "Sleep Timer off");
+            }}>
+              <option value="0">Off</option><option value="15">15 Min</option><option value="30">30 Min</option><option value="60">60 Min</option>
+            </select>
+          </label>
         </section>
+        {(() => {
+          const questions = questionsForChapter(chapterNumberFromName(document.name));
+          return questions.length ? <section className="question-card">
+            <h2>Questions From MaggotClaw About This Chapter</h2>
+            {questions.map((question) => <button key={question} onClick={() => void startComment(`Answer — ${question.slice(0, 80)}`)}>{question}</button>)}
+          </section> : null;
+        })()}
         <footer className="safe-status">{status}</footer>
       </main>
     );
@@ -1170,7 +1327,8 @@ ${item.transcriptionConfirmed}`;
         <span className="who-chip">{readerName} · {roleLabel(role)}</span>
       </section>
       <header className="hero">
-        <div><BrandLogo compact /><h1>Reader Mode</h1><p>{status}</p></div>
+        <div><BrandLogo compact /><h1>Reader Mode</h1><p>{status}</p>
+        {listeningLine(loadListeningStats(readerName)) && <p className="board-hint">{listeningLine(loadListeningStats(readerName))}</p>}</div>
       </header>
       {recoverable && <section className="recovery-banner"><div><strong>Unfinished comment found</strong><p>Your recording and reading position are safe on this device.</p></div><button onClick={resumeRecoverable}>Recover</button></section>}
       <section className="copy-grid">
@@ -1263,6 +1421,7 @@ function Profile({ initial, onContinue }: { initial: string; onContinue: (info: 
             <input inputMode="numeric" maxLength={4} value={pinAgain} onChange={(event) => setPinAgain(event.target.value.replace(/\D/g, ""))} />
           </label>
           <small className="board-hint">Your name and PIN together identify you if you ever move to a new computer. The PIN itself is never stored or shared.</small>
+          <small className="board-hint">So MaggotClaw can cheer you on, the app shares how far you have read — never your comments until you choose to send them.</small>
           {pinProblem && <p className="update-status warn">{pinProblem}</p>}
         </>}
 
@@ -1464,6 +1623,48 @@ function OwnerDashboard({ requests, onDecide, onBack, client, onReleasesChanged 
   const [released, setReleased] = useState<number[]>(loadUnlockedChapters);
   const [releaseBusy, setReleaseBusy] = useState(false);
   const [releaseNote, setReleaseNote] = useState("");
+  const [scheduled, setScheduled] = useState(loadScheduledReleases);
+  const [scheduleChapter, setScheduleChapter] = useState("");
+  const [scheduleDate, setScheduleDate] = useState("");
+  const [pronunciations, setPronunciations] = useState<Pronunciation[]>(loadPronunciations);
+  const [pronunSay, setPronunSay] = useState("");
+  const [pronunAs, setPronunAs] = useState("");
+  const [questionChapter, setQuestionChapter] = useState("");
+  const [questionText, setQuestionText] = useState("");
+  const [questionMap, setQuestionMap] = useState(loadChapterQuestions);
+  const progressReports = latestProgressReports();
+
+  function addSchedule() {
+    const chapter = Number(scheduleChapter);
+    if (!Number.isInteger(chapter) || chapter < 1 || !/^\d{4}-\d{2}-\d{2}$/.test(scheduleDate)) return;
+    const next = [...scheduled.filter((s) => s.chapter !== chapter), { chapter, on: scheduleDate }].sort((a, b) => a.chapter - b.chapter);
+    setScheduled(next);
+    saveScheduledReleases(next);
+    setScheduleChapter("");
+    setScheduleDate("");
+  }
+
+  function addPronunciation() {
+    if (!pronunSay.trim() || !pronunAs.trim()) return;
+    const next = [...pronunciations.filter((p) => p.say.toLowerCase() !== pronunSay.trim().toLowerCase()), { say: pronunSay.trim(), as: pronunAs.trim() }];
+    setPronunciations(next);
+    savePronunciations(next);
+    setPronunSay("");
+    setPronunAs("");
+  }
+
+  function saveQuestions() {
+    const chapter = Number(questionChapter);
+    if (!Number.isInteger(chapter) || chapter < 1) return;
+    const questions = questionText.split("\n").map((q) => q.trim()).filter(Boolean);
+    const next = { ...questionMap };
+    if (questions.length) next[String(chapter)] = questions;
+    else delete next[String(chapter)];
+    setQuestionMap(next);
+    saveChapterQuestions(next);
+    setQuestionText("");
+    setQuestionChapter("");
+  }
 
   function toggleRelease(chapter: number) {
     const next = released.includes(chapter)
@@ -1598,8 +1799,60 @@ function OwnerDashboard({ requests, onDecide, onBack, client, onReleasesChanged 
           {String(chapter).padStart(2, "0")}
         </label>)}
       </div>
+      <p className="board-hint">Or put a chapter on the calendar — it unlocks itself on that day.</p>
+      <div className="pronun-row">
+        <input value={scheduleChapter} inputMode="numeric" placeholder="Chapter" style={{ maxWidth: 90 }} onChange={(event) => setScheduleChapter(event.target.value.replace(/\D/g, ""))} />
+        <input type="date" value={scheduleDate} onChange={(event) => setScheduleDate(event.target.value)} />
+        <button className="primary tiny" disabled={!scheduleChapter || !scheduleDate} onClick={addSchedule}>Schedule</button>
+      </div>
+      {scheduled.length > 0 && <div className="release-grid">{scheduled.map((s) => <label key={s.chapter} className="release-chip">
+        {String(s.chapter).padStart(2, "0")} · {s.on}
+        <button className="text-button tiny-remove" style={{ position: "static", transform: "none" }} onClick={() => { const next = scheduled.filter((x) => x.chapter !== s.chapter); setScheduled(next); saveScheduledReleases(next); }}>✕</button>
+      </label>)}</div>}
       <div className="form-actions"><button className="primary" disabled={releaseBusy} onClick={() => void publishReleaseList()}>{releaseBusy ? "Publishing…" : "Publish Releases To Every Reader"}</button></div>
       {releaseNote && <p className="board-hint">{releaseNote}</p>}
+    </section>
+
+    <section className="dash-section">
+      <h2>Reader Progress</h2>
+      {progressReports.length === 0
+        ? <div className="empty-state"><strong>No progress reports yet</strong><p>As friends read, their furthest chapter appears here — refreshed whenever Messages refreshes.</p></div>
+        : <ul className="request-list">{progressReports.map((report) => <li key={report.author} className="request-card">
+            <div className="request-who"><strong>{report.author}</strong><span>{report.text}</span></div>
+            <time>{report.at ? new Date(report.at).toLocaleString() : ""}</time>
+          </li>)}</ul>}
+    </section>
+
+    <section className="dash-section">
+      <h2>Narrator Pronunciations</h2>
+      <p className="board-hint">Teach the voice your invented names once. Publish Reader Links to carry them to every reader's narrator.</p>
+      {pronunciations.map((entry) => <div key={entry.say} className="pronun-row">
+        <input value={entry.say} readOnly />
+        <input value={entry.as} readOnly />
+        <button className="text-button" onClick={() => { const next = pronunciations.filter((p) => p.say !== entry.say); setPronunciations(next); savePronunciations(next); }}>✕</button>
+      </div>)}
+      <div className="pronun-row">
+        <input value={pronunSay} placeholder="Written (Louvenia)" onChange={(event) => setPronunSay(event.target.value)} />
+        <input value={pronunAs} placeholder="Spoken (loo-VEE-nee-ah)" onChange={(event) => setPronunAs(event.target.value)} />
+        <button className="primary tiny" disabled={!pronunSay.trim() || !pronunAs.trim()} onClick={addPronunciation}>Add</button>
+      </div>
+    </section>
+
+    <section className="dash-section">
+      <h2>End-Of-Chapter Questions</h2>
+      <p className="board-hint">Two or three per chapter, one per line. Readers are asked when they finish; answers arrive as comments. Publish Reader Links to share.</p>
+      {Object.entries(questionMap).map(([chapter, questions]) => <div key={chapter} className="request-card">
+        <div className="request-who"><strong>Chapter {chapter}</strong><span>{questions.length} question{questions.length === 1 ? "" : "s"}</span></div>
+        <div className="request-actions">
+          <button onClick={() => { setQuestionChapter(chapter); setQuestionText(questions.join("\n")); }}>Edit</button>
+          <button onClick={() => { const next = { ...questionMap }; delete next[chapter]; setQuestionMap(next); saveChapterQuestions(next); }}>Remove</button>
+        </div>
+      </div>)}
+      <div className="pronun-row">
+        <input value={questionChapter} inputMode="numeric" placeholder="Chapter" style={{ maxWidth: 90 }} onChange={(event) => setQuestionChapter(event.target.value.replace(/\D/g, ""))} />
+      </div>
+      <label>Questions (one per line)<textarea rows={3} value={questionText} placeholder={"Did you trust Vina here?\nWhere did you get bored?"} onChange={(event) => setQuestionText(event.target.value)} /></label>
+      <div className="form-actions"><button className="primary" disabled={!questionChapter} onClick={saveQuestions}>Save Chapter Questions</button></div>
     </section>
 
     <section className="dash-section">
@@ -1702,6 +1955,7 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
     <label className="check-setting"><input type="checkbox" checked={voice.readRepliesAutomatically} onChange={(event) => updateVoice({ readRepliesAutomatically: event.target.checked })} /> Read replies automatically</label>
     <label className="check-setting"><input type="checkbox" checked={voice.listenAfterReading} onChange={(event) => updateVoice({ listenAfterReading: event.target.checked })} /> Listen again after reading</label>
     <label className="check-setting"><input type="checkbox" checked={voice.skipContentBoxes} onChange={(event) => updateVoice({ skipContentBoxes: event.target.checked })} /> Skip code and output boxes</label>
+    <label className="check-setting"><input type="checkbox" checked={voice.includeStoryContext} onChange={(event) => updateVoice({ includeStoryContext: event.target.checked })} /> Send story context with my words (who mentioned names are, from the codex)</label>
     {isOwner && <>
       <hr/><p className="eyebrow">View the app as someone else</p>
       <fieldset className="role-picker compact"><legend>See every screen the way they see it. Click your name on the main page to come back.</legend>
@@ -1764,6 +2018,12 @@ function ownerMessagingPayload(): { botToken: string; channelId: string } | unde
 
 function cleanTitle(name: string): string {
   return name.replace(/\.(txt|docx)$/i, "").replace(/\s+v\d+(?:\.\d+)*$/i, "");
+}
+
+// "C07-R Chapter 07 …" or "Chapter 7 …" → 7. Null when a file has no chapter.
+function chapterNumberFromName(name: string): number | null {
+  const match = /^C(\d{1,2})\b/i.exec(name) ?? /Chapter\s+(\d{1,2})\b/i.exec(name);
+  return match ? Number(match[1]) : null;
 }
 
 function message(error: unknown): string {

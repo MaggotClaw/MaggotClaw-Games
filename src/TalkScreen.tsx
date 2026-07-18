@@ -8,6 +8,7 @@ import { CommentRecorder } from "./recorder";
 import { responsePlaybackSegments, type ResponsePlaybackSegment } from "./responseSegments";
 import { BrowserSpeechPlayer } from "./speech";
 import { loadVoiceSettings } from "./voiceSettings";
+import { entitiesMentioned, parseRegistry, storyContextBlock, type StoryBrain } from "./storyBrain";
 
 type CompanionState = "idle" | "starting" | "recording" | "sending" | "waiting" | "response";
 
@@ -45,6 +46,7 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
   const lastInsertedDraft = useRef("");
   const nativeSpeechActive = useRef(false);
   const nativeTranscript = useRef(new NativeTranscriptAssembler());
+  const registryBrain = useRef<StoryBrain | "failed" | null>(null);
   const heardMicrophone = useRef(false);
   const adapter = useMemo(() => createConversationAdapter(settings.target), [settings.target]);
 
@@ -340,6 +342,27 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
     }
   }
 
+  // A short canon block for the names just mentioned, built from the local
+  // ID Registry so the AI never guesses who someone is. Loaded once per bar.
+  async function storyContext(words: string): Promise<string> {
+    try {
+      if (!registryBrain.current) {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const docs = await invoke<Array<{ localRelativePath: string; status: string }>>("list_project_documents");
+        const registry = docs
+          .filter((doc) => doc.status === "downloaded" && /ID Registry/i.test(doc.localRelativePath))
+          .sort((a, b) => b.localRelativePath.localeCompare(a.localRelativePath))[0];
+        if (!registry) { registryBrain.current = "failed"; return ""; }
+        const text = await invoke<string>("read_project_document", { localRelativePath: registry.localRelativePath });
+        registryBrain.current = parseRegistry(text);
+      }
+      if (registryBrain.current === "failed") return "";
+      return storyContextBlock(entitiesMentioned(registryBrain.current, words));
+    } catch {
+      return "";
+    }
+  }
+
   async function finishAndSend() {
     if (finishing.current) return;
     finishing.current = true;
@@ -368,7 +391,8 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
       baselineResponseText.current = baselineResponseCount.current > 0
         ? (await adapter.readCopiedResponse().catch(() => "")).trim()
         : "";
-      await adapter.sendMessage(words);
+      const outgoing = settings.includeStoryContext ? `${await storyContext(words)}${words}` : words;
+      await adapter.sendMessage(outgoing);
       sawBusy.current = false;
       waitingStarted.current = Date.now();
       setState("waiting");

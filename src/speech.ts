@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { pronounce } from "./pronunciation";
 
 // Piper is the normal voice inside the installed Windows app. Browser speech
 // remains a fallback so reading still works if a local voice resource is lost.
@@ -12,9 +13,12 @@ export class BrowserSpeechPlayer {
   // it when the audio arrives instead of playing over the user's pause.
   private pauseRequested = false;
 
-  speak(text: string, rate: number, onEnd: () => void, onError: () => void): void {
+  speak(rawText: string, rate: number, onEnd: () => void, onError: () => void): void {
     this.stop();
     this.pauseRequested = false;
+    // Invented names are respelled for the voice only; the page keeps the
+    // author's spelling.
+    const text = pronounce(rawText);
     const generation = this.generation;
 
     if (!("__TAURI_INTERNALS__" in window)) {

@@ -11,7 +11,9 @@ import { invoke } from "@tauri-apps/api/core";
 import type { LongRotMcpClient } from "./mcp";
 import { ROLE_ORDER, type ProjectRole } from "./permissions";
 import { loadAccessMap, roleMayDownload, ACCESS_MAP_DROPBOX_PATH, type FileAccessLevel } from "./fileAccess";
-import { loadUnlockedChapters, saveUnlockedChapters, RELEASES_DROPBOX_PATH } from "./readerCopies";
+import { effectiveReleased, loadScheduledReleases, loadUnlockedChapters, saveScheduledReleases, saveUnlockedChapters, RELEASES_DROPBOX_PATH, type ScheduledRelease } from "./readerCopies";
+import { loadPronunciations, savePronunciations, type Pronunciation } from "./pronunciation";
+import { loadChapterQuestions, saveChapterQuestions, sanitizeChapterQuestions, type ChapterQuestions } from "./chapterQuestions";
 import type { DownloadProgress } from "./projectWorkspace";
 
 export interface CatalogFile {
@@ -25,6 +27,13 @@ export interface ReaderCatalog {
   updatedAt: string;
   released: number[];
   files: CatalogFile[];
+  // The narrator's pronunciation dictionary rides along, so every reader's
+  // voice says the invented names the way the author taught it.
+  pronunciations?: Pronunciation[];
+  // Chapters that unlock themselves on a date.
+  scheduled?: ScheduledRelease[];
+  // The author's end-of-chapter questions.
+  questions?: ChapterQuestions;
 }
 
 export const CATALOG_DROPBOX_PATH = "/The Long Rot/.mcg/reader-catalog.json";
@@ -50,7 +59,15 @@ export function parseCatalog(json: string): ReaderCatalog | null {
     const released = Array.isArray(raw.released) && raw.released.every((n) => typeof n === "number")
       ? (raw.released as number[])
       : [];
-    return { updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "", released, files };
+    const pronunciations = Array.isArray(raw.pronunciations)
+      ? raw.pronunciations.filter((p): p is Pronunciation =>
+          Boolean(p && typeof p.say === "string" && typeof p.as === "string" && p.say.trim() && p.as.trim()))
+      : undefined;
+    const scheduled = Array.isArray(raw.scheduled)
+      ? (raw.scheduled as ScheduledRelease[]).filter((s) => s && typeof s.chapter === "number" && /^\d{4}-\d{2}-\d{2}$/.test(s.on ?? ""))
+      : undefined;
+    const questions = raw.questions ? sanitizeChapterQuestions(raw.questions) : undefined;
+    return { updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "", released, files, pronunciations, scheduled, questions };
   } catch {
     return null;
   }
@@ -105,7 +122,10 @@ export async function publishReaderLinks(
   const catalog: ReaderCatalog = {
     updatedAt: new Date().toISOString(),
     released: loadUnlockedChapters(),
-    files
+    files,
+    pronunciations: loadPronunciations(),
+    scheduled: loadScheduledReleases(),
+    questions: loadChapterQuestions()
   };
   onProgress({ stage: "Publishing the catalog", completed, total: shareable.length, skipped: 0 });
   await client.writeText(CATALOG_DROPBOX_PATH, JSON.stringify(catalog, null, 2));
@@ -121,7 +141,16 @@ export async function fetchCatalog(): Promise<ReaderCatalog | null> {
   if (!url || !("__TAURI_INTERNALS__" in window)) return null;
   const text = await invoke<string>("fetch_dropbox_link_text", { url });
   const catalog = parseCatalog(text);
-  if (catalog?.released.length) saveUnlockedChapters(catalog.released);
+  if (catalog) {
+    if (catalog.scheduled) saveScheduledReleases(catalog.scheduled);
+    const effective = effectiveReleased(catalog.released, catalog.scheduled ?? [], new Date().toISOString().slice(0, 10));
+    if (effective.length) {
+      saveUnlockedChapters(effective);
+      catalog.released = effective;
+    }
+    if (catalog.pronunciations) savePronunciations(catalog.pronunciations);
+    if (catalog.questions) saveChapterQuestions(catalog.questions);
+  }
   return catalog;
 }
 

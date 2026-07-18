@@ -7,6 +7,9 @@ export interface VoiceSettings {
   readRepliesAutomatically: boolean;
   listenAfterReading: boolean;
   skipContentBoxes: boolean;
+  // Prepend a short story-context block (who the mentioned names are) to each
+  // message the companion sends, so the AI never guesses at canon.
+  includeStoryContext: boolean;
   target: ConversationTargetChoice;
 }
 
@@ -17,6 +20,7 @@ export const defaultVoiceSettings: VoiceSettings = {
   readRepliesAutomatically: true,
   listenAfterReading: true,
   skipContentBoxes: true,
+  includeStoryContext: false,
   target: "auto"
 };
 

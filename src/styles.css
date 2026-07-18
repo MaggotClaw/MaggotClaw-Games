@@ -59,6 +59,17 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .chat-rooms li button:hover { border-color: var(--mc-green, #00efb1); }
 .chat-rooms li button.active { background: #14241f; border-color: var(--mc-green, #00efb1); }
 .chat-inline-form { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: #0d1614; border: 1px solid #1e2c28; border-radius: 9px; }
+.home-shell { position: relative; }
+.who-chip.home-corner { position: absolute; top: 14px; right: 16px; z-index: 5; }
+.reaction-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 6px 0; }
+.reaction-row button { padding: 8px 14px; color: var(--mc-white, #f2f6f4); background: #0d1614; border: 1px solid #2c8d75; border-radius: 999px; font-weight: 700; cursor: pointer; }
+.reaction-row button:hover { border-color: var(--mc-green, #00efb1); color: var(--mc-green-soft, #7fd9c4); }
+.question-card { margin: 10px 0; padding: 14px 16px; background: #0d1614; border: 1px solid #1e2c28; border-radius: 12px; }
+.question-card h2 { margin: 0 0 8px; font-size: 1rem; color: var(--mc-green-soft, #7fd9c4); }
+.question-card button { display: block; width: 100%; margin: 6px 0; padding: 10px 12px; text-align: left; color: var(--mc-white, #f2f6f4); background: #0a100e; border: 1px solid #2c3a35; border-radius: 9px; cursor: pointer; }
+.question-card button:hover { border-color: var(--mc-green, #00efb1); }
+.pronun-row { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
+.pronun-row input { flex: 1; padding: 7px 9px; color: var(--mc-white, #f2f6f4); background: #0a100e; border: 1px solid #2c3a35; border-radius: 7px; }
 .release-grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
 .release-chip { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; color: var(--mc-muted, #9aa7a2); background: #0d1614; border: 1px solid #1e2c28; border-radius: 999px; font-weight: 700; cursor: pointer; user-select: none; }
 .release-chip.on { color: #00140e; background: var(--mc-green, #00efb1); border-color: var(--mc-green, #00efb1); }

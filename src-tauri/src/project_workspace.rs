@@ -334,6 +334,25 @@ pub fn retire_project_file(dropbox_path: String) -> Result<(), String> {
     save_manifest(&root, &manifest)
 }
 
+/// A dictated idea, dated and dropped into 02 Working Files/Ideas — explicitly
+/// non-canon until the author promotes it.
+#[tauri::command]
+pub fn save_idea_note(content: String) -> Result<String, String> {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return Err("Say or type the idea first.".to_string());
+    }
+    let root = initialize()?;
+    let folder = root.join("02 Working Files").join("Ideas");
+    fs::create_dir_all(&folder)
+        .map_err(|_| "The Ideas folder could not be created.".to_string())?;
+    let stamp = timestamp();
+    let name = format!("Idea {stamp}.md");
+    let body = format!("# Idea\n\n{trimmed}\n");
+    write_copy(&folder.join(&name), body.as_bytes())?;
+    Ok(format!("02 Working Files/Ideas/{name}"))
+}
+
 #[tauri::command]
 pub fn open_project_workspace() -> Result<(), String> {
     let root = initialize()?;
