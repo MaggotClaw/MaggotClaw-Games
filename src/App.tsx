@@ -31,6 +31,9 @@ import { postRelayMessage } from "./discordLink";
 import { latestProgressReports } from "./ChatScreen";
 import { auditForAI, auditProse, humanMakerSharedWithEditors, setHumanMakerSharedWithEditors, type AuditReport } from "./humanMaker";
 import { OkGoButton } from "./OkGoButton";
+import { WalkthroughWindow } from "./WalkthroughWindow";
+import { loadPeople, parseProfileMessage, publishPeople, removePerson, savePeople, sortedPeople, upsertPerson, type Person } from "./people";
+import { addFeedback, diagnosticsReport, FEEDBACK_AREAS, feedbackMessage, loadErrors, loadFeedback, loadUsage, markFeedbackSent, noteUsage, setShareDiagnostics, shareDiagnostics, watchForErrors } from "./feedback";
 import { activeProject, addProject, allProjects, applyActiveProject, isSafeDropboxRoot, isSafeProjectName, removeProject, setActiveProjectId } from "./projects";
 import {
   actionsPath, actionLog, claudeAccessOn, claudeInstructions, describeAction,
@@ -41,7 +44,7 @@ import { recordJoin } from "./contacts";
 import { EMPTY_READER_PROFILE, hasProfilePin, isValidPin, loadReaderProfile, readerProfileSummary, saveReaderProfile, setNickname, setProfilePin, type ReaderProfile } from "./profileInfo";
 import { ReadSelectionButton } from "./ReadSelectionButton";
 
-type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "workspace-files" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock" | "chat" | "directions" | "idea" | "human-maker" | "claude-access";
+type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "workspace-files" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock" | "chat" | "directions" | "idea" | "human-maker" | "claude-access" | "people" | "feedback";
 
 function BrandLogo({ compact = false }: { compact?: boolean }) {
   return <img className={compact ? "brand-logo compact" : "brand-logo"} src="/maggotclaw-modern.png" alt="MaggotClaw Games" />;
@@ -114,6 +117,25 @@ const IS_COMPANION_WINDOW =
 // over Claude and be dragged anywhere on the screen.
 const IS_OKGO_WINDOW =
   typeof window !== "undefined" && window.location.hash.replace(/^#/, "") === "okgo";
+
+const IS_WALK_WINDOW =
+  typeof window !== "undefined" && window.location.hash.replace(/^#/, "") === "walkthrough";
+
+async function openWalkthroughWindow(): Promise<void> {
+  const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  const existing = await WebviewWindow.getByLabel("walkthrough");
+  if (existing) {
+    try { await existing.show(); await existing.setFocus(); } catch { /* ignore */ }
+    return;
+  }
+  // eslint-disable-next-line no-new
+  new WebviewWindow("walkthrough", {
+    url: "index.html#walkthrough",
+    title: "Show Me How",
+    width: 380, height: 340, resizable: true, decorations: false,
+    transparent: true, shadow: false, alwaysOnTop: true, center: false, focus: true
+  });
+}
 
 async function openOkGoWindow(): Promise<void> {
   const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
@@ -243,6 +265,15 @@ export function App() {
   const [sleepMinutes, setSleepMinutes] = useState(0);
   const [claudeLog, setClaudeLog] = useState<ActionRecord[]>(actionLog);
   const [claudeOn, setClaudeOn] = useState(claudeAccessOn);
+  const [people, setPeople] = useState<Person[]>(() => sortedPeople(loadPeople()));
+  const [peopleBusy, setPeopleBusy] = useState(false);
+  const [feedbackArea, setFeedbackArea] = useState(FEEDBACK_AREAS[0]);
+  const [feedbackKind, setFeedbackKind] = useState<"rating" | "idea" | "problem">("rating");
+  const [feedbackRating, setFeedbackRating] = useState(5);
+  const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const [shareDiag, setShareDiag] = useState(shareDiagnostics);
+  const [appVersion, setAppVersion] = useState("");
   const [projectList, setProjectList] = useState(allProjects);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectRoot, setNewProjectRoot] = useState("");
@@ -367,6 +398,28 @@ export function App() {
     );
     return () => { if (unlisten) unlisten(); };
   }, []);
+
+  // The guide window takes this window with it, step by step.
+  useEffect(() => {
+    if (IS_COMPANION_WINDOW || IS_OKGO_WINDOW || IS_WALK_WINDOW || !("__TAURI_INTERNALS__" in window)) return;
+    let unlisten: (() => void) | undefined;
+    void import("@tauri-apps/api/event").then(({ listen }) =>
+      listen<string>("mcg://go-to-screen", (event) => {
+        const wanted = event.payload as Screen;
+        if (wanted === "settings") settingsReturn.current = "home";
+        setScreen(wanted);
+      }).then((un) => { unlisten = un; })
+    );
+    return () => { if (unlisten) unlisten(); };
+  }, []);
+
+  // Watch for problems, and keep a plain count of what gets used.
+  useEffect(() => { watchForErrors(); }, []);
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) { setAppVersion("dev"); return; }
+    void import("@tauri-apps/api/app").then(({ getVersion }) => getVersion()).then(setAppVersion).catch(() => undefined);
+  }, []);
+  useEffect(() => { if (screen) noteUsage(screen); }, [screen]);
 
   // Startup checks in the main hub only: verify local files against Dropbox,
   // pull the shared chapter releases, and check for waiting Discord requests —
@@ -1139,6 +1192,10 @@ export function App() {
     return <FileWindow relative={FILE_WINDOW_PATH} />;
   }
 
+  if (IS_WALK_WINDOW) {
+    return <WalkthroughWindow isOwner={canPerform(realProfileRole(readerName), "manage")} onClose={() => { void closeCurrentWindow(); }} />;
+  }
+
   if (IS_OKGO_WINDOW) {
     return <OkGoButton readerName={readerName || "Reader"} onClose={() => { void closeCurrentWindow(); }} />;
   }
@@ -1253,6 +1310,9 @@ export function App() {
           <button className="pill-button chip" onClick={() => setScreen("human-maker")}>Human Maker</button>}
         {"__TAURI_INTERNALS__" in window && canPerform(role, "propose") &&
           <button className="pill-button chip" onClick={() => { void openOkGoWindow(); }}>OK GO Button</button>}
+        {"__TAURI_INTERNALS__" in window && <button className="pill-button chip" onClick={() => { void openWalkthroughWindow(); }}>Show Me How</button>}
+        <button className="pill-button chip" onClick={() => setScreen("feedback")}>Tell MaggotClaw</button>
+        {canPerform(role, "manage") && <button className="pill-button chip" onClick={() => setScreen("people")}>People</button>}
         {canPerform(role, "manage") && <button className="pill-button chip" onClick={() => setScreen("claude-access")}>
           Claude{claudeLog.some((r) => r.state === "waiting") && <span className="pending-badge">{claudeLog.filter((r) => r.state === "waiting").length}</span>}
         </button>}
@@ -1339,6 +1399,123 @@ export function App() {
 
   if (screen === "project-explorer") {
     return <ProjectExplorer onBack={() => setScreen("project-workspace")} />;
+  }
+
+  if (screen === "people") {
+    return <main className="app-shell project-shell">
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">PEOPLE</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <section className="projects-heading"><h1>Your People</h1><p>Everyone in the circle, what they told you when they joined, and how to reach them.</p></section>
+
+      <section className="form-actions">
+        <button className="primary" disabled={peopleBusy} onClick={() => {
+          setPeopleBusy(true);
+          void fetchDiscordRequests().then(() => undefined).catch(() => undefined);
+          // Pull the onboarding summaries people's apps posted.
+          void (async () => {
+            try {
+              const { invoke } = await import("@tauri-apps/api/core");
+              const messages = await invoke<Array<{ content?: string }>>("fetch_discord_messages", {
+                botToken: getBotToken(), channelId: getRequestsChannelId(), limit: 100, after: null
+              });
+              let roster = loadPeople();
+              let found = 0;
+              for (const message of Array.isArray(messages) ? messages : []) {
+                const parsed = parseProfileMessage(message.content ?? "");
+                if (parsed) { roster = upsertPerson(roster, parsed); found += 1; }
+              }
+              savePeople(roster);
+              setPeople(sortedPeople(roster));
+              setStatus(found ? `Found ${found} joining message${found === 1 ? "" : "s"}.` : "No new joining messages on Discord.");
+            } catch (error) {
+              setStatus(message(error));
+            } finally {
+              setPeopleBusy(false);
+            }
+          })();
+        }}>{peopleBusy ? "Checking…" : "Check Discord For New People"}</button>
+        <button disabled={peopleBusy || !people.length} onClick={() => {
+          setPeopleBusy(true);
+          void publishPeople(client, people)
+            .then((written) => setStatus(`${written} people files written to the project's People folder on Dropbox.`))
+            .catch(() => setStatus("The people files could not be written. Nothing was changed."))
+            .finally(() => setPeopleBusy(false));
+        }}>Save People Files To Dropbox</button>
+      </section>
+
+      <section className="comments-list">
+        {people.length === 0 && <div className="empty-state"><strong>Nobody yet</strong><p>When someone finishes onboarding, their answers arrive in Discord — press Check Discord For New People and they land here.</p></div>}
+        {people.map((person) => <article key={person.name} className="saved-comment">
+          <div className="comment-meta"><span>{roleLabel(person.role)}</span><time>{person.joinedAt ? new Date(person.joinedAt).toLocaleDateString() : ""}</time></div>
+          <h2>{person.name}{person.nickname ? ` — “${person.nickname}”` : ""}</h2>
+          <div className="person-rows">
+            {person.email && <span>✉ <a href={`mailto:${person.email}`} onClick={(e) => { e.preventDefault(); void import("@tauri-apps/api/core").then(({ invoke }) => invoke("open_url", { url: `mailto:${person.email}` })); }}>{person.email}</a></span>}
+            {person.phone && <span>☎ {person.phone}</span>}
+            {person.where && <span>📍 {person.where}</span>}
+            {person.discord && <span>💬 {person.discord}</span>}
+            {person.furthest && <span>📖 {person.furthest}</span>}
+          </div>
+          {person.reads && <p><strong>Reads:</strong> {person.reads}</p>}
+          {person.authors && <p><strong>Favourites:</strong> {person.authors}</p>}
+          {person.avoid && <p><strong>Rather not read:</strong> {person.avoid}</p>}
+          {person.notes && <p><strong>Notes:</strong> {person.notes}</p>}
+          <div className="request-actions">
+            <label>Role<select value={person.role} onChange={(event) => {
+              const next = upsertPerson(people, { name: person.name, role: event.target.value as ProjectRole });
+              savePeople(next); setPeople(sortedPeople(next));
+            }}>{ROLE_ORDER.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}</select></label>
+            <button onClick={() => { setScreen("chat"); }}>Message</button>
+            <button onClick={() => { if (window.confirm(`Remove ${person.name} from your people list? Their files on Dropbox stay where they are.`)) { const next = removePerson(people, person.name); savePeople(next); setPeople(sortedPeople(next)); } }}>Remove</button>
+          </div>
+        </article>)}
+      </section>
+      <footer className="safe-status">{status}</footer>
+    </main>;
+  }
+
+  if (screen === "feedback") {
+    const mine = loadFeedback();
+    return <main className="app-shell project-shell">
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">TELL MAGGOTCLAW</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <section className="projects-heading"><h1>What Do You Think?</h1><p>Rate a part of the app, send an idea, or report a problem. Nothing leaves this computer until you press send.</p></section>
+
+      <section className="dash-section">
+        <label>What is this about?<select value={feedbackArea} onChange={(event) => setFeedbackArea(event.target.value)}>
+          {FEEDBACK_AREAS.map((area) => <option key={area}>{area}</option>)}
+        </select></label>
+        <label>Is this a rating, an idea, or a problem?<select value={feedbackKind} onChange={(event) => setFeedbackKind(event.target.value as typeof feedbackKind)}>
+          <option value="rating">A rating</option><option value="idea">An idea</option><option value="problem">A problem</option>
+        </select></label>
+        {feedbackKind === "rating" && <div className="star-row">
+          {[1, 2, 3, 4, 5].map((n) => <button key={n} className={n <= feedbackRating ? "star on" : "star"} onClick={() => setFeedbackRating(n)}>★</button>)}
+        </div>}
+        <label>Tell MaggotClaw in your own words<textarea rows={5} value={feedbackText} placeholder={feedbackKind === "problem" ? "What happened, and what were you doing?" : feedbackKind === "idea" ? "What would make this better?" : "What did you like or dislike?"} onChange={(event) => setFeedbackText(event.target.value)} /></label>
+        <label className="check-setting"><input type="checkbox" checked={shareDiag} onChange={(event) => { setShareDiag(event.target.checked); setShareDiagnostics(event.target.checked); }} /> Include what went wrong technically (helps fix it — never includes your reading or writing)</label>
+        <div className="form-actions">
+          <button className="primary" disabled={!feedbackText.trim() || feedbackBusy} onClick={() => {
+            setFeedbackBusy(true);
+            const list = addFeedback({ kind: feedbackKind, area: feedbackArea, rating: feedbackKind === "rating" ? feedbackRating : undefined, text: feedbackText.trim(), from: readerName });
+            const item = list[list.length - 1];
+            const body = shareDiag && feedbackKind === "problem"
+              ? `${feedbackMessage(item)}\n\n---\n${diagnosticsReport(appVersion, loadUsage(), loadErrors())}`
+              : feedbackMessage(item);
+            void sendRequestToDiscord(body).then((sent) => {
+              if (sent) markFeedbackSent(item.id);
+              setStatus(sent ? "Sent to MaggotClaw. Thank you." : "Saved here — it will go when the connection is back.");
+              setFeedbackText("");
+            }).finally(() => setFeedbackBusy(false));
+          }}>{feedbackBusy ? "Sending…" : "Send To MaggotClaw"}</button>
+        </div>
+      </section>
+
+      {mine.length > 0 && <section className="dash-section">
+        <h2>What You Have Sent</h2>
+        <ul className="request-list">{[...mine].reverse().slice(0, 20).map((item) => <li key={item.id} className="request-card">
+          <div className="request-who"><strong>{item.kind === "rating" ? `${"★".repeat(item.rating ?? 0)} ${item.area}` : `${item.kind === "idea" ? "Idea" : "Problem"} — ${item.area}`}</strong><span className={item.sent ? "update-status ok" : "update-status warn"}>{item.sent ? "sent" : "waiting"}</span></div>
+          <p className="request-reason">{item.text}</p>
+        </li>)}</ul>
+      </section>}
+      <footer className="safe-status">{status}</footer>
+    </main>;
   }
 
   if (screen === "claude-access") {
