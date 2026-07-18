@@ -62,4 +62,7 @@ export interface ReaderComment {
   silenceAllowanceSeconds: number;
   createdAt: string;
   updatedAt: string;
+  // Set when this comment was successfully delivered to the owner, so it is
+  // never sent twice and the reader can see it arrived.
+  submittedAt?: string;
 }

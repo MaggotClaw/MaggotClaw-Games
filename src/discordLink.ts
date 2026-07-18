@@ -116,7 +116,7 @@ export async function fetchDiscordRequests(): Promise<DiscordRequestMessage[]> {
   const { invoke } = await import("@tauri-apps/api/core");
   const messages = await invoke<Array<{ id?: string; content?: string; timestamp?: string; author?: { username?: string } }>>(
     "fetch_discord_messages",
-    { botToken: getBotToken(), channelId: getRequestsChannelId(), limit: 50 }
+    { botToken: getBotToken(), channelId: getRequestsChannelId(), limit: 100 }
   );
   const handled = handledMessageIds();
   return extractRequestCodes(Array.isArray(messages) ? messages : []).filter((m) => !handled.has(m.messageId));
@@ -127,6 +127,26 @@ export async function postUnlockToDiscord(name: string, roleLabelText: string, u
   if (!("__TAURI_INTERNALS__" in window)) return false;
   const { invoke } = await import("@tauri-apps/api/core");
   const content = `**Approved:** ${name} → ${roleLabelText}\n${name}, paste this into the app under "Enter unlock code":\n\`${unlockCode}\``;
+  try {
+    if (discordReadingConfigured()) {
+      await invoke("post_discord_bot_message", { botToken: getBotToken(), channelId: getRequestsChannelId(), content });
+      return true;
+    }
+    const url = getRequestWebhook();
+    if (isDiscordWebhook(url)) {
+      await invoke("post_discord_webhook", { url, content });
+      return true;
+    }
+  } catch { /* fall through */ }
+  return false;
+}
+
+// A decline answered out loud: the requester's wait ends with a message
+// instead of silence.
+export async function postUnlockDecline(name: string): Promise<boolean> {
+  if (!("__TAURI_INTERNALS__" in window)) return false;
+  const { invoke } = await import("@tauri-apps/api/core");
+  const content = `**Request declined:** ${name}, the owner declined this access request for now. You can keep reading, and you can always ask again with a note about why.`;
   try {
     if (discordReadingConfigured()) {
       await invoke("post_discord_bot_message", { botToken: getBotToken(), channelId: getRequestsChannelId(), content });
@@ -205,15 +225,58 @@ export function parseChatLines(
   return found.reverse();
 }
 
-// Anyone with the messaging key can pull the relay channel.
+// Snowflake ids are numeric strings; longer means newer, then lexicographic.
+function newestId(a: string, b: string): string {
+  if (a.length !== b.length) return a.length > b.length ? a : b;
+  return a > b ? a : b;
+}
+
+function lastSeenKey(): string {
+  return `mcg-relay-last-id:${getRelayChannelId()}`;
+}
+
+// Anyone with the messaging key can pull the relay channel. After the first
+// pull, later pulls page forward from the last message this machine has seen,
+// so a computer that was off for a week catches up on everything it missed
+// instead of only the newest hundred lines.
 export async function fetchRelayMessages(): Promise<RelayChatMessage[]> {
   if (!getBotToken() || !("__TAURI_INTERNALS__" in window)) return [];
   const { invoke } = await import("@tauri-apps/api/core");
-  const messages = await invoke<Array<{ id?: string; content?: string; timestamp?: string; author?: { username?: string } }>>(
+  type RawMessage = { id?: string; content?: string; timestamp?: string; author?: { username?: string } };
+  const fetchPage = (after: string | null) => invoke<RawMessage[]>(
     "fetch_discord_messages",
-    { botToken: getBotToken(), channelId: getRelayChannelId(), limit: 100 }
+    { botToken: getBotToken(), channelId: getRelayChannelId(), limit: 100, after }
   );
-  return parseChatLines(Array.isArray(messages) ? messages : []);
+
+  let lastSeen = "";
+  try { lastSeen = localStorage.getItem(lastSeenKey()) || ""; } catch { /* ignore */ }
+
+  const collected: RawMessage[] = [];
+  if (!lastSeen) {
+    const page = await fetchPage(null);
+    if (Array.isArray(page)) collected.push(...page);
+  } else {
+    let cursor = lastSeen;
+    for (let pages = 0; pages < 5; pages += 1) {
+      const page = await fetchPage(cursor);
+      if (!Array.isArray(page) || !page.length) break;
+      collected.push(...page);
+      cursor = page.reduce((best, m) => (m.id ? newestId(best, m.id) : best), cursor);
+      if (page.length < 100) break;
+    }
+    if (!collected.length) {
+      // Nothing new since the cursor — refresh the newest page anyway so a
+      // deleted cursor message can never freeze the pull.
+      const page = await fetchPage(null);
+      if (Array.isArray(page)) collected.push(...page);
+    }
+  }
+
+  const newest = collected.reduce((best, m) => (m.id ? newestId(best, m.id) : best), lastSeen);
+  if (newest) {
+    try { localStorage.setItem(lastSeenKey(), newest); } catch { /* ignore */ }
+  }
+  return parseChatLines(collected);
 }
 
 // Post a chat line: through the bot when the key is present (reaches the relay

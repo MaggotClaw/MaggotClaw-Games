@@ -209,12 +209,22 @@ async fn fetch_discord_messages(
     bot_token: String,
     channel_id: String,
     limit: u8,
+    after: Option<String>,
 ) -> Result<Value, String> {
     if !channel_id.chars().all(|c| c.is_ascii_digit()) || channel_id.is_empty() {
         return Err("The channel ID must be a number.".to_string());
     }
     let capped = limit.clamp(1, 100);
-    let endpoint = discord_api_url(&format!("channels/{channel_id}/messages?limit={capped}"))?;
+    // "after" pages forward from a known message id, so a machine that was
+    // offline can catch up on everything rather than only the newest page.
+    let cursor = match after {
+        Some(id) if !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()) => {
+            format!("&after={id}")
+        }
+        _ => String::new(),
+    };
+    let endpoint =
+        discord_api_url(&format!("channels/{channel_id}/messages?limit={capped}{cursor}"))?;
     let response = reqwest::Client::new()
         .get(endpoint)
         .header("authorization", format!("Bot {}", bot_token.trim()))
@@ -485,6 +495,7 @@ pub fn run() {
             project_workspace::list_approved_uploads,
             project_workspace::read_approved_upload,
             project_workspace::archive_approved_upload,
+            project_workspace::retire_project_file,
             project_workspace::search_project_documents
         ])
         .build(tauri::generate_context!())

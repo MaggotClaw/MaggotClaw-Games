@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { canPerform, roleLabel, type ProjectRole } from "./permissions";
 import {
   fetchRelayMessages, getBotToken, getRelayChannelId, messagingConnected,
@@ -86,14 +86,24 @@ export function mergeThread(local: LocalMessage[], incoming: LocalMessage[]): Lo
 }
 
 // Pure: which thread does a relay message belong to, seen by this person?
+// The owner always writes as the MaggotClaw handle, so readers file the
+// author's replies under their "Message MaggotClaw" thread no matter what the
+// owner's real profile name is.
 export function threadKeyFor(message: RelayChatMessage, viewerName: string, viewerIsOwner: boolean): string | null {
   if (message.room) return `room:${message.room}`;
   const to = (message.to ?? "").trim();
+  const author = message.author.trim();
   const me = viewerName.trim().toLowerCase();
+  const authorIsOwner = author === OWNER_HANDLE;
   const isToMe = to.toLowerCase() === me || (viewerIsOwner && to === OWNER_HANDLE);
-  const isFromMe = message.author.trim().toLowerCase() === me;
-  if (isToMe) return `dm:${message.author.trim().toLowerCase()}`;
-  if (isFromMe) return `dm:${to.toLowerCase()}`;
+  const isFromMe = author.toLowerCase() === me || (viewerIsOwner && authorIsOwner);
+  if (viewerIsOwner) {
+    if (isToMe) return `dm:${author.toLowerCase()}`;
+    if (isFromMe) return `dm:${to.toLowerCase()}`;
+    return null;
+  }
+  if (isToMe) return authorIsOwner ? "dm:maggotclaw" : `dm:${author.toLowerCase()}`;
+  if (isFromMe) return to === OWNER_HANDLE ? "dm:maggotclaw" : `dm:${to.toLowerCase()}`;
   return null;
 }
 
@@ -107,6 +117,9 @@ export function ChatScreen({ role, name, onBack, onOpenDiscord }: { role: Projec
   const [connected, setConnected] = useState(messagingConnected);
   const [note, setNote] = useState("");
   const [pulling, setPulling] = useState(false);
+  const [keyEntry, setKeyEntry] = useState<string | null>(null);
+  const [friendEntry, setFriendEntry] = useState<string | null>(null);
+  const logRef = useRef<HTMLDivElement | null>(null);
 
   const activeRoom = activeKey.startsWith("room:") ? rooms.find((r) => r.id === activeKey.slice(5)) : undefined;
   const activeDm = activeKey.startsWith("dm:") ? activeKey.slice(3) : null;
@@ -134,14 +147,16 @@ export function ChatScreen({ role, name, onBack, onOpenDiscord }: { role: Projec
           id: message.messageId, author: message.author, text: message.text, at: message.sentAt
         });
         // Anyone heard on the relay is a real person: attach them to contacts.
-        if (message.author.trim().toLowerCase() !== name.trim().toLowerCase()) recordJoin(message.author, "");
+        // The MaggotClaw handle is the author's persona, not a contact entry.
+        const author = message.author.trim();
+        if (author.toLowerCase() !== name.trim().toLowerCase() && author !== OWNER_HANDLE) recordJoin(author, "");
       }
       for (const [key, incoming] of byThread) saveThread(key, mergeThread(loadThread(key), incoming));
       setContacts(loadContacts());
       setMessages(loadThread(storageKey));
       setNote("");
     } catch {
-      setNote("Messages Could Not Be Refreshed — Showing This Computer's Copy");
+      setNote("Messages could not be refreshed — showing this computer's copy.");
     } finally {
       setPulling(false);
     }
@@ -149,29 +164,45 @@ export function ChatScreen({ role, name, onBack, onOpenDiscord }: { role: Projec
 
   useEffect(() => { void pullRelay(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
+  // The room keeps itself fresh while it is open — nobody should have to find
+  // the little Refresh button to see a reply.
+  useEffect(() => {
+    if (!connected) return;
+    const timer = window.setInterval(() => { void pullRelay(); }, 25000);
+    return () => window.clearInterval(timer);
+  }, [connected, pullRelay]);
+
+  // New messages land at the bottom; keep the view there.
+  useEffect(() => {
+    const log = logRef.current;
+    if (log) log.scrollTop = log.scrollHeight;
+  }, [messages, activeKey]);
+
   async function send() {
     const text = draft.trim();
     if (!text || !activeKey) return;
-    const local: LocalMessage = { id: `local-${crypto.randomUUID()}`, author: name, text, at: new Date().toISOString() };
+    // The owner writes as MaggotClaw — the author's one consistent voice on
+    // every reader's machine.
+    const wireAuthor = isOwner ? OWNER_HANDLE : name;
+    const local: LocalMessage = { id: `local-${crypto.randomUUID()}`, author: wireAuthor, text, at: new Date().toISOString() };
     const next = [...messages, local];
     setMessages(next);
     saveThread(storageKey, next);
     setDraft("");
     const sent = await postRelayMessage(activeRoom
-      ? { room: activeRoom.id, author: name, text }
-      : { to: activeDm === "maggotclaw" ? OWNER_HANDLE : (dmTargets.find((c) => c.name.toLowerCase() === activeDm)?.name ?? activeDm ?? ""), author: name, text });
-    setNote(sent ? "" : "Sent To This Computer Only — The Team Connection Did Not Answer");
+      ? { room: activeRoom.id, author: wireAuthor, text }
+      : { to: activeDm === "maggotclaw" ? OWNER_HANDLE : (dmTargets.find((c) => c.name.toLowerCase() === activeDm)?.name ?? activeDm ?? ""), author: wireAuthor, text });
+    setNote(sent ? "" : "That message is only on this computer — the team connection did not answer.");
   }
 
-  function connectMessaging() {
-    const pasted = window.prompt("Paste the Messaging Key the owner sent you:");
-    if (!pasted || !pasted.trim()) return;
+  function connectMessaging(pasted: string) {
     const key = parseMessagingKey(pasted);
-    if (!key) { setNote("That Messaging Key Was Not Recognised"); return; }
+    if (!key) { setNote("That Messaging Key was not recognised — check it was copied in full."); return; }
     setBotToken(key.botToken);
     setRelayChannelId(key.channelId);
     setConnected(true);
-    setNote("Messaging Connected — Pulling The Team's Messages");
+    setKeyEntry(null);
+    setNote("Messaging connected — pulling the team's messages.");
     void pullRelay();
   }
 
@@ -179,16 +210,16 @@ export function ChatScreen({ role, name, onBack, onOpenDiscord }: { role: Projec
     const code = makeMessagingKey({ botToken: getBotToken(), channelId: getRelayChannelId() });
     try {
       await navigator.clipboard?.writeText(code);
-      setNote("Messaging Key Copied — Send It To Whoever You Want Chatting Here");
+      setNote("Messaging Key copied — send it privately to whoever you want chatting here.");
     } catch {
-      window.prompt("Copy this Messaging Key:", code);
+      setNote("The clipboard was not available. Try again.");
     }
   }
 
-  function addFriend() {
-    const discordName = window.prompt("Their Discord name (they attach automatically when they join the app):");
-    if (!discordName || !discordName.trim()) return;
+  function addFriend(discordName: string) {
+    if (!discordName.trim()) return;
     setContacts(addContact(discordName, discordName));
+    setFriendEntry(null);
   }
 
   const composerLocked = Boolean(activeRoom?.ownerPostsOnly && !isOwner);
@@ -217,7 +248,11 @@ export function ChatScreen({ role, name, onBack, onOpenDiscord }: { role: Projec
           </li>)}
         </ul>
 
-        <div className="chat-rooms-head"><h2>Direct Messages</h2>{isOwner && <button className="primary tiny" onClick={addFriend}>Add A Friend</button>}</div>
+        <div className="chat-rooms-head"><h2>Direct Messages</h2>{isOwner && <button className="primary tiny" onClick={() => setFriendEntry(friendEntry === null ? "" : null)}>Add A Friend</button>}</div>
+        {friendEntry !== null && <div className="chat-inline-form">
+          <input value={friendEntry} placeholder="Their Discord name" autoFocus onChange={(event) => setFriendEntry(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addFriend(friendEntry); }} />
+          <button className="primary tiny" disabled={!friendEntry.trim()} onClick={() => addFriend(friendEntry)}>Add</button>
+        </div>}
         <ul>
           {!isOwner && <li>
             <button className={activeKey === "dm:maggotclaw" ? "active" : ""} onClick={() => setActiveKey("dm:maggotclaw")}>
@@ -234,7 +269,11 @@ export function ChatScreen({ role, name, onBack, onOpenDiscord }: { role: Projec
           </li>)}
         </ul>
 
-        {!connected && <button className="primary tiny" onClick={connectMessaging}>Connect Messaging</button>}
+        {!connected && <button className="primary tiny" onClick={() => setKeyEntry(keyEntry === null ? "" : null)}>Connect Messaging</button>}
+        {keyEntry !== null && <div className="chat-inline-form">
+          <textarea rows={3} value={keyEntry} placeholder="Paste the Messaging Key from MaggotClaw (MCG-MSG-…)" autoFocus onChange={(event) => setKeyEntry(event.target.value)} />
+          <button className="primary tiny" disabled={!keyEntry.trim()} onClick={() => connectMessaging(keyEntry)}>Connect</button>
+        </div>}
         {isOwner && connected && <button className="primary tiny" onClick={() => void copyMessagingKey()}>Copy Messaging Key</button>}
 
         <div className="chat-rooms-head"><h2>Who's Here</h2></div>
@@ -253,7 +292,7 @@ export function ChatScreen({ role, name, onBack, onOpenDiscord }: { role: Projec
             <button className="text-button" onClick={onOpenDiscord} disabled={!onOpenDiscord} title="Voice calls run in the full Messages window">Start call</button>
           </div>
 
-          <div className="chat-messages">
+          <div className="chat-messages" ref={logRef}>
             {messages.length === 0
               ? <div className="chat-placeholder">
                   <strong>{activeTitle} is quiet</strong>
@@ -282,7 +321,7 @@ export function ChatScreen({ role, name, onBack, onOpenDiscord }: { role: Projec
           </div>
           <p className="chat-note">{note || (connected
             ? "Messages travel through the team's Discord channel and are kept on this computer too."
-            : "Messages stay on this computer until the owner sends you a Messaging Key.")}</p>
+            : "Messages you send are delivered to the team's Discord. Ask MaggotClaw for a Messaging Key to see replies here.")}</p>
         </>}
       </section>
     </section>

@@ -68,19 +68,42 @@ export function parseAccessMap(json: string): FileAccessMap {
   }
 }
 
-// Pull the shared map from Dropbox and remember it locally. Quietly keeps the
-// local copy when the bridge is off or the map has never been published.
-export async function fetchSharedAccessMap(client: LongRotMcpClient): Promise<FileAccessMap> {
-  try {
-    const map = parseAccessMap(await client.readText(ACCESS_MAP_DROPBOX_PATH));
-    saveAccessMap(map);
-    return map;
-  } catch {
-    return loadAccessMap();
+// Pull the shared map from Dropbox and remember it locally. `shared` says
+// whether Dropbox actually answered — callers that guard downloads need to
+// know the difference between "no ratings" and "could not ask".
+export async function fetchSharedAccessMap(
+  client: LongRotMcpClient
+): Promise<{ map: FileAccessMap; shared: boolean }> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const map = parseAccessMap(await client.readText(ACCESS_MAP_DROPBOX_PATH));
+      // The shared ratings are the truth, but this machine's unpublished
+      // edits stay on top of them.
+      const merged = { ...map, ...loadAccessMap() };
+      saveAccessMap(merged);
+      return { map: merged, shared: true };
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 700));
+    }
   }
+  return { map: loadAccessMap(), shared: false };
 }
 
 // Owner only: publish the local ratings so every machine downloads by them.
+// Refuses to publish an empty map over a real one — that is how a fresh
+// machine could otherwise wipe the whole permission system.
 export async function publishAccessMap(client: LongRotMcpClient): Promise<void> {
-  await client.writeText(ACCESS_MAP_DROPBOX_PATH, JSON.stringify(loadAccessMap(), null, 2));
+  const local = loadAccessMap();
+  if (!Object.keys(local).length) {
+    try {
+      const shared = parseAccessMap(await client.readText(ACCESS_MAP_DROPBOX_PATH));
+      if (Object.keys(shared).length) {
+        throw new Error("This computer has no ratings yet — open the file list and rate files before publishing.");
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("no ratings yet")) throw error;
+      // No shared map exists either; publishing empty is harmless.
+    }
+  }
+  await client.writeText(ACCESS_MAP_DROPBOX_PATH, JSON.stringify(local, null, 2));
 }

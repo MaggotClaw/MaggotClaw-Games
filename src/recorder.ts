@@ -56,7 +56,9 @@ export class CommentRecorder {
 
   stop(): Promise<RecordingResult> {
     if (!this.mediaRecorder || this.mediaRecorder.state === "inactive") {
-      return Promise.resolve({ audio: new Blob(), mimeType: "", transcription: this.latestTranscript.trim() });
+      // No active recording means no transcript: returning stale words from an
+      // earlier session could send the wrong message entirely.
+      return Promise.resolve({ audio: new Blob(), mimeType: "", transcription: "" });
     }
     return new Promise((resolve) => {
       const mediaRecorder = this.mediaRecorder!;
@@ -64,8 +66,9 @@ export class CommentRecorder {
       mediaRecorder.onstop = () => {
         const mimeType = mediaRecorder.mimeType || this.chunks[0]?.type || "audio/webm";
         const audio = new Blob(this.chunks, { type: mimeType });
+        const transcription = this.latestTranscript.trim();
         this.cleanup();
-        this.resolveStop?.({ audio, mimeType, transcription: this.latestTranscript.trim() });
+        this.resolveStop?.({ audio, mimeType, transcription });
         this.resolveStop = null;
       };
       this.recognition?.stop();
@@ -131,5 +134,6 @@ export class CommentRecorder {
     this.stream = null;
     this.mediaRecorder = null;
     this.recognition = null;
+    this.latestTranscript = "";
   }
 }

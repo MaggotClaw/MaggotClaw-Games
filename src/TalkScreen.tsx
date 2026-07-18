@@ -190,39 +190,54 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
   useEffect(() => {
     if (state !== "waiting" || !adapter.responseState) return;
     let checking = false;
+    // If Stop (or a new turn) bumps the cycle while a slow poll is mid-flight,
+    // that poll must never start reading a reply afterwards.
+    const cycle = playbackCycle.current;
     const timer = window.setInterval(async () => {
       if (checking) return;
       checking = true;
       try {
+        const waited = Date.now() - waitingStarted.current;
+        // After ten minutes, don't give up — long thinking runs are normal.
+        // Just check more gently and keep the ▶ escape hatch alive.
+        if (waited > 10 * 60 * 1000) {
+          fallbackTick.current += 1;
+          if (fallbackTick.current % 8 !== 0) return;
+          setStatus(`${targetName} is taking a long time — I'm still watching, and ▶ reads whatever is there now.`);
+        }
         const responseState = await adapter.responseState!();
-        if (responseState.busy) {
-          sawBusy.current = true;
+        if (cycle !== playbackCycle.current) { window.clearInterval(timer); return; }
+        if (responseState.busy) sawBusy.current = true;
+        if (responseState.busy && waited < 60000) {
           setStatus(`${targetName} is answering…`);
           return;
         }
         // Claude virtualizes its message list, so Copy-button counts are unreliable there;
         // the primary signal is the Stop button appearing and then going away.
-        const finishedAfterBusy = sawBusy.current && responseState.hasCompletedResponse;
-        const finishedByCount = responseState.hasCompletedResponse
+        const finishedAfterBusy = sawBusy.current && !responseState.busy && responseState.hasCompletedResponse;
+        const finishedByCount = !responseState.busy && responseState.hasCompletedResponse
           && responseState.completedResponseCount > baselineResponseCount.current
-          && Date.now() - waitingStarted.current > 8000;
+          && waited > 8000;
         if (finishedAfterBusy || finishedByCount) {
           const latest = await adapter.readCopiedResponse();
-          if (latest.trim()) {
+          if (cycle !== playbackCycle.current) { window.clearInterval(timer); return; }
+          // Never read our own just-sent words back as the answer.
+          if (latest.trim() && latest.trim() !== sentWords.current) {
             window.clearInterval(timer);
             beginReply(latest);
             return;
           }
         }
         // Self-rescue: if the buttons we watch were renamed by an app update,
-        // neither signal above ever fires. After 15 quiet seconds, peek at the
-        // latest copyable text every ~6 seconds — if it is new, that IS the
-        // reply, so read it instead of sitting silent.
-        const waited = Date.now() - waitingStarted.current;
-        if (!responseState.busy && waited > 15000) {
+        // neither signal above ever fires. After 15 quiet seconds (or one
+        // minute even if something claims to be busy — a stray "Stop" control
+        // must not gag us forever), peek at the latest copyable text — if it
+        // is new, that IS the reply, so read it instead of sitting silent.
+        if (waited > 15000) {
           fallbackTick.current += 1;
           if (fallbackTick.current % 5 === 0) {
             const latest = (await adapter.readCopiedResponse().catch(() => "")).trim();
+            if (cycle !== playbackCycle.current) { window.clearInterval(timer); return; }
             if (latest && latest !== baselineResponseText.current && latest !== sentWords.current) {
               window.clearInterval(timer);
               beginReply(latest);
@@ -230,11 +245,6 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
             }
             setStatus(`Still waiting for ${targetName} — press ▶ to read the reply if it looks finished.`);
           }
-        }
-        if (Date.now() - waitingStarted.current > 10 * 60 * 1000) {
-          window.clearInterval(timer);
-          setState("idle");
-          setStatus("Stopped waiting after ten minutes. Press Start Talking when ready.");
         }
       } catch (error) {
         setStatus(`${message(error)} I’ll keep checking.`);
@@ -429,10 +439,16 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
   }
 
   // The escape hatch while waiting: grab whatever the latest reply is and read
-  // it now, without waiting for the automatic detection.
+  // it now, without waiting for the automatic detection. If the answer is
+  // still being written, stay patient rather than reading the previous one.
   async function forceReadReply() {
-    setStatus("Reading the latest reply…");
     try {
+      const busyNow = await adapter.responseState?.().then((s) => s.busy).catch(() => false);
+      if (busyNow) {
+        setStatus(`${targetName} is still answering — I'll read it the moment it finishes.`);
+        return;
+      }
+      setStatus("Reading the latest reply…");
       const latest = (await adapter.readCopiedResponse()).trim();
       if (latest) beginReply(latest);
       else setStatus("There is no finished reply to read yet.");

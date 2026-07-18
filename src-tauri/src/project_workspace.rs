@@ -96,11 +96,8 @@ fn save_manifest(root: &Path, manifest: &WorkspaceManifest) -> Result<(), String
         .map_err(|_| "The local project inventory could not be prepared.".to_string())?;
     fs::write(&temporary, contents)
         .map_err(|_| "The local project inventory could not be saved.".to_string())?;
-    if path.exists() {
-        fs::remove_file(&path).map_err(|_| {
-            "The previous local project inventory could not be replaced.".to_string()
-        })?;
-    }
+    // fs::rename on Windows replaces an existing destination atomically, so the
+    // old inventory exists right up until the new one takes its place.
     fs::rename(&temporary, &path)
         .map_err(|_| "The local project inventory could not be finalized.".to_string())
 }
@@ -156,10 +153,6 @@ fn write_copy(path: &Path, content: &[u8]) -> Result<(), String> {
     ));
     fs::write(&temporary, content)
         .map_err(|_| "A local project file could not be saved.".to_string())?;
-    if path.exists() {
-        fs::remove_file(path)
-            .map_err(|_| "The previous local project file could not be replaced.".to_string())?;
-    }
     fs::rename(temporary, path)
         .map_err(|_| "A local project file could not be finalized.".to_string())
 }
@@ -215,7 +208,9 @@ pub fn save_project_text_file(
     let root = initialize()?;
     let relative = safe_relative_path(&dropbox_path)?;
     let original = root.join("01 Originals").join(&relative);
-    let ai_relative = relative.with_extension("md");
+    // Appending ".md" (instead of swapping the extension) keeps "Notes.txt"
+    // and "Notes.json" from colliding into one AI Context file.
+    let ai_relative = PathBuf::from(format!("{}.md", relative.display()));
     let ai_copy = root.join("03 AI Context").join(&ai_relative);
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
@@ -295,6 +290,48 @@ pub fn record_project_binary_file(dropbox_path: String) -> Result<WorkspaceFile,
     manifest.upload_enabled = false;
     save_manifest(&root, &manifest)?;
     Ok(record)
+}
+
+/// A file that vanished from Dropbox (deleted or renamed): its local original
+/// and AI copies move into Backups/Removed — never destroyed — and it leaves
+/// the inventory so the shelf, search, and AI context stop serving stale text.
+#[tauri::command]
+pub fn retire_project_file(dropbox_path: String) -> Result<(), String> {
+    let root = initialize()?;
+    let relative = safe_relative_path(&dropbox_path)?;
+    let shelter = root
+        .join("07 Backups")
+        .join("Removed")
+        .join(timestamp());
+    let moves = [
+        (root.join("01 Originals").join(&relative), shelter.join("01 Originals").join(&relative)),
+        // Both AI-copy namings that have existed: "<file>.md" appended and the
+        // older extension-swapped form.
+        (
+            root.join("03 AI Context").join(PathBuf::from(format!("{}.md", relative.display()))),
+            shelter.join("03 AI Context").join(PathBuf::from(format!("{}.md", relative.display()))),
+        ),
+        (
+            root.join("03 AI Context").join(relative.with_extension("md")),
+            shelter.join("03 AI Context").join(relative.with_extension("md")),
+        ),
+    ];
+    for (from, to) in moves {
+        if !from.exists() {
+            continue;
+        }
+        if let Some(parent) = to.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|_| "The Backups shelter folder could not be created.".to_string())?;
+        }
+        fs::rename(&from, &to)
+            .map_err(|_| "A removed file could not be tucked into Backups.".to_string())?;
+    }
+    let mut manifest = load_manifest(&root)?;
+    manifest
+        .files
+        .retain(|item| item.dropbox_path != dropbox_path);
+    save_manifest(&root, &manifest)
 }
 
 #[tauri::command]

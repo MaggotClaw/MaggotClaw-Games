@@ -12,14 +12,16 @@ import { downloadProject, formatWorkspaceTime, initializeWorkspace, openWorkspac
 import { canPerform, profileRole, realProfileRole, getViewAs, setViewAs, roleLabel, ROLE_ORDER, setProfileRole, type ProjectRole } from "./permissions";
 import { decideAccessRequest, pendingRequests, submitAccessRequest, type AccessRequest } from "./accessRequests";
 import { makeRequestCode, makeUnlockCode, parseRequestCode, parseUnlockCode, unlockMatchesProfile } from "./accessCodes";
-import { isChapterUnlocked, loadUnlockedChapters, readerCopies } from "./readerCopies";
+import { fetchSharedReleases, isChapterUnlocked, loadUnlockedChapters, publishReleases, readerCopies, saveUnlockedChapters } from "./readerCopies";
+import { listenForNativeSpeech, NativeTranscriptAssembler, startNativeDictation, stopNativeDictation } from "./nativeSpeech";
 import type { ParsedDoc, ProjectDocument } from "./projectDocs";
 import { invoke } from "@tauri-apps/api/core";
 import { UpdateChecker } from "./UpdateChecker";
 import { ChatScreen } from "./ChatScreen";
-import { getDiscordName, setDiscordName, getRequestWebhook, setRequestWebhook, isDiscordWebhook, requestAnnouncement, sendRequestToDiscord, fetchDiscordRequests, postUnlockToDiscord, markMessageHandled, discordReadingConfigured, getBotToken, setBotToken, getRequestsChannelId, setRequestsChannelId, getRelayChannelId, setRelayChannelId, messagingConnected, type DiscordRequestMessage } from "./discordLink";
+import { getDiscordName, setDiscordName, getRequestWebhook, setRequestWebhook, isDiscordWebhook, requestAnnouncement, sendRequestToDiscord, fetchDiscordRequests, postUnlockToDiscord, postUnlockDecline, markMessageHandled, discordReadingConfigured, getBotToken, setBotToken, getRequestsChannelId, setRequestsChannelId, getRelayChannelId, setRelayChannelId, messagingConnected, type DiscordRequestMessage } from "./discordLink";
 import { checkProjectSync, syncNote } from "./startupSync";
-import { ACCESS_LEVEL_LABELS, loadAccessMap, publishAccessMap, setFileAccess, type FileAccessMap } from "./fileAccess";
+import { ACCESS_LEVEL_LABELS, fetchSharedAccessMap, loadAccessMap, publishAccessMap, setFileAccess, type FileAccessMap } from "./fileAccess";
+import { getNickname } from "./profileInfo";
 import { recordJoin } from "./contacts";
 import { hasProfilePin, isValidPin, setNickname, setProfilePin } from "./profileInfo";
 import { ReadSelectionButton } from "./ReadSelectionButton";
@@ -171,7 +173,12 @@ export function App() {
   const [document, setDocument] = useState<DocumentRecord | null>(null);
   const [segmentIndex, setSegmentIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [rate, setRate] = useState(1);
+  // The narrator speed a person chose at onboarding (or in Settings) follows
+  // them into every chapter and every window.
+  const [rate, setRate] = useState(() => {
+    const saved = loadVoiceSettings(localStorage.getItem("long-rot-reader-name") || "local").speechRate;
+    return [0.8, 1, 1.2].includes(saved) ? saved : 1;
+  });
   const [status, setStatus] = useState("Ready");
   const [loading, setLoading] = useState(false);
   const [comment, setComment] = useState<ReaderComment | null>(null);
@@ -186,10 +193,24 @@ export function App() {
   const [requestCode, setRequestCode] = useState("");
   const [syncMessage, setSyncMessage] = useState("");
   const [discordWaiting, setDiscordWaiting] = useState(0);
+  const [commentsSending, setCommentsSending] = useState(false);
+  const [commentsNote, setCommentsNote] = useState("");
   const [shelf, setShelf] = useState<ParsedDoc[]>([]);
   const [readMyself, setReadMyself] = useState(false);
-  const [unlockedChapters] = useState<number[]>(() => loadUnlockedChapters());
+  const [unlockedChapters, setUnlockedChapters] = useState<number[]>(() => loadUnlockedChapters());
+  const [docFailed, setDocFailed] = useState(false);
   const refreshRequests = useCallback(() => setRequests(pendingRequests()), []);
+  const startupRan = useRef(false);
+  const settingsReturn = useRef<Screen>("home");
+  // Comment dictation runs through the bundled Windows helper — the browser
+  // speech engine does not exist inside the installed app.
+  const commentDictation = useRef(new NativeTranscriptAssembler());
+  const commentDictationActive = useRef(false);
+
+  function openSettingsFrom(from: Screen) {
+    settingsReturn.current = from;
+    setScreen("settings");
+  }
 
   function openVoiceTarget(target: VoiceSettings["target"]) {
     const current = loadVoiceSettings(readerName);
@@ -259,6 +280,7 @@ export function App() {
           retrievedAt: new Date().toISOString()
         });
       } catch {
+        setDocFailed(true);
         setStatus("This chapter could not be opened.");
       }
     })();
@@ -273,27 +295,52 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen]);
 
+  // The Projects tile tells the truth about the workspace instead of a
+  // hard-coded warning.
+  useEffect(() => {
+    if (screen !== "projects" || !("__TAURI_INTERNALS__" in window)) return;
+    void workspaceStatus().then(setWorkspace).catch(() => undefined);
+  }, [screen]);
+
   // The main hub listens for the companion window's request to open Settings.
   useEffect(() => {
     if (IS_COMPANION_WINDOW || !("__TAURI_INTERNALS__" in window)) return;
     let unlisten: (() => void) | undefined;
     void import("@tauri-apps/api/event").then(({ listen }) =>
-      listen("mcg://open-settings", () => setScreen("settings")).then((un) => { unlisten = un; })
+      listen("mcg://open-settings", () => openSettingsFrom("home")).then((un) => { unlisten = un; })
     );
     return () => { if (unlisten) unlisten(); };
   }, []);
 
-  // Startup checks in the main hub only: verify local files against Dropbox and
-  // pull waiting Discord requests, all quietly in the background. Nothing is
-  // downloaded or changed — the results are notes, not actions.
+  // Startup checks in the main hub only: verify local files against Dropbox,
+  // pull the shared chapter releases, and check for waiting Discord requests —
+  // all quietly in the background. Nothing is downloaded or changed. Runs once
+  // per session, including the session where someone just finished onboarding.
   useEffect(() => {
     if (IS_COMPANION_WINDOW || DOC_WINDOW_PATH || FILE_WINDOW_PATH || !("__TAURI_INTERNALS__" in window)) return;
-    if (!readerName) return;
+    if (!readerName || startupRan.current) return;
+    startupRan.current = true;
+    void fetchSharedReleases(client).then((released) => { if (released) setUnlockedChapters(released); }).catch(() => undefined);
     void checkProjectSync(client).then((result) => setSyncMessage(syncNote(result))).catch(() => undefined);
     if (canPerform(realProfileRole(readerName), "manage") && discordReadingConfigured()) {
       void fetchDiscordRequests().then((found) => setDiscordWaiting(found.length)).catch(() => undefined);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readerName]);
+
+  // Comment dictation: the helper's words stream into the live transcript and
+  // keep the silence countdown honest while a comment is being recorded.
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    let unlisten: (() => void) | undefined;
+    void listenForNativeSpeech((event) => {
+      if (!commentDictationActive.current) return;
+      const words = commentDictation.current.update(event);
+      if (!words.trim()) return;
+      setLiveTranscript(words);
+      silenceDeadline.current = Date.now() + silenceAllowance.current * 1000;
+    }).then((remove) => { unlisten = remove; });
+    return () => { if (unlisten) unlisten(); };
   }, []);
 
   useEffect(() => {
@@ -492,10 +539,23 @@ export function App() {
     silenceDeadline.current = Date.now() + 5000;
     setScreen("comment");
     try {
+      const inApp = "__TAURI_INTERNALS__" in window;
       await recorder.current.start(
         () => { silenceDeadline.current = Date.now() + silenceAllowance.current * 1000; },
-        setLiveTranscript
+        setLiveTranscript,
+        // The installed app has no browser speech engine; the bundled Windows
+        // dictation helper transcribes instead.
+        !inApp
       );
+      if (inApp) {
+        try {
+          commentDictation.current.reset();
+          commentDictationActive.current = true;
+          await startNativeDictation();
+        } catch {
+          commentDictationActive.current = false;
+        }
+      }
       setStatus("Recording comment");
     } catch (error) {
       const failed = { ...draft, status: "confirming" as const, updatedAt: new Date().toISOString() };
@@ -509,6 +569,12 @@ export function App() {
     if (!comment || finishing.current) return;
     finishing.current = true;
     try {
+      if (commentDictationActive.current) {
+        commentDictationActive.current = false;
+        // A short beat lets the last spoken words arrive before stopping.
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+        await stopNativeDictation().catch(() => undefined);
+      }
       const result = await recorder.current.stop();
       const transcription = result.transcription || liveTranscript;
       const updated: ReaderComment = {
@@ -567,6 +633,10 @@ export function App() {
 
   async function discardComment() {
     if (!comment) return;
+    if (commentDictationActive.current) {
+      commentDictationActive.current = false;
+      void stopNativeDictation().catch(() => undefined);
+    }
     recorder.current.cancel();
     await saveComment({ ...comment, status: "discarded", updatedAt: new Date().toISOString() });
     setComment(null);
@@ -594,8 +664,9 @@ export function App() {
   function saveSettings(next: ConnectionSettings) {
     localStorage.setItem("long-rot-connection", JSON.stringify(next));
     setSettings(next);
-    setScreen("library");
-    setStatus("Connection settings saved on this device");
+    // Return to wherever Settings was opened from — Save and Cancel agree.
+    setScreen(settingsReturn.current);
+    setStatus("Settings saved on this device");
   }
 
   function saveProfile(info: { name: string; discordName?: string; wantedRole?: ProjectRole; nickname?: string; pin?: string; readingSpeed?: number }) {
@@ -784,6 +855,18 @@ export function App() {
     URL.revokeObjectURL(url);
   }
 
+  // A chapter window is only ever a chapter: while it loads (or if it fails)
+  // it shows a simple message, never a second copy of the whole hub.
+  if (DOC_WINDOW_PATH && !document) {
+    return <main className="app-shell">
+      <header className="topbar"><button className="text-button" onClick={() => { void closeCurrentWindow(); }}>← Close</button><span className="eyebrow">The Long Rot</span></header>
+      <section className="empty-state" style={{ marginTop: 40 }}>
+        <strong>{docFailed ? "This chapter could not be opened." : "Opening chapter…"}</strong>
+        <p>{docFailed ? "The file may have moved or been renamed. Close this window and refresh the shelf." : "One moment."}</p>
+      </section>
+    </main>;
+  }
+
   if (FILE_WINDOW_PATH) {
     return <FileWindow relative={FILE_WINDOW_PATH} />;
   }
@@ -803,11 +886,11 @@ export function App() {
   }
 
   if (screen === "talk") {
-    return <TalkScreen readerName={readerName} onBack={() => setScreen("voice-targets")} onSettings={() => { localStorage.removeItem("long-rot-companion-active"); setScreen("settings"); }} />;
+    return <TalkScreen readerName={readerName} onBack={() => setScreen("voice-targets")} onSettings={() => { localStorage.removeItem("long-rot-companion-active"); openSettingsFrom("talk"); }} />;
   }
 
   if (screen === "settings") {
-    return <Settings initial={settings} onSave={saveSettings} onCancel={() => setScreen("home")} />;
+    return <Settings initial={settings} onSave={saveSettings} onCancel={() => setScreen(settingsReturn.current)} />;
   }
 
   if (screen === "request-access") {
@@ -819,7 +902,7 @@ export function App() {
   }
 
   if (screen === "dashboard") {
-    return <OwnerDashboard requests={requests} onDecide={decideRequest} onBack={() => setScreen("home")} />;
+    return <OwnerDashboard requests={requests} onDecide={decideRequest} onBack={() => setScreen("home")} client={client} onReleasesChanged={setUnlockedChapters} />;
   }
 
   if (screen === "chat") {
@@ -847,7 +930,7 @@ export function App() {
       <header className="hero"><BannerWithVersion /></header>
       <section className="home-toolbar">
         {canPerform(role, "manage") && <button className="pill-button chip" onClick={openDashboard}>Owner Dashboard{(requests.length + discordWaiting) > 0 && <span className="pending-badge">{requests.length + discordWaiting}</span>}</button>}
-        <button className="pill-button chip" onClick={() => setScreen("settings")}>Settings</button>
+        <button className="pill-button chip" onClick={() => openSettingsFrom("home")}>Settings</button>
         <button className="pill-button chip" onClick={() => setScreen("directions")}>Directions</button>
         {getViewAs()
           ? <button className="pill-button chip" onClick={() => { setViewAs(null); window.location.reload(); }}>Viewing as {roleLabel(role)} — back</button>
@@ -877,7 +960,7 @@ export function App() {
     return <main className="app-shell projects-list-shell">
       <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">PROJECTS</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
       <section className="projects-heading"><h1>Your Projects</h1><p>Select a project to open its local workspace and available actions.</p></section>
-      <section className="project-tiles"><button className="project-tile" onClick={openLongRotWorkspace}><img className="project-placeholder project-icon-image" src="/long-rot-icon.png" alt="The Long Rot" /><span><strong>The Long Rot</strong><small>Local workspace ready · Dropbox connection needs attention</small></span><span>Open →</span></button><button className="project-tile project-zero-tile" onClick={() => setScreen("project-zero")}><img className="project-placeholder project-icon-image" src="/project-zero-icon.svg" alt="Project Zero Author" /><span><strong>Project Zero Author</strong><small>Project added · Local workspace and connection not configured yet</small></span><span>Open →</span></button></section>
+      <section className="project-tiles"><button className="project-tile" onClick={openLongRotWorkspace}><img className="project-placeholder project-icon-image" src="/long-rot-icon.png" alt="The Long Rot" /><span><strong>The Long Rot</strong><small>{workspace?.initialized ? `${workspace.downloadedFiles} Files On This Computer${syncMessage ? ` · ${syncMessage}` : ""}` : "Not Downloaded Yet — Open To Set Up"}</small></span><span>Open →</span></button><button className="project-tile project-zero-tile" onClick={() => setScreen("project-zero")}><img className="project-placeholder project-icon-image" src="/project-zero-icon.svg" alt="Project Zero Author" /><span><strong>Project Zero Author</strong><small>Project added · Local workspace and connection not configured yet</small></span><span>Open →</span></button></section>
     </main>;
   }
 
@@ -933,25 +1016,42 @@ export function App() {
   }
 
   if (screen === "voice-targets") {
-    return <main className="app-shell target-screen"><header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Voice Companion</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header><section className="library-heading"><div><h2>Choose the program</h2><p>The companion controls the normal Windows program you already use.</p></div></section><section className="home-toolbar page"><button className="pill-button chip" onClick={() => setScreen("settings")}>Voice Settings</button></section><section className="target-grid"><button className="target-card available" onClick={() => openVoiceTarget("claude")}><strong>Claude</strong><small>Available now</small></button><button className="target-card available" onClick={() => openVoiceTarget("codex")}><strong>Codex</strong><small>Available now</small></button><button className="target-card" disabled><strong>ChatGPT</strong><small>Coming later</small></button></section></main>;
+    return <main className="app-shell target-screen"><header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Voice Companion</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header><section className="library-heading"><div><h2>Choose the program</h2><p>The companion controls the normal Windows program you already use.</p></div></section><section className="home-toolbar page"><button className="pill-button chip" onClick={() => openSettingsFrom("voice-targets")}>Voice Settings</button></section><section className="target-grid"><button className="target-card available" onClick={() => openVoiceTarget("claude")}><strong>Claude</strong><small>Available now</small></button><button className="target-card available" onClick={() => openVoiceTarget("codex")}><strong>Codex</strong><small>Available now</small></button><button className="target-card" disabled><strong>ChatGPT</strong><small>Coming later</small></button></section></main>;
   }
 
   if (screen === "comments") {
+    const unsent = savedComments.filter((item) => !item.submittedAt);
     return <main className="app-shell comments-shell">
       <header className="topbar"><button className="text-button" onClick={() => setScreen("library")}>← Back</button><span className="eyebrow">My Comments</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
-      <section className="comments-heading"><div><h1>Saved Comments</h1><p>{savedComments.length} saved safely on this device.</p></div><button onClick={exportComments} disabled={!savedComments.length}>Save comments file</button><button className="primary" disabled={!savedComments.length} onClick={async () => {
-        setStatus("Sending comments to the owner…");
+      <section className="comments-heading"><div><h1>Saved Comments</h1><p>{savedComments.length} saved safely on this device.</p></div><button onClick={exportComments} disabled={!savedComments.length}>Save Comments File</button><button className="primary" disabled={!unsent.length || commentsSending} onClick={async () => {
+        setCommentsSending(true);
+        setCommentsNote(`Sending ${unsent.length} comment${unsent.length === 1 ? "" : "s"} to the owner…`);
         let sent = 0;
-        for (const item of savedComments) {
-          const text = `**Reader comment** from ${item.readerName}
+        let failed = 0;
+        try {
+          for (const item of unsent) {
+            const body = `**Reader comment** from ${item.readerName}
 ${item.exactFilename} — paragraph ${item.paragraphIndex + 1}, sentence ${item.sentenceIndex + 1}
 "${item.anchorText}"
-${item.transcriptionConfirmed}`.slice(0, 1800);
-          if (await sendRequestToDiscord(text)) sent += 1;
-          await new Promise((resolve) => setTimeout(resolve, 350));
+${item.transcriptionConfirmed}`;
+            const clipped = body.length > 1800;
+            if (await sendRequestToDiscord(clipped ? body.slice(0, 1750) + "\n… (the full comment is longer — kept on the reader's device)" : body)) {
+              sent += 1;
+              await saveComment({ ...item, submittedAt: new Date().toISOString() });
+            } else {
+              failed += 1;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 350));
+          }
+          setSavedComments((await loadSavedComments()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+          setCommentsNote(failed
+            ? `Sent ${sent}. ${failed} could not be sent — they stay marked unsent and will go next time.`
+            : sent ? `Sent ${sent} comment${sent === 1 ? "" : "s"} to the owner.` : "The comments could not be sent — they are still saved here. Nothing was lost.");
+        } finally {
+          setCommentsSending(false);
         }
-        setStatus(sent ? `Sent ${sent} comment${sent === 1 ? "" : "s"} to the owner.` : "The comments could not be sent — they are still saved here.");
-      }}>Submit Comments</button></section>
+      }}>{commentsSending ? "Sending…" : unsent.length ? `Submit ${unsent.length} New Comment${unsent.length === 1 ? "" : "s"}` : "All Comments Sent"}</button></section>
+      {commentsNote && <p className="board-hint">{commentsNote}</p>}
       <section className="comments-list">
         {savedComments.length === 0 && <div className="empty-state"><strong>No comments yet</strong><p>Comments you confirm while reading will appear here.</p></div>}
         {savedComments.map((item) => <SavedCommentCard key={item.id} comment={item} onDelete={async () => { await deleteComment(item.id); setSavedComments(await loadSavedComments()); }} />)}
@@ -961,7 +1061,6 @@ ${item.transcriptionConfirmed}`.slice(0, 1800);
 
   if (screen === "comment" && comment) {
     const recording = comment.status === "recording";
-    const audioUrl = comment.audio?.size ? URL.createObjectURL(comment.audio) : null;
     return <main className="app-shell comment-shell">
       <header className="topbar"><span className="eyebrow">READER COMMENT</span><span className="status-dot">Saved on this device</span></header>
       <section className="comment-heading">
@@ -979,7 +1078,7 @@ ${item.transcriptionConfirmed}`.slice(0, 1800);
       </section> : <section className="confirmation-card">
         <label>Comment transcription<textarea value={comment.transcriptionConfirmed} onChange={(event) => updateCommentDraft({ transcriptionConfirmed: event.target.value })} rows={7} placeholder="Type the comment if automatic transcription is unavailable." /></label>
         <label>Comment type<select value={comment.category} onChange={(event) => updateCommentDraft({ category: event.target.value })}>{["General Comment", "Question", "Confusing", "Possible Error", "Favorite Part", "Character Issue", "Pacing Issue", "Continuity Issue"].map((category) => <option key={category}>{category}</option>)}</select></label>
-        {audioUrl && <audio controls src={audioUrl}>Your browser cannot play this recording.</audio>}
+        <CommentAudio blob={comment.audio} />
         <div className="comment-actions"><button className="discard" onClick={discardComment}>Discard</button><button className="finish" onClick={saveConfirmedComment}>Save Comment</button></div>
       </section>}
       <footer className="safe-status">{status}</footer>
@@ -1021,16 +1120,21 @@ ${item.transcriptionConfirmed}`.slice(0, 1800);
               <p className="context">{document.segments[segmentIndex + 1]?.text}</p>
             </article>}
         <section className="primary-controls" aria-label="Reading controls">
-          <button className="control secondary" onClick={() => moveBy(-1)}>Back</button>
+          <button className="control secondary" onClick={() => moveBy(-1)}>Previous</button>
           <button className="control primary" onClick={togglePlayback}>{playing ? "Pause" : "Continue"}</button>
-          <button className="control comment" onClick={startComment}>Comment</button>
+          <button className="control comment" onClick={startComment} disabled={!document.segments.length}>Comment</button>
         </section>
         <section className="secondary-controls">
-          <button onClick={() => moveBy(-1)}>Repeat sentence</button>
+          <button onClick={() => { player.current.stop(); speakAt(segmentIndex); }}>Repeat Sentence</button>
           <button onClick={() => moveBy(1)}>Forward</button>
           <ReadSelectionButton rate={rate} />
           <label>Speed
-            <select value={rate} onChange={(event) => { player.current.stop(); setPlaying(false); setRate(Number(event.target.value)); }}>
+            <select value={rate} onChange={(event) => {
+              const next = Number(event.target.value);
+              player.current.stop(); setPlaying(false); setRate(next);
+              // The choice sticks: every chapter and window reads at this speed.
+              saveVoiceSettings(readerName || "local", { ...loadVoiceSettings(readerName || "local"), speechRate: next });
+            }}>
               <option value="0.8">Slower</option><option value="1">Normal</option><option value="1.2">Faster</option>
             </select>
           </label>
@@ -1045,7 +1149,7 @@ ${item.transcriptionConfirmed}`.slice(0, 1800);
       <section className="home-toolbar page">
         <button className="pill-button chip" onClick={() => setScreen("home")}>← Back</button>
         <button className="pill-button chip" onClick={openSavedComments}>My Comments</button>
-        <button className="pill-button chip" onClick={() => setScreen("settings")}>Settings</button>
+        <button className="pill-button chip" onClick={() => openSettingsFrom("library")}>Settings</button>
         <button className="pill-button chip" onClick={refreshCopies} disabled={loading}>{loading ? "Loading…" : "Refresh"}</button>
         <span className="who-chip">{readerName} · {roleLabel(role)}</span>
       </section>
@@ -1081,12 +1185,17 @@ ${item.transcriptionConfirmed}`.slice(0, 1800);
 
 function Profile({ initial, onContinue }: { initial: string; onContinue: (info: { name: string; discordName: string; wantedRole: ProjectRole; nickname: string; pin: string; readingSpeed: number }) => void }) {
   const [name, setName] = useState(initial);
-  const [nickname, setNicknameState] = useState("");
+  // A returning person's saved details come back with them — revisiting this
+  // screen must never silently reset anything.
+  const [nickname, setNicknameState] = useState(() => initial ? getNickname(initial) : "");
   const [discordName, setDiscord] = useState(() => initial ? getDiscordName(initial) : "");
   const [wantedRole, setWantedRole] = useState<ProjectRole>("reader");
   const [pin, setPin] = useState("");
   const [pinAgain, setPinAgain] = useState("");
-  const [readingSpeed, setReadingSpeed] = useState(1);
+  const [readingSpeed, setReadingSpeed] = useState(() => {
+    const saved = initial ? loadVoiceSettings(initial).speechRate : 1;
+    return [0.8, 1, 1.2, 1.4].includes(saved) ? saved : 1;
+  });
   const options: Array<{ value: ProjectRole; label: string; hint: string }> = [
     { value: "reader", label: "Reader", hint: "Read and comment — starts right now" },
     { value: "contributor", label: "Contributor", hint: "Suggest and propose changes — needs approval" },
@@ -1124,7 +1233,7 @@ function Profile({ initial, onContinue }: { initial: string; onContinue: (info: 
 
     <label>5. How fast should the narrator read to you?
       <select value={readingSpeed} onChange={(event) => setReadingSpeed(Number(event.target.value))}>
-        <option value="0.8">Slower</option><option value="1">Normal</option><option value="1.2">Faster</option>
+        <option value="0.8">Slower</option><option value="1">Normal</option><option value="1.2">Faster</option><option value="1.4">Much Faster</option>
       </select>
     </label>
 
@@ -1141,7 +1250,12 @@ function Profile({ initial, onContinue }: { initial: string; onContinue: (info: 
           {pinProblem && <p className="update-status warn">{pinProblem}</p>}
         </>}
 
-    <button className="continue-profile" disabled={!name.trim() || !pinOk} onClick={() => onContinue({ name, discordName, wantedRole, nickname, pin, readingSpeed })}>Get Started</button>
+    <button className="continue-profile" disabled={!name.trim() || !pinOk} onClick={() => {
+      // "Test Profile" is the local test identity with full owner controls —
+      // nobody should wander into it by accident.
+      if (name.trim() === "Test Profile" && !window.confirm("Test Profile is the local test identity with full owner controls on this computer. Is that really what you want?")) return;
+      onContinue({ name, discordName, wantedRole, nickname, pin, readingSpeed });
+    }}>Get Started</button>
   </main>;
 }
 // One project file in its own window: full text (or Word formatting), with
@@ -1193,14 +1307,20 @@ function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: Proj
     void invoke<ProjectDocument[]>("list_project_documents")
       .then((files) => setDocs(files.sort((a, b) => a.localRelativePath.localeCompare(b.localRelativePath))))
       .catch(() => setNote("The local file list could not be read."));
+    // Start from the shared ratings so this machine can never publish an
+    // empty or stale map over the real one.
+    void fetchSharedAccessMap(client).then(({ map }) => setAccess(map)).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   async function publish() {
     setBusy(true);
     try {
       await publishAccessMap(client);
       setNote("File Access Published — every machine now downloads by these ratings.");
-    } catch {
-      setNote("The ratings are saved on this computer, but Dropbox could not be reached to share them.");
+    } catch (error) {
+      setNote(error instanceof Error && error.message.includes("no ratings yet")
+        ? error.message
+        : "The ratings are saved on this computer, but Dropbox could not be reached to share them.");
     } finally {
       setBusy(false);
     }
@@ -1251,7 +1371,9 @@ function RequestAccess({ role, code, onSend, onCancel }: { role: ProjectRole; co
   // Offer only roles above the current one — you cannot request less, and you
   // cannot request the owner role (that stays with the author).
   const options = ROLE_ORDER.filter((r) => ROLE_ORDER.indexOf(r) > ROLE_ORDER.indexOf(role) && r !== "administrator");
-  const [requested, setRequested] = useState<ProjectRole>(options[options.length - 1] ?? "editor");
+  // Default to the gentlest step up — nobody should accidentally ask the
+  // owner for Technical Support powers.
+  const [requested, setRequested] = useState<ProjectRole>(options[0] ?? "contributor");
   const [reason, setReason] = useState("");
 
   if (code) {
@@ -1286,7 +1408,7 @@ function RedeemUnlock({ name, onRedeem, onCancel }: { name: string; onRedeem: (c
   </main>;
 }
 
-function OwnerDashboard({ requests, onDecide, onBack }: { requests: AccessRequest[]; onDecide: (id: string, approve: boolean) => void; onBack: () => void }) {
+function OwnerDashboard({ requests, onDecide, onBack, client, onReleasesChanged }: { requests: AccessRequest[]; onDecide: (id: string, approve: boolean) => void; onBack: () => void; client: LongRotMcpClient; onReleasesChanged: (released: number[]) => void }) {
   const [pasted, setPasted] = useState("");
   const [incoming, setIncoming] = useState<ReturnType<typeof parseRequestCode>>(null);
   const [codeError, setCodeError] = useState("");
@@ -1305,6 +1427,30 @@ function OwnerDashboard({ requests, onDecide, onBack }: { requests: AccessReques
   useEffect(() => { if (discordReadingConfigured()) void checkDiscord(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   const [inboxBusy, setInboxBusy] = useState(false);
   const [inboxNote, setInboxNote] = useState("");
+  const [released, setReleased] = useState<number[]>(loadUnlockedChapters);
+  const [releaseBusy, setReleaseBusy] = useState(false);
+  const [releaseNote, setReleaseNote] = useState("");
+
+  function toggleRelease(chapter: number) {
+    const next = released.includes(chapter)
+      ? released.filter((n) => n !== chapter)
+      : [...released, chapter].sort((a, b) => a - b);
+    setReleased(next);
+    saveUnlockedChapters(next);
+    onReleasesChanged(next);
+  }
+
+  async function publishReleaseList() {
+    setReleaseBusy(true);
+    try {
+      await publishReleases(client);
+      setReleaseNote("Published. Every reader's app picks the new list up when it next opens.");
+    } catch {
+      setReleaseNote("The list is saved on this computer, but Dropbox could not be reached to share it. Try again with the bridge running.");
+    } finally {
+      setReleaseBusy(false);
+    }
+  }
 
   async function checkDiscord() {
     setInboxBusy(true);
@@ -1324,15 +1470,24 @@ function OwnerDashboard({ requests, onDecide, onBack }: { requests: AccessReques
     const parsed = parseRequestCode(item.code);
     if (!parsed) { setInboxNote("That message's code is damaged — handle it by hand in Discord."); return; }
     if (approve) {
-      const unlock = makeUnlockCode({ name: parsed.name, role: parsed.requestedRole, messaging: ownerMessagingPayload() });
+      // Codes posted into the shared channel never carry the messaging key —
+      // the key travels privately via Copy Messaging Key in Messages.
+      const unlock = makeUnlockCode({ name: parsed.name, role: parsed.requestedRole });
       recordJoin(parsed.name, "", parsed.requestedRole);
       const posted = await postUnlockToDiscord(parsed.name, roleLabel(parsed.requestedRole), unlock);
       setInboxNote(posted
         ? `Approved. The unlock code was posted in Discord for ${parsed.name}.`
-        : "Approved, but Discord could not be reached — send the code by hand.");
-      if (!posted) { setGranted({ name: parsed.name, role: parsed.requestedRole, code: unlock }); }
+        : "Approved, but Discord could not be reached — the request stays in the inbox; send the code by hand.");
+      if (!posted) {
+        setGranted({ name: parsed.name, role: parsed.requestedRole, code: unlock });
+        // Not marked handled: if the owner walks away, the request comes back
+        // on the next check instead of vanishing unanswered.
+        return;
+      }
     } else {
-      setInboxNote(`Declined ${parsed.name}'s request. Nothing changed.`);
+      // The person on the other machine deserves to hear a no, not silence.
+      void postUnlockDecline(parsed.name);
+      setInboxNote(`Declined ${parsed.name}'s request. They were told in Discord.`);
     }
     markMessageHandled(item.messageId);
     setInbox((current) => current.filter((entry) => entry.messageId !== item.messageId));
@@ -1401,19 +1556,43 @@ function OwnerDashboard({ requests, onDecide, onBack }: { requests: AccessReques
     </section>
 
     <section className="dash-section">
+      <h2>Released Chapters</h2>
+      <p className="board-hint">Tick the chapters readers may open. Publish sends the list to Dropbox so every reader's app picks it up the next time it opens.</p>
+      <div className="release-grid">
+        {Array.from({ length: Math.max(12, ...released.map((n) => n + 2)) }, (_, i) => i + 1).map((chapter) => <label key={chapter} className={released.includes(chapter) ? "release-chip on" : "release-chip"}>
+          <input type="checkbox" checked={released.includes(chapter)} onChange={() => toggleRelease(chapter)} />
+          {String(chapter).padStart(2, "0")}
+        </label>)}
+      </div>
+      <div className="form-actions"><button className="primary" disabled={releaseBusy} onClick={() => void publishReleaseList()}>{releaseBusy ? "Publishing…" : "Publish Releases To Every Reader"}</button></div>
+      {releaseNote && <p className="board-hint">{releaseNote}</p>}
+    </section>
+
+    <section className="dash-section">
       <h2>Messages</h2>
       <div className="empty-state"><strong>Team chat lives in Messages</strong><p>Rooms and direct messages are on the main page under Messages. Anything sent to MaggotClaw arrives in your direct messages there.</p></div>
     </section>
 
-    <footer className="safe-status">Approvals are recorded on this computer. Cross-device requests arrive once the shared connection is turned on.</footer>
+    <footer className="safe-status">{discordReadingConfigured()
+      ? "Two-way Discord is on: requests and approvals travel automatically."
+      : "Approvals are recorded on this computer. Add the Discord keys in Settings → Owner to receive requests from other machines automatically."}</footer>
   </main>;
+}
+
+// One audio player per recording, with its object URL cleaned up on unmount —
+// building the URL inline in a render leaks one per keystroke.
+function CommentAudio({ blob }: { blob: Blob | null }) {
+  const [audioUrl] = useState(() => blob?.size ? URL.createObjectURL(blob) : null);
+  useEffect(() => () => { if (audioUrl) URL.revokeObjectURL(audioUrl); }, [audioUrl]);
+  if (!audioUrl) return null;
+  return <audio controls src={audioUrl}>Your browser cannot play this recording.</audio>;
 }
 
 function SavedCommentCard({ comment, onDelete }: { comment: ReaderComment; onDelete?: () => void }) {
   const [audioUrl] = useState(() => comment.audio?.size ? URL.createObjectURL(comment.audio) : null);
   useEffect(() => () => { if (audioUrl) URL.revokeObjectURL(audioUrl); }, [audioUrl]);
   return <article className="saved-comment">
-    <div className="comment-meta"><span>{comment.category}</span><time>{new Date(comment.createdAt).toLocaleString()}</time></div>
+    <div className="comment-meta"><span>{comment.category}</span>{comment.submittedAt && <span className="update-status ok">Sent To The Owner</span>}<time>{new Date(comment.createdAt).toLocaleString()}</time></div>
     <h2>{cleanTitle(comment.exactFilename)}</h2>
     <blockquote>“{comment.anchorText}”</blockquote>
     <p>{comment.transcriptionConfirmed}</p>
@@ -1435,11 +1614,29 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
   const [channelId, setChannelIdState] = useState(getRequestsChannelId);
   const [relayChannel, setRelayChannelState] = useState(getRelayChannelId);
   function updateVoice(changes: Partial<VoiceSettings>) { setVoice((current) => ({ ...current, ...changes })); }
-  function saveAll() { saveVoiceSettings(profile, voice); onSave({ endpoint: endpoint.trim(), bearerToken }); }
+  // A cleared or nonsense number must never save: 0 seconds of silence would
+  // send a message after the very first word.
+  const bounded = (value: number, min: number, max: number, fallback: number) =>
+    Number.isFinite(value) && value >= min && value <= max ? value : fallback;
+  function saveAll() {
+    saveVoiceSettings(profile, {
+      ...voice,
+      silenceSeconds: bounded(voice.silenceSeconds, 0.5, 30, 2),
+      addSeconds: bounded(voice.addSeconds, 1, 120, 5)
+    });
+    if (isOwner) {
+      setRequestWebhook(webhook);
+      setBotToken(botToken);
+      setRequestsChannelId(channelId);
+      setRelayChannelId(relayChannel);
+    }
+    onSave({ endpoint: endpoint.trim() || defaultSettings.endpoint, bearerToken });
+  }
   return <main className="app-shell settings-panel">
     <button className="text-button mode-back" onClick={onCancel}>← Back</button>
-    <BrandLogo compact /><p className="eyebrow">Profile settings</p><h1>Voice Companion</h1>
-    <p>These settings are saved for {profile} on this computer.</p>
+    <BrandLogo compact /><p className="eyebrow">Settings</p><h1>Settings</h1>
+    <p>Saved for {profile} on this computer when you press Save.</p>
+    <p className="eyebrow">Voice Companion</p>
     <label>Talk to<select value={voice.target} onChange={(event) => updateVoice({ target: event.target.value as VoiceSettings["target"] })}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
     <label>Send after silence<input type="number" min="0.5" max="30" step="0.5" value={voice.silenceSeconds} onChange={(event) => updateVoice({ silenceSeconds: Number(event.target.value) })} /></label>
     <label>Add Time button<input type="number" min="1" max="120" step="1" value={voice.addSeconds} onChange={(event) => updateVoice({ addSeconds: Number(event.target.value) })} /></label>
@@ -1463,23 +1660,25 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
     {isOwner && <>
       <hr/><p className="eyebrow">Owner — access requests via Discord</p>
       <label>Discord webhook for the requests channel
-        <input value={webhook} placeholder="https://discord.com/api/webhooks/…" onChange={(event) => { setWebhook(event.target.value); setRequestWebhook(event.target.value); }} autoComplete="off" />
+        <input value={webhook} placeholder="https://discord.com/api/webhooks/…" onChange={(event) => setWebhook(event.target.value)} autoComplete="off" />
       </label>
       {webhook && !isDiscordWebhook(webhook) && <small className="update-status warn">That does not look like a Discord webhook address.</small>}
       {webhook && isDiscordWebhook(webhook) && <small className="update-status ok">Access requests will arrive in your Discord channel automatically.</small>}
       <label>Discord bot key (lets the app read the requests channel)
-        <input type="password" value={botToken} placeholder="Paste the bot token from the Discord Developer Portal" onChange={(event) => { setBotTokenState(event.target.value); setBotToken(event.target.value); }} autoComplete="off" />
+        <input type="password" value={botToken} placeholder="Paste the bot token from the Discord Developer Portal" onChange={(event) => setBotTokenState(event.target.value)} autoComplete="off" />
       </label>
       <label>Requests channel ID
-        <input value={channelId} placeholder="Right-click the channel → Copy Channel ID" onChange={(event) => { setChannelIdState(event.target.value); setRequestsChannelId(event.target.value); }} autoComplete="off" />
+        <input value={channelId} placeholder="Right-click the channel → Copy Channel ID" onChange={(event) => setChannelIdState(event.target.value)} autoComplete="off" />
       </label>
       <label>Team chat channel ID (rooms and direct messages travel here)
-        <input value={relayChannel} placeholder="Uses the requests channel unless you set one" onChange={(event) => { setRelayChannelState(event.target.value); setRelayChannelId(event.target.value); }} autoComplete="off" />
+        <input value={relayChannel} placeholder="Uses the requests channel unless you set one" onChange={(event) => setRelayChannelState(event.target.value)} autoComplete="off" />
       </label>
+      <small className="board-hint">These Discord details are stored when you press Save — Cancel leaves them untouched.</small>
       {discordReadingConfigured() && <small className="update-status ok">Two-way Discord is on: the Owner Dashboard can pull requests and post approvals.</small>}
     </>}
     <hr/><p className="eyebrow">ADVANCED CONNECTION</p>
     <label>Connection address<input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} /></label>
+    {endpoint.trim() !== defaultSettings.endpoint && <button className="text-button" onClick={() => setEndpoint(defaultSettings.endpoint)}>Reset To The Standard Address</button>}
     <label>Temporary bearer credential<input type="password" value={bearerToken} onChange={(event) => setBearerToken(event.target.value)} autoComplete="off" /></label>
     <p className="warning">These technical controls will move behind administrator support access in a future build.</p>
     <div className="form-actions"><button onClick={onCancel}>Cancel</button><button className="primary" onClick={saveAll}>Save</button></div>
@@ -1493,7 +1692,7 @@ function ownerMessagingPayload(): { botToken: string; channelId: string } | unde
 }
 
 function cleanTitle(name: string): string {
-  return name.replace(/\.txt$/i, "").replace(/\s+v\d+(?:\.\d+)*$/i, "");
+  return name.replace(/\.(txt|docx)$/i, "").replace(/\s+v\d+(?:\.\d+)*$/i, "");
 }
 
 function message(error: unknown): string {

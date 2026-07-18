@@ -174,10 +174,16 @@ fn composer(
     })
 }
 
+// How strictly a button name must match. Stop buttons match by prefix so a
+// label like "Custom stop point" cannot fake a busy state; copy buttons match
+// anywhere but never inside code blocks ("Copy code"), whose buttons would
+// otherwise be mistaken for the reply's own Copy control.
 fn matching_buttons(
     automation: &UIAutomation,
     window: UIElement,
     names: &[&str],
+    prefix_only: bool,
+    exclude: &[&str],
 ) -> Vec<UIElement> {
     automation
         .create_matcher()
@@ -194,7 +200,16 @@ fn matching_buttons(
                         .get_name()
                         .map(|name| {
                             let lower = name.to_ascii_lowercase();
-                            names.iter().any(|candidate| lower.contains(candidate))
+                            if exclude.iter().any(|word| lower.contains(word)) {
+                                return false;
+                            }
+                            names.iter().any(|candidate| {
+                                if prefix_only {
+                                    lower.starts_with(candidate)
+                                } else {
+                                    lower.contains(candidate)
+                                }
+                            })
                         })
                         .unwrap_or(false)
                 })
@@ -281,10 +296,22 @@ fn conversation_response_state_blocking(
 ) -> Result<ConversationResponseState, String> {
     let automation = automation()?;
     let (target, window) = resolve_target(&automation, target.as_deref())?;
-    let busy =
-        !matching_buttons(&automation, window.clone(), target.stop_button_names()).is_empty();
-    let completed_response_count =
-        matching_buttons(&automation, window, target.copy_button_names()).len();
+    let busy = !matching_buttons(
+        &automation,
+        window.clone(),
+        target.stop_button_names(),
+        true,
+        &[],
+    )
+    .is_empty();
+    let completed_response_count = matching_buttons(
+        &automation,
+        window,
+        target.copy_button_names(),
+        false,
+        &["code"],
+    )
+    .len();
     Ok(ConversationResponseState {
         busy,
         has_completed_response: completed_response_count > 0,
@@ -305,7 +332,13 @@ fn conversation_is_foreground_blocking(target: Option<String>) -> Result<bool, S
 fn copy_latest_conversation_response_blocking(target: Option<String>) -> Result<String, String> {
     let automation = automation()?;
     let (target, window) = resolve_target(&automation, target.as_deref())?;
-    let copy_buttons = matching_buttons(&automation, window, target.copy_button_names());
+    let copy_buttons = matching_buttons(
+        &automation,
+        window,
+        target.copy_button_names(),
+        false,
+        &["code"],
+    );
     let copy = copy_buttons.last().ok_or_else(|| {
         format!(
             "No completed {} response is available yet.",

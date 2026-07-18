@@ -4,6 +4,7 @@
 
 import { canPerform, type ProjectRole } from "./permissions";
 import { compareVersions, parseDoc, type ParsedDoc, type ProjectDocument } from "./projectDocs";
+import type { LongRotMcpClient } from "./mcp";
 
 // Chapters a reader may open today. Everything else is listed but locked, so a
 // reader can see the shape of the book without being told why.
@@ -20,11 +21,13 @@ export function readerCopies(docs: ProjectDocument[]): ParsedDoc[] {
     if (parsed.typeCode !== "R" || parsed.chapter == null) continue;
     const existing = byChapter.get(parsed.chapter);
     const isWord = (item: ParsedDoc) => /\.docx$/i.test(item.fileName);
-    // The author's styled Word copy of a chapter always beats the plain text
-    // one; otherwise the newest version wins.
+    // The newest version always wins, whatever its format — an old Word file
+    // must never shadow a newer text revision. On a version tie, the author's
+    // styled Word copy beats the plain text one.
+    const cmp = existing ? compareVersions(parsed.version, existing.version) : 1;
     const wins = !existing
-      || (isWord(parsed) && !isWord(existing))
-      || (isWord(parsed) === isWord(existing) && compareVersions(parsed.version, existing.version) > 0);
+      || cmp > 0
+      || (cmp === 0 && isWord(parsed) && !isWord(existing));
     if (wins) {
       byChapter.set(parsed.chapter, parsed);
     }
@@ -61,4 +64,36 @@ export function saveUnlockedChapters(chapters: number[]): void {
   } catch {
     /* ignore private-mode storage errors */
   }
+}
+
+// ---- Chapter releases shared through Dropbox -------------------------------
+// The owner picks released chapters on the dashboard and publishes the list;
+// every reader's app pulls it during the startup check, so releasing Chapter 5
+// reaches everyone without a new build.
+
+export const RELEASES_DROPBOX_PATH = "/The Long Rot/.mcg/released-chapters.json";
+
+export function parseReleasedChapters(json: string): number[] | null {
+  try {
+    const raw = JSON.parse(json) as unknown;
+    if (!Array.isArray(raw) || !raw.every((n) => typeof n === "number")) return null;
+    return [...new Set(raw as number[])].sort((a, b) => a - b);
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchSharedReleases(client: LongRotMcpClient): Promise<number[] | null> {
+  try {
+    const released = parseReleasedChapters(await client.readText(RELEASES_DROPBOX_PATH));
+    if (released) saveUnlockedChapters(released);
+    return released;
+  } catch {
+    // Never published yet, or the bridge is off — keep the local list.
+    return null;
+  }
+}
+
+export async function publishReleases(client: LongRotMcpClient): Promise<void> {
+  await client.writeText(RELEASES_DROPBOX_PATH, JSON.stringify(loadUnlockedChapters()));
 }
