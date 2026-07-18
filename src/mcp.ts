@@ -1,4 +1,5 @@
 import type { ConnectionSettings } from "./types";
+import { activeProject } from "./projects";
 
 interface McpResponse {
   result?: { content?: Array<{ type: string; text?: string }>; isError?: boolean };
@@ -53,7 +54,7 @@ export class LongRotMcpClient {
     return "__TAURI_INTERNALS__" in window ? getDropboxCreds() : null;
   }
 
-  async listFolder(path = "/The Long Rot"): Promise<ProjectEntry[]> {
+  async listFolder(path = activeProject().dropboxRoot): Promise<ProjectEntry[]> {
     const creds = this.direct();
     if (creds) {
       const { invoke } = await import("@tauri-apps/api/core");
@@ -141,10 +142,10 @@ export class LongRotMcpClient {
 export function projectSafeError(text?: string): string {
   if (!text) return "The project returned an unreadable response. Nothing was changed.";
   if (/expired_access_token|HTTP\s*401/i.test(text)) {
-    return "The application reached the project service, but its Dropbox connection has expired. No work was deleted or changed. Reconnect the Long Rot Dropbox account.";
+    return "The application reached the project service, but its Dropbox connection has expired. No work was deleted or changed. Reconnect the project’s Dropbox account.";
   }
   if (/unauthorized|forbidden|HTTP\s*403/i.test(text)) {
-    return "The application is not authorized to open the project files. Nothing was changed. Ask the administrator to reconnect the Long Rot account.";
+    return "The application is not authorized to open the project files. Nothing was changed. Ask the administrator to reconnect the project account.";
   }
   return "The project service could not complete that request. Nothing was changed. Please try again or ask the administrator to check the connection.";
 }

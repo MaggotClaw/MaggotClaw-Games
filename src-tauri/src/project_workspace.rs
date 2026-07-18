@@ -4,10 +4,53 @@ use std::{
     env, fs,
     path::{Component, Path, PathBuf},
     process::Command,
+    sync::Mutex,
 };
 
-const PROJECT_NAME: &str = "The Long Rot";
-const DROPBOX_ROOT: &str = "/The Long Rot";
+// Which project this app is working on. MaggotClaw Games is the program; a
+// project is one of the things worked on inside it, so the name and remote
+// folder are set by the app rather than baked in here.
+static ACTIVE_PROJECT: Mutex<Option<(String, String)>> = Mutex::new(None);
+
+// Only a first-run fallback: the app names its project the moment any window
+// opens. Kept so an existing workspace is never orphaned.
+const DEFAULT_PROJECT_NAME: &str = "The Long Rot";
+const DEFAULT_DROPBOX_ROOT: &str = "/The Long Rot";
+
+fn project_name() -> String {
+    ACTIVE_PROJECT
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|(name, _)| name.clone()))
+        .unwrap_or_else(|| DEFAULT_PROJECT_NAME.to_string())
+}
+
+fn dropbox_root() -> String {
+    ACTIVE_PROJECT
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|(_, root)| root.clone()))
+        .unwrap_or_else(|| DEFAULT_DROPBOX_ROOT.to_string())
+}
+
+/// The app names the project it is working on; every local folder and path
+/// check follows it from here.
+#[tauri::command]
+pub fn set_active_project(name: String, dropbox_root: String) -> Result<(), String> {
+    let clean_name = name.trim().to_string();
+    if clean_name.is_empty() || clean_name.contains(['\\', '/', ':', '*', '?', '"', '<', '>', '|']) {
+        return Err("That project name cannot be used as a folder name.".to_string());
+    }
+    let clean_root = dropbox_root.trim().trim_end_matches('/').to_string();
+    if !clean_root.starts_with('/') || clean_root.contains("..") {
+        return Err("That project folder is not a valid location.".to_string());
+    }
+    let mut guard = ACTIVE_PROJECT
+        .lock()
+        .map_err(|_| "The project could not be switched just now.".to_string())?;
+    *guard = Some((clean_name, clean_root));
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,7 +102,7 @@ fn workspace_root() -> Result<PathBuf, String> {
     Ok(profile
         .join("Documents")
         .join("MaggotClaw Games Projects")
-        .join(PROJECT_NAME))
+        .join(project_name()))
 }
 
 fn manifest_path(root: &Path) -> PathBuf {
@@ -68,8 +111,8 @@ fn manifest_path(root: &Path) -> PathBuf {
 
 fn empty_manifest(root: &Path) -> WorkspaceManifest {
     WorkspaceManifest {
-        project_name: PROJECT_NAME.to_string(),
-        dropbox_root: DROPBOX_ROOT.to_string(),
+        project_name: project_name(),
+        dropbox_root: dropbox_root(),
         workspace_path: root.display().to_string(),
         created_at: timestamp(),
         last_download_at: None,
@@ -126,9 +169,10 @@ fn initialize() -> Result<PathBuf, String> {
 
 fn safe_relative_path(dropbox_path: &str) -> Result<PathBuf, String> {
     let normalized = dropbox_path.replace('\\', "/");
+    let prefix = format!("{}/", dropbox_root());
     let relative = normalized
-        .strip_prefix("/The Long Rot/")
-        .ok_or_else(|| "That file is outside The Long Rot project.".to_string())?;
+        .strip_prefix(prefix.as_str())
+        .ok_or_else(|| "That file is outside this project.".to_string())?;
     let path = Path::new(relative);
     if path.as_os_str().is_empty()
         || path
@@ -605,7 +649,7 @@ mod tests {
                 .to_string_lossy(),
             "Stories/Chapter 1.txt"
         );
-        assert!(safe_relative_path("/Other Project/file.txt").is_err());
+        assert!(safe_relative_path("/Somewhere Else/file.txt").is_err());
         assert!(safe_relative_path("/The Long Rot/../secret.txt").is_err());
     }
 }

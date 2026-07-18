@@ -10,14 +10,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { LongRotMcpClient } from "./mcp";
 import { ROLE_ORDER, type ProjectRole } from "./permissions";
-import { loadAccessMap, roleMayDownload, ACCESS_MAP_DROPBOX_PATH, type FileAccessLevel } from "./fileAccess";
-import { effectiveReleased, loadScheduledReleases, loadUnlockedChapters, saveScheduledReleases, saveUnlockedChapters, RELEASES_DROPBOX_PATH, type ScheduledRelease } from "./readerCopies";
+import { loadAccessMap, roleMayDownload, accessMapPath, type FileAccessLevel } from "./fileAccess";
+import { activeProject, projectFile } from "./projects";
+import { effectiveReleased, loadScheduledReleases, loadUnlockedChapters, saveScheduledReleases, saveUnlockedChapters, releasesPath, type ScheduledRelease } from "./readerCopies";
 import { loadPronunciations, savePronunciations, type Pronunciation } from "./pronunciation";
 import { loadChapterQuestions, saveChapterQuestions, sanitizeChapterQuestions, type ChapterQuestions } from "./chapterQuestions";
 import type { DownloadProgress } from "./projectWorkspace";
 
 export interface CatalogFile {
-  path: string;             // dropbox path, e.g. /The Long Rot/C01-R ....txt
+  path: string;             // dropbox path inside the project
   name: string;
   url: string;              // read-only shared link
   access: FileAccessLevel;  // lowest role that needs it
@@ -36,7 +37,7 @@ export interface ReaderCatalog {
   questions?: ChapterQuestions;
 }
 
-export const CATALOG_DROPBOX_PATH = "/The Long Rot/.mcg/reader-catalog.json";
+export const catalogPath = () => projectFile("reader-catalog.json");
 const CATALOG_URL_KEY = "mcg-reader-catalog-url";
 
 export function getCatalogUrl(): string {
@@ -102,11 +103,11 @@ export async function publishReaderLinks(
       }
     }
   };
-  await walk("/The Long Rot");
+  await walk(activeProject().dropboxRoot);
   const shareable = everything.filter((file) =>
-    file.path !== ACCESS_MAP_DROPBOX_PATH
-    && file.path !== RELEASES_DROPBOX_PATH
-    && file.path !== CATALOG_DROPBOX_PATH
+    file.path !== accessMapPath()
+    && file.path !== releasesPath()
+    && file.path !== catalogPath()
     && access[file.path] !== "excluded");
 
   const files: CatalogFile[] = [];
@@ -128,8 +129,8 @@ export async function publishReaderLinks(
     questions: loadChapterQuestions()
   };
   onProgress({ stage: "Publishing the catalog", completed, total: shareable.length, skipped: 0 });
-  await client.writeText(CATALOG_DROPBOX_PATH, JSON.stringify(catalog, null, 2));
-  const catalogUrl = await invoke<string>("dropbox_shared_link", { creds, path: CATALOG_DROPBOX_PATH });
+  await client.writeText(catalogPath(), JSON.stringify(catalog, null, 2));
+  const catalogUrl = await invoke<string>("dropbox_shared_link", { creds, path: catalogPath() });
   setCatalogUrl(catalogUrl);
   return catalogUrl;
 }

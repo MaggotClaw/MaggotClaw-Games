@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { LongRotMcpClient, type ProjectEntry } from "./mcp";
-import { fetchSharedAccessMap, roleMayDownload, ACCESS_MAP_DROPBOX_PATH } from "./fileAccess";
+import { fetchSharedAccessMap, roleMayDownload, accessMapPath } from "./fileAccess";
+import { activeProject } from "./projects";
 import type { ProjectRole } from "./permissions";
 
 export interface WorkspaceStatus {
@@ -51,9 +52,9 @@ export async function downloadProject(
   if (!access.shared && role !== "administrator" && role !== "support" && !Object.keys(access.map).length) {
     throw new Error("The file permissions could not be read, so nothing was downloaded. Try again in a moment.");
   }
-  const everything = await collectFiles(client, "/The Long Rot", onProgress);
+  const everything = await collectFiles(client, activeProject().dropboxRoot, onProgress);
   const files = everything.filter((file) =>
-    file.path !== ACCESS_MAP_DROPBOX_PATH && roleMayDownload(access.map, file.path, role));
+    file.path !== accessMapPath() && roleMayDownload(access.map, file.path, role));
   const withheld = everything.length - files.length;
 
   // What this machine already has, so unchanged files can be skipped instead

@@ -31,8 +31,9 @@ import { postRelayMessage } from "./discordLink";
 import { latestProgressReports } from "./ChatScreen";
 import { auditForAI, auditProse, humanMakerSharedWithEditors, setHumanMakerSharedWithEditors, type AuditReport } from "./humanMaker";
 import { OkGoButton } from "./OkGoButton";
+import { activeProject, addProject, allProjects, applyActiveProject, isSafeDropboxRoot, isSafeProjectName, removeProject, setActiveProjectId } from "./projects";
 import {
-  ACTIONS_DROPBOX_PATH, actionLog, claudeAccessOn, claudeInstructions, describeAction,
+  actionsPath, actionLog, claudeAccessOn, claudeInstructions, describeAction,
   handledIds, logAction, markHandled, needsOkGo, parseActions, setClaudeAccess,
   updateLogState, type ActionRecord, type ClaudeAction
 } from "./claudeActions";
@@ -242,6 +243,9 @@ export function App() {
   const [sleepMinutes, setSleepMinutes] = useState(0);
   const [claudeLog, setClaudeLog] = useState<ActionRecord[]>(actionLog);
   const [claudeOn, setClaudeOn] = useState(claudeAccessOn);
+  const [projectList, setProjectList] = useState(allProjects);
+  const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectRoot, setNewProjectRoot] = useState("");
   const sleepDeadline = useRef(0);
   const lastStopAt = useRef(0);
   const [shelf, setShelf] = useState<ParsedDoc[]>([]);
@@ -306,6 +310,9 @@ export function App() {
     if (!DOC_WINDOW_PATH || !("__TAURI_INTERNALS__" in window)) return;
     void (async () => {
       try {
+        // Every window names its project before reading, so a chapter window
+        // never looks in the wrong project's folder.
+        await applyActiveProject();
         let content: string;
         let html: string | undefined;
         if (/docx$/i.test(DOC_WINDOW_PATH)) {
@@ -369,6 +376,7 @@ export function App() {
     if (IS_COMPANION_WINDOW || DOC_WINDOW_PATH || FILE_WINDOW_PATH || !("__TAURI_INTERNALS__" in window)) return;
     if (!readerName || startupRan.current) return;
     startupRan.current = true;
+    void applyActiveProject();
     if (getDropboxCreds() || !readerLinksConfigured()) {
       void fetchSharedReleases(client).then((released) => { if (released) setUnlockedChapters(released); }).catch(() => undefined);
       void checkProjectSync(client).then((result) => setSyncMessage(syncNote(result))).catch(() => undefined);
@@ -459,7 +467,7 @@ export function App() {
     const poll = async () => {
       if (stopped || !claudeAccessOn()) return;
       try {
-        const actions = parseActions(await client.readText(ACTIONS_DROPBOX_PATH));
+        const actions = parseActions(await client.readText(actionsPath()));
         const handled = handledIds();
         for (const action of actions) {
           if (handled.has(action.id)) continue;
@@ -1042,7 +1050,7 @@ export function App() {
       for (const relative of files) {
         try {
           const content = await invoke<string>("read_approved_upload", { localRelativePath: relative });
-          await client.writeText(`/The Long Rot/${relative}`, content);
+          await client.writeText(`${activeProject().dropboxRoot}/${relative}`, content);
           await invoke("archive_approved_upload", { localRelativePath: relative });
           sent += 1;
           setStatus(`Uploaded ${relative} (${sent}/${files.length})`);
@@ -1119,7 +1127,7 @@ export function App() {
   // it shows a simple message, never a second copy of the whole hub.
   if (DOC_WINDOW_PATH && !document) {
     return <main className="app-shell">
-      <header className="topbar"><button className="text-button" onClick={() => { void closeCurrentWindow(); }}>← Close</button><span className="eyebrow">The Long Rot</span></header>
+      <header className="topbar"><button className="text-button" onClick={() => { void closeCurrentWindow(); }}>← Close</button><span className="eyebrow">{activeProject().name}</span></header>
       <section className="empty-state" style={{ marginTop: 40 }}>
         <strong>{docFailed ? "This chapter could not be opened." : "Opening chapter…"}</strong>
         <p>{docFailed ? "The file may have moved or been renamed. Close this window and refresh the shelf." : "One moment."}</p>
@@ -1215,11 +1223,11 @@ export function App() {
       <section className="directions-grid">
         <article><h2>Reader Mode</h2><p>The book itself. Pick a chapter, then choose Narrated (she reads to you, sentence by sentence) or Read myself (a normal book page). Locked chapters are not released yet. Press Comment while reading to record a note tied to the exact sentence.</p></article>
         <article><h2>Voice Companion</h2><p>Talk out loud and your words are typed into Claude or Codex for you. The little bar floats above the AI program: microphone to start, + to add time, ➤ to send now, ■ to stop, ✕ to close.</p></article>
-        <article><h2>Projects</h2><p>The working side. Open The Long Rot to see the workspace: Explore Files browses every chapter and codex, Chapters shows what is finished, Codex is the story brain, and the search finds every mention of anything. Download or Update refreshes your local copies from Dropbox.</p></article>
+        <article><h2>Projects</h2><p>The working side. Open a project to see its workspace: Explore Files browses every chapter and codex, Chapters shows what is finished, Codex is the story brain, and the search finds every mention of anything. Download or Update refreshes your local copies from Dropbox.</p></article>
         <article><h2>Messages</h2><p>Rooms for readers, editors, and the author. Post in a room, or open the full Messages window (Discord) for voice calls. Access requests also land there for the owner.</p></article>
         <article><h2>Requesting more access</h2><p>Everyone starts as a Reader. Request access sends your ask to the owner; when approved you get an unlock code — paste it under Enter unlock code and your new role is live.</p></article>
         <article><h2>Owner Dashboard</h2><p>Owner only: approvals waiting, requests pulled from Discord, and the paste-a-code fallback. Approving posts the unlock code back automatically.</p></article>
-        {canPerform(role, "manage") && <article className="owner-directions"><h2>For MaggotClaw — One-Time Setup</h2><p>1. Settings → Owner → Project Files → <strong>Import From The Bridge</strong>, then Save. Your computer now talks to Dropbox itself — the bridge no longer needs to run.<br/>2. Projects → The Long Rot → View The File List → rate the files → <strong>Publish Reader Links</strong>. This makes the read-only links friends download the book through.<br/>3. Messages → <strong>Copy Messaging Key</strong>. Send that one key privately to each friend — it connects their chat and their book downloads.</p></article>}
+        {canPerform(role, "manage") && <article className="owner-directions"><h2>For MaggotClaw — One-Time Setup</h2><p>1. Settings → Owner → Project Files → <strong>Import From The Bridge</strong>, then Save. Your computer now talks to Dropbox itself — the bridge no longer needs to run.<br/>2. Projects → your project → View The File List → rate the files → <strong>Publish Reader Links</strong>. This makes the read-only links friends download the book through.<br/>3. Messages → <strong>Copy Messaging Key</strong>. Send that one key privately to each friend — it connects their chat and their book downloads.</p></article>}
         {canPerform(role, "manage") && <article className="owner-directions"><h2>For MaggotClaw — Everyday</h2><p><strong>Release a chapter:</strong> Owner Dashboard → Released Chapters → tick it → Publish. Every reader's app picks it up when it next opens.<br/><strong>Someone asks for access:</strong> the alert appears when the app opens; approve from the dashboard and the unlock code posts back to Discord by itself.<br/><strong>Push your writing:</strong> Download or Update pulls the latest; files you drop in 05 Approved Uploads go up with Upload Approved. Revised chapters reach readers automatically — links always serve the newest version.<br/><strong>New app version for everyone:</strong> ask your assistant to build and push the update; friends get it from Check For Updates.</p></article>}
         <article><h2>Settings</h2><p>Voice Companion choices, updates and the share link, and for the owner: Discord keys and View as — see the whole app the way a Reader or Editor sees it, then click your name to come back.</p></article>
         <article><h2>The OK GO Button</h2><p>A small green button that floats over everything and can be dragged anywhere you like. Press it and it counts down three, two, one before "OK GO" goes through to the AI — press again during the countdown to call it off. Nothing is ever approved by accident.</p></article>
@@ -1260,7 +1268,7 @@ export function App() {
         <span className="reader-note">You can read and comment right away. Need to edit? <button className="text-button inline" onClick={() => { setRequestCode(""); setScreen("request-access"); }}>Request access</button> · <button className="text-button inline" onClick={() => setScreen("unlock")}>Enter unlock code</button></span>
       </section>}
       <section className="mode-grid">
-        <button className="mode-card" onClick={() => setScreen("library")}><img className="mode-icon image-icon" src="/long-rot-icon.png" alt="The Long Rot" /><span><strong>Reader Mode</strong><small>Read or listen, save your place, and record comments.</small></span><span>→</span></button>
+        <button className="mode-card" onClick={() => setScreen("library")}><img className="mode-icon image-icon" src={activeProject().icon} alt="" /><span><strong>Reader Mode</strong><small>Read or listen, save your place, and record comments.</small></span><span>→</span></button>
         <button className="mode-card voice-mode" onClick={() => setScreen("voice-targets")}><span className="mode-icon voice-mic-mark" aria-hidden="true" /><span><strong>Voice Companion</strong><small>Talk with Claude or Codex now. ChatGPT will be added later.</small></span><span>→</span></button>
         <button className="mode-card project-mode" onClick={openProjects}><img className="mode-icon image-icon" src="/mcg-social-circle.png" alt="MaggotClaw Games" /><span><strong>Projects</strong><small>{canPerform(role, "review") ? "Open a project, review its local files, and use the actions allowed for your role." : "Editing the project files needs approval from the owner."}</small></span><span>→</span></button>
         <button className="mode-card chat-mode" onClick={() => setScreen("chat")}><span className="mode-icon chat-mark" aria-hidden="true" /><span><strong>Messages</strong><small>Rooms and voice calls for readers, editors, and the author.</small></span><span>→</span></button>
@@ -1272,7 +1280,42 @@ export function App() {
     return <main className="app-shell projects-list-shell">
       <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">PROJECTS</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
       <section className="projects-heading"><h1>Your Projects</h1><p>Select a project to open its local workspace and available actions.</p></section>
-      <section className="project-tiles"><button className="project-tile" onClick={openLongRotWorkspace}><img className="project-placeholder project-icon-image" src="/long-rot-icon.png" alt="The Long Rot" /><span><strong>The Long Rot</strong><small>{workspace?.initialized ? `${workspace.downloadedFiles} Files On This Computer${syncMessage ? ` · ${syncMessage}` : ""}` : "Not Downloaded Yet — Open To Set Up"}</small></span><span>Open →</span></button><button className="project-tile project-zero-tile" onClick={() => setScreen("project-zero")}><img className="project-placeholder project-icon-image" src="/project-zero-icon.svg" alt="Project Zero Author" /><span><strong>Project Zero Author</strong><small>Project added · Local workspace and connection not configured yet</small></span><span>Open →</span></button></section>
+      <section className="project-tiles">
+        {projectList.map((project) => {
+          const isActive = project.id === activeProject().id;
+          return <button key={project.id} className={project.dropboxRoot ? "project-tile" : "project-tile project-zero-tile"} onClick={() => {
+            if (!project.dropboxRoot) { setScreen("project-zero"); return; }
+            setActiveProjectId(project.id);
+            void applyActiveProject().then(() => openLongRotWorkspace());
+          }}>
+            <img className="project-placeholder project-icon-image" src={project.icon} alt="" />
+            <span><strong>{project.name}</strong><small>{!project.dropboxRoot
+              ? "Project added · No remote folder set yet"
+              : isActive && workspace?.initialized
+                ? `${workspace.downloadedFiles} Files On This Computer${syncMessage ? ` · ${syncMessage}` : ""}`
+                : "Open To Set Up"}</small></span>
+            <span>Open →</span>
+          </button>;
+        })}
+      </section>
+      {canPerform(role, "manage") && <section className="dash-section">
+        <h2>Add A Project</h2>
+        <p className="board-hint">MaggotClaw Games can work on anything. Give the project a name and the Dropbox folder its files live in.</p>
+        <div className="pronun-row">
+          <input value={newProjectName} placeholder="Project name" onChange={(event) => setNewProjectName(event.target.value)} />
+          <input value={newProjectRoot} placeholder="/Folder On Dropbox" onChange={(event) => setNewProjectRoot(event.target.value)} />
+          <button className="primary tiny" disabled={!isSafeProjectName(newProjectName) || !isSafeDropboxRoot(newProjectRoot)} onClick={() => {
+            addProject(newProjectName, newProjectRoot);
+            setProjectList(allProjects());
+            setNewProjectName(""); setNewProjectRoot("");
+            setStatus("Project added. Open it to set up its local workspace.");
+          }}>Add</button>
+        </div>
+        {projectList.filter((p) => !p.builtIn).map((p) => <div key={p.id} className="pronun-row">
+          <input value={`${p.name} — ${p.dropboxRoot}`} readOnly />
+          <button className="text-button" onClick={() => { removeProject(p.id); setProjectList(allProjects()); }}>✕</button>
+        </div>)}
+      </section>}
     </main>;
   }
 
@@ -1456,7 +1499,7 @@ ${item.transcriptionConfirmed}`;
       <main className="app-shell reader-shell">
         <header className="topbar">
           <button className="text-button" onClick={closeReader}>← Back</button>
-          <span className="eyebrow">The Long Rot</span>
+          <span className="eyebrow">{activeProject().name}</span>
           <span className="who-chip">{readerName} · {roleLabel(role)}</span>
         </header>
         <section className="reader-heading">
@@ -1730,6 +1773,7 @@ function FileWindow({ relative }: { relative: string }) {
   useEffect(() => {
     void (async () => {
       try {
+        await applyActiveProject();
         if (/docx$/i.test(relative)) {
           const bytes = await invoke<number[]>("read_project_document_bytes", { localRelativePath: relative });
           const buffer = new Uint8Array(bytes).buffer;

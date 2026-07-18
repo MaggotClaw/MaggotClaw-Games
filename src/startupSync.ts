@@ -33,7 +33,7 @@ export async function checkProjectSync(client: LongRotMcpClient): Promise<SyncCh
   // One cheap probe decides whether the bridge is reachable at all, so a
   // single deleted file can never disguise itself as "everything is offline".
   try {
-    await client.listFolder("/The Long Rot");
+    await client.listFolder();
   } catch {
     result.unreachable = true;
     return result;

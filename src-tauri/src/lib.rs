@@ -7,7 +7,7 @@ mod native_speech;
 mod piper_speech;
 mod project_workspace;
 
-const OPENAI_KEY_SERVICE: &str = "The Long Rot Reader";
+const OPENAI_KEY_SERVICE: &str = "MaggotClaw Games";
 const OPENAI_KEY_ACCOUNT: &str = "openai-api-key";
 
 fn api_key_entry() -> Result<keyring::Entry, String> {
@@ -325,7 +325,7 @@ async fn openai_transcribe(audio: Vec<u8>, mime_type: String) -> Result<String, 
         .map_err(|_| "The recording format was not supported.".to_string())?;
     let form = reqwest::multipart::Form::new()
         .text("model", "gpt-4o-transcribe")
-        .text("prompt", "The Long Rot; Silas Crane; Vina; Hiram; Josiah Curn; Aedan; Elowen; Blackwood; Mourning Bend; The Pull")
+        .text("prompt", "Proper nouns and character names from the current project.")
         .part("file", part);
     let response = reqwest::Client::new()
         .post("https://api.openai.com/v1/audio/transcriptions")
@@ -366,7 +366,7 @@ async fn openai_respond(input: String, conversation: Vec<Value>) -> Result<Strin
     transcript.push_str(&format!("user: {}", input));
     let body = serde_json::json!({
         "model": "gpt-5.4-mini",
-        "instructions": "You are the voice project assistant for the book The Long Rot. Be concise, clear, and honest. Distinguish established project facts from suggestions. Never claim that a project file changed. This initial talk mode has no live project-file tool access, so say when an answer requires consulting project files.",
+        "instructions": "You are the voice assistant for the MaggotClaw Games project the author is working on. Be concise, clear, and honest. Distinguish established project facts from suggestions. Never claim that a project file changed. This initial talk mode has no live project-file tool access, so say when an answer requires consulting project files.",
         "input": transcript,
         "max_output_tokens": 800
     });
@@ -498,6 +498,7 @@ pub fn run() {
             project_workspace::read_approved_upload,
             project_workspace::archive_approved_upload,
             project_workspace::retire_project_file,
+            project_workspace::set_active_project,
             project_workspace::save_idea_note,
             project_workspace::write_workspace_file,
             project_workspace::move_workspace_file,
@@ -511,7 +512,7 @@ pub fn run() {
             dropbox::read_bridge_env
         ])
         .build(tauri::generate_context!())
-        .expect("error while building The Long Rot Voice")
+        .expect("error while building MaggotClaw Games")
         .run(|_, event| {
             if matches!(event, tauri::RunEvent::Exit) {
                 native_speech::shutdown_native_dictation();

@@ -8,6 +8,7 @@
 
 import type { LongRotMcpClient } from "./mcp";
 import { ROLE_ORDER, type ProjectRole } from "./permissions";
+import { projectFile } from "./projects";
 
 // "excluded" means the file never downloads for anyone — clutter the app
 // simply does not need.
@@ -15,7 +16,7 @@ export type FileAccessLevel = ProjectRole | "excluded";
 
 export type FileAccessMap = Record<string, FileAccessLevel>;
 
-export const ACCESS_MAP_DROPBOX_PATH = "/The Long Rot/.mcg/file-access.json";
+export const accessMapPath = () => projectFile("file-access.json");
 const STORAGE_KEY = "mcg-file-access";
 
 export const ACCESS_LEVEL_LABELS: Array<{ value: FileAccessLevel; label: string }> = [
@@ -77,7 +78,7 @@ export async function fetchSharedAccessMap(
 ): Promise<{ map: FileAccessMap; shared: boolean }> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const map = parseAccessMap(await client.readText(ACCESS_MAP_DROPBOX_PATH));
+      const map = parseAccessMap(await client.readText(accessMapPath()));
       // The shared ratings are the truth, but this machine's unpublished
       // edits stay on top of them.
       const merged = { ...map, ...loadAccessMap() };
@@ -97,7 +98,7 @@ export async function publishAccessMap(client: LongRotMcpClient): Promise<void> 
   const local = loadAccessMap();
   if (!Object.keys(local).length) {
     try {
-      const shared = parseAccessMap(await client.readText(ACCESS_MAP_DROPBOX_PATH));
+      const shared = parseAccessMap(await client.readText(accessMapPath()));
       if (Object.keys(shared).length) {
         throw new Error("This computer has no ratings yet — open the file list and rate files before publishing.");
       }
@@ -106,5 +107,5 @@ export async function publishAccessMap(client: LongRotMcpClient): Promise<void> 
       // No shared map exists either; publishing empty is harmless.
     }
   }
-  await client.writeText(ACCESS_MAP_DROPBOX_PATH, JSON.stringify(local, null, 2));
+  await client.writeText(accessMapPath(), JSON.stringify(local, null, 2));
 }

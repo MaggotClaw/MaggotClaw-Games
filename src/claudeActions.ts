@@ -10,7 +10,9 @@
 // author's OK GO, because that brake is the whole reason this project works.
 // Every action is written to a log either way.
 
-export const ACTIONS_DROPBOX_PATH = "/The Long Rot/.mcg/claude-actions.json";
+import { projectFile } from "./projects";
+
+export const actionsPath = () => projectFile("claude-actions.json");
 
 export type ActionKind =
   | "open_screen"
@@ -153,7 +155,7 @@ export function updateLogState(id: string, state: ActionRecord["state"], note: s
 export function claudeInstructions(): string {
   return `You can act inside the MaggotClaw Games app.
 
-Write a JSON file to Dropbox at ${ACTIONS_DROPBOX_PATH} shaped like:
+Write a JSON file to Dropbox at ${actionsPath()} shaped like:
 
 {"actions": [ { "id": "unique-id", "kind": "...", "why": "one line for the author", ... } ]}
 

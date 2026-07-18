@@ -253,7 +253,7 @@ export function ProjectExplorer({ onBack }: { onBack: () => void }) {
 
   return <main className="app-shell explorer-shell">
     <header className="topbar">
-      <button className="text-button" onClick={onBack}>← The Long Rot</button>
+      <button className="text-button" onClick={onBack}>← Back</button>
       <span className="eyebrow">PROJECT FILES</span>
       <span>{downloaded.length} files{pending.length ? ` · ${pending.length} pending` : ""}</span>
     </header>

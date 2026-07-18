@@ -5,6 +5,7 @@
 import { canPerform, type ProjectRole } from "./permissions";
 import { compareVersions, parseDoc, type ParsedDoc, type ProjectDocument } from "./projectDocs";
 import type { LongRotMcpClient } from "./mcp";
+import { projectFile } from "./projects";
 
 // Chapters a reader may open today. Everything else is listed but locked, so a
 // reader can see the shape of the book without being told why.
@@ -71,7 +72,7 @@ export function saveUnlockedChapters(chapters: number[]): void {
 // every reader's app pulls it during the startup check, so releasing Chapter 5
 // reaches everyone without a new build.
 
-export const RELEASES_DROPBOX_PATH = "/The Long Rot/.mcg/released-chapters.json";
+export const releasesPath = () => projectFile("released-chapters.json");
 
 // A chapter can also be scheduled: it unlocks by itself on its date, with no
 // republishing — release waves on a calendar.
@@ -134,7 +135,7 @@ export function parseReleasesFile(json: string): { released: number[]; scheduled
 
 export async function fetchSharedReleases(client: LongRotMcpClient): Promise<number[] | null> {
   try {
-    const file = parseReleasesFile(await client.readText(RELEASES_DROPBOX_PATH));
+    const file = parseReleasesFile(await client.readText(releasesPath()));
     if (!file) return null;
     saveScheduledReleases(file.scheduled);
     const effective = effectiveReleased(file.released, file.scheduled, new Date().toISOString().slice(0, 10));
@@ -147,7 +148,7 @@ export async function fetchSharedReleases(client: LongRotMcpClient): Promise<num
 }
 
 export async function publishReleases(client: LongRotMcpClient): Promise<void> {
-  await client.writeText(RELEASES_DROPBOX_PATH, JSON.stringify({
+  await client.writeText(releasesPath(), JSON.stringify({
     released: loadUnlockedChapters(),
     scheduled: loadScheduledReleases()
   }));
