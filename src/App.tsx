@@ -22,6 +22,7 @@ import { getDiscordName, setDiscordName, getRequestWebhook, setRequestWebhook, i
 import { checkProjectSync, syncNote } from "./startupSync";
 import { ACCESS_LEVEL_LABELS, fetchSharedAccessMap, loadAccessMap, publishAccessMap, setFileAccess, type FileAccessMap } from "./fileAccess";
 import { getNickname } from "./profileInfo";
+import { downloadProjectViaLinks, fetchCatalog, getCatalogUrl, publishReaderLinks, readerLinksConfigured } from "./readerLinks";
 import { recordJoin } from "./contacts";
 import { hasProfilePin, isValidPin, setNickname, setProfilePin } from "./profileInfo";
 import { ReadSelectionButton } from "./ReadSelectionButton";
@@ -320,8 +321,13 @@ export function App() {
     if (IS_COMPANION_WINDOW || DOC_WINDOW_PATH || FILE_WINDOW_PATH || !("__TAURI_INTERNALS__" in window)) return;
     if (!readerName || startupRan.current) return;
     startupRan.current = true;
-    void fetchSharedReleases(client).then((released) => { if (released) setUnlockedChapters(released); }).catch(() => undefined);
-    void checkProjectSync(client).then((result) => setSyncMessage(syncNote(result))).catch(() => undefined);
+    if (getDropboxCreds() || !readerLinksConfigured()) {
+      void fetchSharedReleases(client).then((released) => { if (released) setUnlockedChapters(released); }).catch(() => undefined);
+      void checkProjectSync(client).then((result) => setSyncMessage(syncNote(result))).catch(() => undefined);
+    } else {
+      // Link-based readers: the catalog carries the released-chapter list.
+      void fetchCatalog().then((catalog) => { if (catalog?.released.length) setUnlockedChapters(catalog.released); }).catch(() => undefined);
+    }
     if (canPerform(realProfileRole(readerName), "manage") && discordReadingConfigured()) {
       void fetchDiscordRequests().then((found) => setDiscordWaiting(found.length)).catch(() => undefined);
     }
@@ -831,9 +837,13 @@ export function App() {
     setWorkspaceBusy(true);
     setWorkspaceProgress(null);
     try {
-      const result = await downloadProject(client, role, setWorkspaceProgress);
+      // With keys, talk to Dropbox (or the bridge) directly; without keys, a
+      // reader's machine downloads through its no-secrets catalog links.
+      const result = getDropboxCreds() || !readerLinksConfigured()
+        ? await downloadProject(client, role, setWorkspaceProgress)
+        : await downloadProjectViaLinks(role, setWorkspaceProgress);
       setWorkspace(await workspaceStatus());
-      setStatus(`${result.completed} text files saved locally. ${result.skipped} other files need binary download support. Dropbox was not changed.`);
+      setStatus(`${result.stage} Dropbox was not changed.`);
     } catch (error) {
       setStatus(`${message(error)} Dropbox was not changed.`);
     } finally {
@@ -1325,13 +1335,31 @@ function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: Proj
       setBusy(false);
     }
   }
+  async function publishLinks() {
+    const creds = getDropboxCreds();
+    if (!creds) { setNote("Reader Links need the project file keys — Settings → Owner → Project Files first."); return; }
+    setBusy(true);
+    try {
+      await publishAccessMap(client).catch(() => undefined);
+      await publishReaderLinks(client, creds, (progress) => setNote(progress.stage));
+      setNote("Reader Links published. Copy Messaging Key in Messages now carries read-only book downloads for friends.");
+    } catch (error) {
+      setNote(`${error instanceof Error ? error.message : "Reader Links could not be published."} Nothing readers already have was changed.`);
+    } finally {
+      setBusy(false);
+    }
+  }
   const levelLabel = (path: string) => ACCESS_LEVEL_LABELS.find((l) => l.value === (access[path] ?? "reader"))?.label ?? "Reader And Up";
   return <main className="app-shell project-shell">
     <header className="topbar"><button className="text-button" onClick={onBack}>← Back</button><span className="eyebrow">DOWNLOADED FILES</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
     <section className="projects-heading"><h1>Every File On This Computer</h1><p>{isOwner
       ? "Rate each file with the lowest role that needs it. People only download what their role calls for, so their AI stays focused. Publish to share the ratings with every machine."
       : "The files your role downloads. The owner decides which files each role needs."}</p></section>
-    {isOwner && <section className="form-actions"><button className="primary" onClick={() => void publish()} disabled={busy}>{busy ? "Publishing…" : "Publish File Access To Dropbox"}</button></section>}
+    {isOwner && <section className="form-actions">
+      <button className="primary" onClick={() => void publish()} disabled={busy}>{busy ? "Publishing…" : "Publish File Access To Dropbox"}</button>
+      <button className="primary" onClick={() => void publishLinks()} disabled={busy} title="Read-only links for friends — no keys leave your machine">{busy ? "Working…" : "Publish Reader Links"}</button>
+      {readerLinksConfigured() && <small className="update-status ok">Reader Links are live — friend keys carry read-only downloads.</small>}
+    </section>}
     {note && <p className="board-hint">{note}</p>}
     <section className="comments-list">
       {docs.length === 0 && <div className="empty-state"><strong>Nothing downloaded yet</strong><p>Run Download or Update in the workspace first.</p></div>}

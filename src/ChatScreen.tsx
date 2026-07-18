@@ -5,7 +5,8 @@ import {
   postRelayMessage, setBotToken, setRelayChannelId, type RelayChatMessage
 } from "./discordLink";
 import { makeMessagingKey, parseMessagingKey } from "./accessCodes";
-import { getDropboxCreds, setDropboxCreds } from "./mcp";
+import { setDropboxCreds } from "./mcp";
+import { getCatalogUrl, setCatalogUrl } from "./readerLinks";
 import { addContact, directMessageTargets, loadContacts, recordJoin, removeContact, type Contact } from "./contacts";
 import { ReadSelectionButton } from "./ReadSelectionButton";
 
@@ -201,28 +202,31 @@ export function ChatScreen({ role, name, onBack, onOpenDiscord }: { role: Projec
     if (!key) { setNote("That Messaging Key was not recognised — check it was copied in full."); return; }
     setBotToken(key.botToken);
     setRelayChannelId(key.channelId);
-    // The key can carry the project file connection too — one paste and this
-    // machine can also download the book from Dropbox.
+    // The reader catalog link: read-only book downloads with no secrets held.
+    if (key.catalogUrl) setCatalogUrl(key.catalogUrl);
+    // Full file keys only ever arrive on an owner/editor key.
     if (key.dropbox) setDropboxCreds(key.dropbox);
     setConnected(true);
     setKeyEntry(null);
-    setNote(key.dropbox
-      ? "Messaging connected, and this computer can now download the project files too."
+    setNote(key.catalogUrl || key.dropbox
+      ? "Messaging connected, and this computer can now download the book too."
       : "Messaging connected — pulling the team's messages.");
     void pullRelay();
   }
 
   async function copyMessagingKey() {
+    // Friend keys carry the catalog link — never the full Dropbox keys. Those
+    // stay on the owner's machines.
     const code = makeMessagingKey({
       botToken: getBotToken(),
       channelId: getRelayChannelId(),
-      dropbox: getDropboxCreds() ?? undefined
+      catalogUrl: getCatalogUrl() || undefined
     });
     try {
       await navigator.clipboard?.writeText(code);
-      setNote(getDropboxCreds()
-        ? "Messaging Key copied — it connects chat AND project files. Send it privately."
-        : "Messaging Key copied — send it privately to whoever you want chatting here.");
+      setNote(getCatalogUrl()
+        ? "Messaging Key copied — it connects chat and read-only book downloads. Send it privately."
+        : "Messaging Key copied — publish Reader Links in the file list first if you also want it to carry book downloads.");
     } catch {
       setNote("The clipboard was not available. Try again.");
     }

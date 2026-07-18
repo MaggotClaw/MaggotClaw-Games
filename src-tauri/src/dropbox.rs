@@ -188,6 +188,83 @@ pub async fn dropbox_write_text(
     Ok(())
 }
 
+/// A read-only shared link for one file. The link always serves the file's
+/// CURRENT contents, so readers automatically get every revision — and they
+/// hold no credentials at all: a link can read one file and nothing else.
+#[tauri::command]
+pub async fn dropbox_shared_link(creds: DropboxCreds, path: String) -> Result<String, String> {
+    let token = access_token(&creds).await?;
+    let response = reqwest::Client::new()
+        .post("https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings")
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "path": path }))
+        .timeout(Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|_| "Dropbox could not be reached.".to_string())?;
+    let status = response.status();
+    let value: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|_| "Dropbox returned an unreadable response.".to_string())?;
+    if status.is_success() {
+        if let Some(url) = value["url"].as_str() {
+            return Ok(url.to_string());
+        }
+    }
+    // The link already exists — Dropbox reports that as an error carrying the
+    // existing link, and list_shared_links is the reliable way to fetch it.
+    let listed = api_call(
+        &creds,
+        "sharing/list_shared_links",
+        serde_json::json!({ "path": path, "direct_only": true }),
+    )
+    .await?;
+    listed["links"][0]["url"]
+        .as_str()
+        .map(|url| url.to_string())
+        .ok_or_else(|| "Dropbox could not provide a shared link for that file.".to_string())
+}
+
+/// Fetches text from a Dropbox shared link. Restricted to Dropbox's own
+/// domains so this can never be pointed anywhere else.
+#[tauri::command]
+pub async fn fetch_dropbox_link_text(url: String) -> Result<String, String> {
+    let parsed = url::Url::parse(&url).map_err(|_| "That link is not a valid address.".to_string())?;
+    let host_ok = parsed
+        .host_str()
+        .map(|host| host == "dropbox.com" || host.ends_with(".dropbox.com") || host.ends_with(".dropboxusercontent.com"))
+        .unwrap_or(false);
+    if parsed.scheme() != "https" || !host_ok {
+        return Err("Only Dropbox links can be opened here.".to_string());
+    }
+    // dl=1 asks for the raw file rather than Dropbox's preview page.
+    let mut direct = parsed.clone();
+    let pairs: Vec<(String, String)> = parsed
+        .query_pairs()
+        .filter(|(key, _)| key != "dl")
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect();
+    direct.query_pairs_mut().clear().extend_pairs(pairs).append_pair("dl", "1");
+    let response = reqwest::Client::new()
+        .get(direct)
+        .timeout(Duration::from_secs(60))
+        .send()
+        .await
+        .map_err(|_| "The file link could not be reached.".to_string())?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "The file link did not answer ({}). The owner may need to publish reader links again.",
+            response.status().as_u16()
+        ));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|_| "The file could not be read from its link.".to_string())?;
+    Ok(String::from_utf8_lossy(&bytes).to_string())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeEnvCreds {
