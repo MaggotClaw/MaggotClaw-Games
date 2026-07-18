@@ -20,27 +20,24 @@ what changed today and what is still open.
   `90 Codex, Technical Operations v1.5` on Dropbox, and Claude/ChatGPT
   instruction files at v1.1 in `Operations/02`.
 
-## Broken — fix this first
+## Packaging fault — resolved
 
-**The installer will not package.** `npm run desktop:build` compiles the
-frontend and Rust fine, then `makensis` fails with "Can't open output file".
-Not disk space (222 GB free), not antivirus (Defender off), no process holding
-the file, and clearing `target/release/bundle` and `target/release/nsis` did
-not help. It succeeded once at 17:22 and never again.
+`makensis` refused to produce the installer for several hours, failing with
+"Can't open output file" while everything else compiled. Disk space,
+antivirus, file locks and stale bundle directories were all ruled out.
 
-So **v1.6.0-beta exists only as source.** Everything after v1.5.0-beta —
-Title Case menus, the Human Maker send button, the Claude connector
-walkthrough — is committed and tested but has never been packaged.
+**A restart cleared it.** The first build after rebooting worked with no other
+change. If it ever returns, restart before spending time on anything else;
+failing that, Tauri can bundle an MSI instead of NSIS.
 
-Try a reboot, then `cargo clean` and rebuild. If it still fails, that is the
-first job.
+**v1.6.0-beta is built and published.**
 
 ## Needs the author's own hands
 
 - **Add the Claude connector.** Settings → Connectors → Add custom connector,
   URL above, Auth0 details from Bitwarden. There is now a walkthrough for it
-  ("Putting MaggotClaw In Claude's Menu") — but only in the unbuilt v1.6.0.
-- **Install v1.5.0-beta, then Settings → Import From Bridge → Save.** The
+  ("Putting MaggotClaw In Claude's Menu"), shipped in v1.6.0-beta.
+- **Install v1.6.0-beta, then Settings → Import From Bridge → Save.** The
   app still holds the pre-rotation Dropbox token.
 - **Put the update-file URL in the app's update setting** so other machines
   find updates:
