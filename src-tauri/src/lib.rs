@@ -507,6 +507,8 @@ pub fn run() {
             dropbox::dropbox_read_text,
             dropbox::dropbox_current_revision,
             dropbox::dropbox_write_text,
+            dropbox::dropbox_move,
+            dropbox::dropbox_create_folder,
             dropbox::dropbox_shared_link,
             dropbox::fetch_dropbox_link_text,
             dropbox::read_bridge_env

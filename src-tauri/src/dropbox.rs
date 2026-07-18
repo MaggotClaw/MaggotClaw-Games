@@ -188,6 +188,44 @@ pub async fn dropbox_write_text(
     Ok(())
 }
 
+/// Moves or renames a file or folder on Dropbox. Used to tidy the project
+/// layout; Dropbox keeps its own history, so this is reversible.
+#[tauri::command]
+pub async fn dropbox_move(creds: DropboxCreds, from: String, to: String) -> Result<String, String> {
+    if !from.starts_with('/') || !to.starts_with('/') || from.contains("..") || to.contains("..") {
+        return Err("Those folder locations are not valid.".to_string());
+    }
+    let value = api_call(
+        &creds,
+        "files/move_v2",
+        serde_json::json!({
+            "from_path": from,
+            "to_path": to,
+            "autorename": false,
+            "allow_ownership_transfer": false
+        }),
+    )
+    .await?;
+    Ok(value["metadata"]["path_display"]
+        .as_str()
+        .unwrap_or(&to)
+        .to_string())
+}
+
+/// Makes a folder on Dropbox. Existing folders are left exactly as they are.
+#[tauri::command]
+pub async fn dropbox_create_folder(creds: DropboxCreds, path: String) -> Result<(), String> {
+    if !path.starts_with('/') || path.contains("..") {
+        return Err("That folder location is not valid.".to_string());
+    }
+    match api_call(&creds, "files/create_folder_v2", serde_json::json!({ "path": path })).await {
+        Ok(_) => Ok(()),
+        // 409 is Dropbox's "it already exists", which is exactly what we want.
+        Err(message) if message.contains("does not know") || message.contains("409") => Ok(()),
+        Err(message) => Err(message),
+    }
+}
+
 /// A read-only shared link for one file. The link always serves the file's
 /// CURRENT contents, so readers automatically get every revision — and they
 /// hold no credentials at all: a link can read one file and nothing else.

@@ -13,8 +13,8 @@ export interface Project {
 }
 
 export const BUILT_IN_PROJECTS: Project[] = [
-  { id: "long-rot", name: "The Long Rot", dropboxRoot: "/The Long Rot", icon: "/long-rot-icon.png", builtIn: true },
-  { id: "project-zero", name: "Project Zero Author", dropboxRoot: "", icon: "/project-zero-icon.svg", builtIn: true }
+  { id: "long-rot", name: "The Long Rot", dropboxRoot: "/MaggotClaw Games/The Long Rot", icon: "/long-rot-icon.png", builtIn: true },
+  { id: "project-zero", name: "Project Zero Author", dropboxRoot: "/MaggotClaw Games/Project Zero Author", icon: "/project-zero-icon.svg", builtIn: true }
 ];
 
 const ADDED_KEY = "mcg-projects";

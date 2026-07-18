@@ -1734,6 +1734,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
+name = "maggotclaw-games"
+version = "0.6.7"
+dependencies = [
+ "keyring",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "uiautomation",
+ "url",
+ "windows 0.62.2",
+]
+
+[[package]]
 name = "markup5ever"
 version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3417,22 +3433,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5fed54709c5b3a53d09bb1c113ea4f5ceafd1e772ddcb0030a82e1d56c087b08"
 dependencies = [
  "new_debug_unreachable",
-]
-
-[[package]]
-name = "the-long-rot-voice"
-version = "0.6.7"
-dependencies = [
- "keyring",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "uiautomation",
- "url",
- "windows 0.62.2",
 ]
 
 [[package]]

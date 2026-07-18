@@ -1283,14 +1283,14 @@ export function App() {
       <section className="project-tiles">
         {projectList.map((project) => {
           const isActive = project.id === activeProject().id;
-          return <button key={project.id} className={project.dropboxRoot ? "project-tile" : "project-tile project-zero-tile"} onClick={() => {
-            if (!project.dropboxRoot) { setScreen("project-zero"); return; }
+          return <button key={project.id} className={project.id === "project-zero" ? "project-tile project-zero-tile" : "project-tile"} onClick={() => {
+            if (project.id === "project-zero") { setActiveProjectId(project.id); void applyActiveProject(); setScreen("project-zero"); return; }
             setActiveProjectId(project.id);
             void applyActiveProject().then(() => openLongRotWorkspace());
           }}>
             <img className="project-placeholder project-icon-image" src={project.icon} alt="" />
-            <span><strong>{project.name}</strong><small>{!project.dropboxRoot
-              ? "Project added · No remote folder set yet"
+            <span><strong>{project.name}</strong><small>{project.id === "project-zero"
+              ? "Project added · Folder ready on Dropbox, nothing in it yet"
               : isActive && workspace?.initialized
                 ? `${workspace.downloadedFiles} Files On This Computer${syncMessage ? ` · ${syncMessage}` : ""}`
                 : "Open To Set Up"}</small></span>

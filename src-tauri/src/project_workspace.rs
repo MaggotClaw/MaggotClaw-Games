@@ -15,7 +15,7 @@ static ACTIVE_PROJECT: Mutex<Option<(String, String)>> = Mutex::new(None);
 // Only a first-run fallback: the app names its project the moment any window
 // opens. Kept so an existing workspace is never orphaned.
 const DEFAULT_PROJECT_NAME: &str = "The Long Rot";
-const DEFAULT_DROPBOX_ROOT: &str = "/The Long Rot";
+const DEFAULT_DROPBOX_ROOT: &str = "/MaggotClaw Games/The Long Rot";
 
 fn project_name() -> String {
     ACTIVE_PROJECT
@@ -644,12 +644,12 @@ mod tests {
     #[test]
     fn accepts_only_paths_inside_the_project() {
         assert_eq!(
-            safe_relative_path("/The Long Rot/Stories/Chapter 1.txt")
+            safe_relative_path("/MaggotClaw Games/The Long Rot/Stories/Chapter 1.txt")
                 .unwrap()
                 .to_string_lossy(),
             "Stories/Chapter 1.txt"
         );
         assert!(safe_relative_path("/Somewhere Else/file.txt").is_err());
-        assert!(safe_relative_path("/The Long Rot/../secret.txt").is_err());
+        assert!(safe_relative_path("/MaggotClaw Games/The Long Rot/../secret.txt").is_err());
     }
 }
