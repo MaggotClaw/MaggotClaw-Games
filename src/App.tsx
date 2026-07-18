@@ -1245,7 +1245,7 @@ export function App() {
   }
 
   if (screen === "settings") {
-    return <Settings initial={settings} onSave={saveSettings} onCancel={() => setScreen(settingsReturn.current)} />;
+    return <Settings initial={settings} onSave={saveSettings} onCancel={() => setScreen(settingsReturn.current)} onRequestAccess={() => { setRequestCode(""); setScreen("request-access"); }} onEnterCode={() => setScreen("unlock")} />;
   }
 
   if (screen === "idea") {
@@ -1356,9 +1356,6 @@ export function App() {
       </section>}
       {syncMessage && <section className="welcome-strip">
         <span className="reader-note">{syncMessage}. {syncMessage.includes("Newer") && <button className="text-button inline" onClick={() => { void openLongRotWorkspace(); }}>Open The Workspace To Update</button>}</span>
-      </section>}
-      {!canPerform(role, "manage") && <section className="welcome-strip">
-        <span className="reader-note">You can read and comment right away. Need to edit? <button className="text-button inline" onClick={() => { setRequestCode(""); setScreen("request-access"); }}>Request access</button> · <button className="text-button inline" onClick={() => setScreen("unlock")}>Enter unlock code</button></span>
       </section>}
       <section className="mode-grid">
         <button className="mode-card" onClick={() => setScreen("library")}><img className="mode-icon image-icon" src={activeProject().icon} alt="" /><span><strong>Reader Mode</strong><small>Read or listen, save your place, and record comments.</small></span><span>→</span></button>
@@ -2604,7 +2601,7 @@ function SavedCommentCard({ comment, onDelete }: { comment: ReaderComment; onDel
   </article>;
 }
 
-function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; onSave: (value: ConnectionSettings) => void; onCancel: () => void }) {
+function Settings({ initial, onSave, onCancel, onRequestAccess, onEnterCode }: { initial: ConnectionSettings; onSave: (value: ConnectionSettings) => void; onCancel: () => void; onRequestAccess: () => void; onEnterCode: () => void }) {
   const [endpoint, setEndpoint] = useState(initial.endpoint);
   const [bearerToken, setBearerToken] = useState(initial.bearerToken);
   const profile = localStorage.getItem("long-rot-reader-name") || "local";
@@ -2682,6 +2679,14 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
           <span><strong>{roleLabel(option)}</strong></span>
         </label>)}
       </fieldset>
+    </>}
+    {!isOwner && <>
+      <hr/><p className="eyebrow">Your access</p>
+      <p className="board-hint">You are a {roleLabel(realProfileRole(profile))}. Ask MaggotClaw for more and your app unlocks itself once he approves — there is nothing to copy or paste.</p>
+      <div className="form-actions">
+        <button className="primary" onClick={onRequestAccess}>Ask For More Access</button>
+        <button onClick={onEnterCode}>I Was Sent A Code</button>
+      </div>
     </>}
     <hr/><p className="eyebrow">Your settings</p>
     <p className="board-hint">Windows ties settings to the app's identity, so an update can leave them out of reach. This carries them across — and to a new computer.</p>

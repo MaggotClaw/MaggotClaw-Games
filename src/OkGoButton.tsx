@@ -79,6 +79,7 @@ export function OkGoButton({ readerName, onClose }: { readerName: string; onClos
     : "OK GO";
 
   return <main
+    title={note || (phase === "counting" ? "Press again to call it off" : "Press to approve")}
     className={`okgo-shell ${phase}`}
     // Dragging anywhere but the buttons moves the whole thing.
     data-tauri-drag-region
@@ -91,9 +92,6 @@ export function OkGoButton({ readerName, onClose }: { readerName: string; onClos
     <button className="okgo-button" onClick={press} title={phase === "counting" ? "Press again to call it off" : "Press to approve — three seconds to change your mind"}>
       {label}
     </button>
-    <div className="okgo-side">
-      <span className="okgo-note">{note || (phase === "counting" ? "Press again to stop" : "Approve")}</span>
-      <button className="okgo-close" onClick={onClose} title="Close">✕</button>
-    </div>
+    <button className="okgo-close" onClick={onClose} title="Close">✕</button>
   </main>;
 }
