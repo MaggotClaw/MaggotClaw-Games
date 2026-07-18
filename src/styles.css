@@ -59,6 +59,21 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .chat-rooms li button:hover { border-color: var(--mc-green, #00efb1); }
 .chat-rooms li button.active { background: #14241f; border-color: var(--mc-green, #00efb1); }
 .chat-inline-form { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: #0d1614; border: 1px solid #1e2c28; border-radius: 9px; }
+.directive-box { margin: 8px 0; padding: 14px 16px; background: #0d1614; border: 1px solid #1e2c28; border-radius: 12px; }
+.directive-box p { margin: 0 0 8px; color: var(--mc-white, #f2f6f4); font-size: .92rem; line-height: 1.55; }
+.tell-group { margin: 14px 0; }
+.tell-group h3 { margin: 0 0 8px; color: var(--mc-green-soft, #7fd9c4); font: 700 .82rem system-ui; text-transform: uppercase; letter-spacing: .06em; }
+.tell-card { margin: 8px 0; padding: 12px 14px; background: #0a100e; border: 1px solid #24352f; border-left-width: 4px; border-radius: 10px; }
+.tell-card.high { border-left-color: #ff8b6b; }
+.tell-card.medium { border-left-color: #ffd166; }
+.tell-card.low { border-left-color: #55625d; }
+.tell-card p { margin: 6px 0; color: var(--mc-white, #f2f6f4); }
+.tell-card blockquote { margin: 8px 0; padding-left: 12px; border-left: 2px solid #2c8d75; color: var(--mc-green-soft, #7fd9c4); font-style: italic; }
+.tell-card small { color: var(--mc-muted, #9aa7a2); }
+.sev { font-weight: 800; font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; }
+.sev.high { color: #ff8b6b; }
+.sev.medium { color: #ffd166; }
+.sev.low { color: var(--mc-muted, #9aa7a2); }
 .home-shell { position: relative; }
 .who-chip.home-corner { position: absolute; top: 14px; right: 16px; z-index: 5; }
 .reaction-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 6px 0; }

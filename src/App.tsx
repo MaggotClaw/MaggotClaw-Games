@@ -29,11 +29,12 @@ import { loadChapterQuestions, questionsForChapter, saveChapterQuestions } from 
 import { loadScheduledReleases, saveScheduledReleases } from "./readerCopies";
 import { postRelayMessage } from "./discordLink";
 import { latestProgressReports } from "./ChatScreen";
+import { auditForAI, auditProse, humanMakerSharedWithEditors, setHumanMakerSharedWithEditors, type AuditReport } from "./humanMaker";
 import { recordJoin } from "./contacts";
 import { hasProfilePin, isValidPin, setNickname, setProfilePin } from "./profileInfo";
 import { ReadSelectionButton } from "./ReadSelectionButton";
 
-type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "workspace-files" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock" | "chat" | "directions" | "idea";
+type Screen = "profile" | "home" | "projects" | "project-workspace" | "project-explorer" | "project-zero" | "project-review" | "workspace-files" | "library" | "reader" | "settings" | "comment" | "comments" | "talk" | "voice-targets" | "dashboard" | "request-access" | "unlock" | "chat" | "directions" | "idea" | "human-maker";
 
 function BrandLogo({ compact = false }: { compact?: boolean }) {
   return <img className={compact ? "brand-logo compact" : "brand-logo"} src="/maggotclaw-modern.png" alt="MaggotClaw Games" />;
@@ -1084,6 +1085,9 @@ export function App() {
           ? <button className="pill-button chip" onClick={() => { setViewAs(null); window.location.reload(); }}>Viewing as {roleLabel(role)} — back</button>
           : <button className="pill-button chip" onClick={() => setScreen("profile")}>{readerName || "Start Here"}</button>}
         {"__TAURI_INTERNALS__" in window && <button className="pill-button chip" onClick={() => { setIdeaText(""); setScreen("idea"); }}>Note To Self</button>}
+        {/* The author's own bench — owner-only unless he shares it with editors. */}
+        {(canPerform(role, "manage") || (humanMakerSharedWithEditors() && canPerform(role, "upload"))) &&
+          <button className="pill-button chip" onClick={() => setScreen("human-maker")}>Human Maker</button>}
       </section>
       {readerName === "Test Profile" && <div className="test-mode-banner">TEST PROFILE — LOCAL ONLY — NOTHING IS SYNCHRONIZED</div>}
       {discordWaiting > 0 && canPerform(role, "manage") && <section className="welcome-strip">
@@ -1132,6 +1136,10 @@ export function App() {
 
   if (screen === "project-explorer") {
     return <ProjectExplorer onBack={() => setScreen("project-workspace")} />;
+  }
+
+  if (screen === "human-maker") {
+    return <HumanMakerScreen readerName={readerName} role={role} onBack={() => setScreen("home")} />;
   }
 
   if (screen === "workspace-files") {
@@ -1541,6 +1549,138 @@ function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: Proj
   </main>;
 }
 
+// The Human Maker: the author's prose-audit bench. Runs his own Human Maker
+// codex against a chapter, entirely on this computer, and reports every
+// mechanical tell in his numbering — then hands the findings to the AI for the
+// Ok Go rewrite.
+function HumanMakerScreen({ readerName, role, onBack }: { readerName: string; role: ProjectRole; onBack: () => void }) {
+  const [docs, setDocs] = useState<ProjectDocument[]>([]);
+  const [chosen, setChosen] = useState("");
+  const [text, setText] = useState("");
+  const [report, setReport] = useState<AuditReport | null>(null);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [showDirective, setShowDirective] = useState(false);
+
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    void invoke<ProjectDocument[]>("list_project_documents")
+      .then((files) => setDocs(files.filter((f) => f.status === "downloaded" && /\.(txt|md)$/i.test(f.localRelativePath))))
+      .catch(() => undefined);
+  }, []);
+
+  async function loadChapter(relative: string) {
+    setChosen(relative);
+    setReport(null);
+    if (!relative) { setText(""); return; }
+    setBusy(true);
+    try {
+      setText(unwrapHardLines(await invoke<string>("read_project_document", { localRelativePath: relative })));
+      setNote("");
+    } catch {
+      setNote("That file could not be opened from the local workspace.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function runAudit() {
+    if (!text.trim()) { setNote("Pick a chapter or paste some prose first."); return; }
+    setReport(auditProse(text));
+    setNote("");
+  }
+
+  async function copyForAI() {
+    if (!report) return;
+    const brief = auditForAI(report, chosen ? chosen.split("/").pop()! : "this passage");
+    try {
+      await navigator.clipboard?.writeText(brief);
+      setNote("Audit copied. Paste it to Claude with the passage and say Ok Go for the humanizing pass.");
+    } catch {
+      setNote("The clipboard was not available.");
+    }
+  }
+
+  const grouped = report
+    ? [...new Map(report.findings.map((f) => [f.category, report.findings.filter((x) => x.category === f.category)])).entries()]
+    : [];
+
+  return <main className="app-shell project-shell">
+    <header className="topbar">
+      <button className="text-button" onClick={onBack}>← Back</button>
+      <span className="eyebrow">HUMAN MAKER</span>
+      <span className="who-chip">{readerName} · {roleLabel(role)}</span>
+    </header>
+    <section className="projects-heading">
+      <h1>Human Maker</h1>
+      <p>The de-machine filter from your own codex, run on this computer. Nothing leaves the machine.</p>
+    </section>
+
+    <section className="dash-section">
+      <button className="text-button" onClick={() => setShowDirective(!showDirective)}>{showDirective ? "▾" : "▸"} The Ward Directive And Your Standing Rules</button>
+      {showDirective && <div className="directive-box">
+        <p><strong>Ward Directive:</strong> Lyrical prose rooted in Southern storytelling. Raw emotional honesty — tender and brutally honest. Mythic undercurrents in the ordinary. Beauty inside imperfection. Intimate sensory language; emotion breathes through the narrative rather than being announced. Musical sentences whose rhythm rises and breaks. Grounded in this place and community, reaching toward universal truth. Elevated, never pretentious.</p>
+        <p><strong>Description density:</strong> dial at 4 — a few sharp sensory details, then move on.</p>
+        <p><strong>Name clarity:</strong> in crowded scenes use names, never an ambiguous "he" or "she".</p>
+        <p><strong>Mark time:</strong> state plainly when time passes, so the reader always knows when they are.</p>
+        <p className="board-hint">The filter never bans a technique outright — it bans the mechanical, compulsive, uniform use of it. Once a chapter is style; every page is a fingerprint.</p>
+      </div>}
+    </section>
+
+    <section className="dash-section">
+      <h2>What Am I Auditing?</h2>
+      <label>A chapter from your workspace
+        <select value={chosen} onChange={(event) => void loadChapter(event.target.value)}>
+          <option value="">— Choose a file, or paste below —</option>
+          {docs.map((doc) => <option key={doc.localRelativePath} value={doc.localRelativePath}>{doc.localRelativePath}</option>)}
+        </select>
+      </label>
+      <label>Or paste the prose
+        <textarea rows={8} value={text} placeholder="Paste a passage here…" onChange={(event) => { setText(event.target.value); setReport(null); }} />
+      </label>
+      <div className="form-actions">
+        <button className="primary" disabled={busy || !text.trim()} onClick={runAudit}>{busy ? "Opening…" : "Run The Audit"}</button>
+        {report && <button onClick={() => void copyForAI()}>Copy Audit For The Rewrite</button>}
+      </div>
+      {note && <p className="board-hint">{note}</p>}
+    </section>
+
+    {report && <>
+      <section className="workspace-card">
+        <div><span>Verdict</span><strong>{report.score}/100</strong><small>{report.verdict}</small></div>
+        <div><span>The passage</span><strong>{report.stats.words.toLocaleString()} words</strong><small>{report.stats.sentences} sentences · {report.stats.paragraphs} paragraphs · average {report.stats.avgSentenceWords} words a sentence</small></div>
+        <div><span>Rhythm</span><strong>Spread {report.stats.sentenceVariety}</strong><small>Under about 4 reads mechanical · {report.stats.emDashesPer1000} em-dashes per 1,000 words · {report.stats.singleLineParagraphs} single-line paragraphs</small></div>
+      </section>
+
+      <section className="dash-section">
+        <h2>Tells Found <span className="pending-badge">{report.findings.length}</span></h2>
+        {report.findings.length === 0
+          ? <div className="empty-state"><strong>No mechanical tells caught</strong><p>Now read it aloud against the checklist below — the tells that matter most are the ones no machine can see.</p></div>
+          : grouped.map(([category, items]) => <div key={category} className="tell-group">
+              <h3>{category}</h3>
+              {items.map((finding, index) => <article key={`${finding.tell}-${index}`} className={`tell-card ${finding.severity}`}>
+                <div className="comment-meta"><span>Tell {finding.tell} · {finding.title}</span><span className={`sev ${finding.severity}`}>{finding.severity === "high" ? "Strong" : finding.severity === "medium" ? "Clear" : "Light"}</span></div>
+                <p>{finding.detail}</p>
+                {finding.excerpt && <blockquote>“{finding.excerpt}”</blockquote>}
+                <small><strong>Fix:</strong> {finding.fix}</small>
+              </article>)}
+            </div>)}
+      </section>
+
+      <section className="dash-section">
+        <h2>Read Aloud For These</h2>
+        <p className="board-hint">No rule engine can catch these — they are the ones that decide whether the prose has a person behind it. Read the passage aloud and judge each.</p>
+        <ul className="request-list">
+          {report.checklist.map((item) => <li key={item.n} className="request-card">
+            <div className="request-who"><strong>Tell {item.n} · {item.title}</strong><span>{item.category}</span></div>
+            <p className="request-reason">{item.fix}</p>
+          </li>)}
+        </ul>
+      </section>
+    </>}
+  </main>;
+}
+
 function CodeBox({ label, code, hint }: { label: string; code: string; hint: string }) {
   const [copied, setCopied] = useState(false);
   async function copy() {
@@ -1905,6 +2045,7 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
   const [dropboxSecret, setDropboxSecret] = useState(savedDropbox?.appSecret ?? "");
   const [dropboxRefresh, setDropboxRefresh] = useState(savedDropbox?.refreshToken ?? "");
   const [dropboxNote, setDropboxNote] = useState("");
+  const [shareHumanMaker, setShareHumanMaker] = useState(humanMakerSharedWithEditors);
 
   async function importFromBridge() {
     try {
@@ -1969,6 +2110,9 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
     <hr/><p className="eyebrow">Updates</p>
     <UpdateChecker configurable />
     {isOwner && <>
+      <hr/><p className="eyebrow">Owner — Human Maker</p>
+      <label className="check-setting"><input type="checkbox" checked={shareHumanMaker} onChange={(event) => { setShareHumanMaker(event.target.checked); setHumanMakerSharedWithEditors(event.target.checked); }} /> Let editors use the Human Maker too</label>
+      <small className="board-hint">Off by default — the prose bench is yours alone. Turn it on to hand it to a trusted editor.</small>
       <hr/><p className="eyebrow">Owner — access requests via Discord</p>
       <label>Discord webhook for the requests channel
         <input value={webhook} placeholder="https://discord.com/api/webhooks/…" onChange={(event) => setWebhook(event.target.value)} autoComplete="off" />
