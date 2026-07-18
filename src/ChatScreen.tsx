@@ -7,6 +7,7 @@ import {
 import { makeMessagingKey, parseMessagingKey } from "./accessCodes";
 import { setDropboxCreds } from "./mcp";
 import { getCatalogUrl, setCatalogUrl } from "./readerLinks";
+import { getUpdateManifestUrl, setUpdateManifestUrl } from "./updates";
 import { addContact, directMessageTargets, loadContacts, recordJoin, removeContact, type Contact } from "./contacts";
 import { ReadSelectionButton } from "./ReadSelectionButton";
 
@@ -215,6 +216,8 @@ export function ChatScreen({ role, name, onBack, onOpenDiscord }: { role: Projec
     setRelayChannelId(key.channelId);
     // The reader catalog link: read-only book downloads with no secrets held.
     if (key.catalogUrl) setCatalogUrl(key.catalogUrl);
+    // So their app can find new versions without being told where to look.
+    if (key.updateUrl) setUpdateManifestUrl(key.updateUrl);
     // Full file keys only ever arrive on an owner/editor key.
     if (key.dropbox) setDropboxCreds(key.dropbox);
     setConnected(true);
@@ -231,7 +234,8 @@ export function ChatScreen({ role, name, onBack, onOpenDiscord }: { role: Projec
     const code = makeMessagingKey({
       botToken: getBotToken(),
       channelId: getRelayChannelId(),
-      catalogUrl: getCatalogUrl() || undefined
+      catalogUrl: getCatalogUrl() || undefined,
+      updateUrl: getUpdateManifestUrl() || undefined
     });
     try {
       await navigator.clipboard?.writeText(code);

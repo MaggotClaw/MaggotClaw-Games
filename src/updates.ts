@@ -1,6 +1,9 @@
-// Check-for-updates against a GitHub repository's latest Release. Keeps only the
-// small, pure helpers here; the network call and browser-open run through Tauri
-// commands (see fetch_latest_release / open_url in the Rust side).
+// Check-for-updates, from either of two places.
+//
+// The author publishes the installer to his own Dropbox and, if he wants,
+// GitHub as well. The app looks at Dropbox first and falls back to GitHub, so
+// either can be switched off later without stranding anybody. Both sources are
+// settings, not baked-in facts.
 
 import { compareVersions } from "./projectDocs";
 
@@ -27,6 +30,44 @@ export function setUpdateRepo(repo: string): void {
 
 export function isValidRepo(repo: string): boolean {
   return /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repo.trim());
+}
+
+// ---- The author's own channel ---------------------------------------------
+// A small file on Dropbox describing the newest build. Its address travels in
+// the Messaging Key and the reader catalog, so friends never type anything.
+
+const MANIFEST_KEY = "mcg-update-manifest-url";
+
+export interface UpdateManifest {
+  version: string;
+  installerUrl: string;
+  notes?: string;
+}
+
+export function getUpdateManifestUrl(): string {
+  try { return (localStorage.getItem(MANIFEST_KEY) || "").trim(); } catch { return ""; }
+}
+
+export function setUpdateManifestUrl(url: string): void {
+  try {
+    if (url.trim()) localStorage.setItem(MANIFEST_KEY, url.trim());
+    else localStorage.removeItem(MANIFEST_KEY);
+  } catch { /* ignore */ }
+}
+
+// Pure: read the published file, keeping only a sane version and a Dropbox
+// installer address.
+export function parseManifest(json: string): UpdateManifest | null {
+  try {
+    const raw = JSON.parse(json) as Partial<UpdateManifest>;
+    const version = stripV(String(raw?.version ?? ""));
+    const installerUrl = String(raw?.installerUrl ?? "");
+    if (!/^[0-9]+(\.[0-9]+)*(-[A-Za-z0-9.]+)?$/.test(version)) return null;
+    if (!/^https:\/\/[^\s]*dropbox(usercontent)?\.com\//.test(installerUrl)) return null;
+    return { version, installerUrl, notes: typeof raw?.notes === "string" ? raw.notes : "" };
+  } catch {
+    return null;
+  }
 }
 
 // A stable link to send people: GitHub always redirects /releases/latest to the
@@ -74,19 +115,46 @@ export function isNewer(latest: string, current: string): boolean {
 }
 
 export async function checkForUpdates(current: string): Promise<UpdateResult> {
+  const manifestUrl = getUpdateManifestUrl();
   const repo = getUpdateRepo();
-  if (!isValidRepo(repo)) return { state: "unconfigured" };
+  if (!manifestUrl && !isValidRepo(repo)) return { state: "unconfigured" };
   if (!("__TAURI_INTERNALS__" in window)) {
     return { state: "error", message: "Open the installed MaggotClaw Games app to check for updates." };
   }
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const json = await invoke<ReleaseJson>("fetch_latest_release", { repo });
-    const info = parseLatestRelease(json);
-    return isNewer(info.version, current) ? { state: "available", info } : { state: "current", current };
-  } catch (error) {
-    return { state: "error", message: error instanceof Error ? error.message : "The update check could not be completed." };
+  const { invoke } = await import("@tauri-apps/api/core");
+  let firstProblem = "";
+
+  // The author's own channel first.
+  if (manifestUrl) {
+    try {
+      const manifest = parseManifest(await invoke<string>("fetch_dropbox_link_text", { url: manifestUrl }));
+      if (manifest) {
+        const info: UpdateInfo = {
+          version: manifest.version,
+          url: manifest.installerUrl,
+          page: manifest.installerUrl,
+          notes: manifest.notes ?? ""
+        };
+        return isNewer(info.version, current) ? { state: "available", info } : { state: "current", current };
+      }
+      firstProblem = "The update file could not be read.";
+    } catch (error) {
+      firstProblem = error instanceof Error ? error.message : "The update file could not be reached.";
+    }
   }
+
+  // Then GitHub, so either source can be retired without stranding anyone.
+  if (isValidRepo(repo)) {
+    try {
+      const json = await invoke<ReleaseJson>("fetch_latest_release", { repo });
+      const info = parseLatestRelease(json);
+      return isNewer(info.version, current) ? { state: "available", info } : { state: "current", current };
+    } catch (error) {
+      const second = error instanceof Error ? error.message : "The update check could not be completed.";
+      return { state: "error", message: firstProblem || second };
+    }
+  }
+  return { state: "error", message: firstProblem || "The update check could not be completed." };
 }
 
 export async function openDownload(url: string): Promise<void> {

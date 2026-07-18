@@ -15,6 +15,7 @@ import { activeProject, projectFile } from "./projects";
 import { effectiveReleased, loadScheduledReleases, loadUnlockedChapters, saveScheduledReleases, saveUnlockedChapters, releasesPath, type ScheduledRelease } from "./readerCopies";
 import { loadPronunciations, savePronunciations, type Pronunciation } from "./pronunciation";
 import { loadChapterQuestions, saveChapterQuestions, sanitizeChapterQuestions, type ChapterQuestions } from "./chapterQuestions";
+import { getUpdateManifestUrl, setUpdateManifestUrl } from "./updates";
 import type { DownloadProgress } from "./projectWorkspace";
 
 export interface CatalogFile {
@@ -35,6 +36,8 @@ export interface ReaderCatalog {
   scheduled?: ScheduledRelease[];
   // The author's end-of-chapter questions.
   questions?: ChapterQuestions;
+  // Where new versions of the app are published.
+  updateUrl?: string;
 }
 
 export const catalogPath = () => projectFile("reader-catalog.json");
@@ -68,7 +71,8 @@ export function parseCatalog(json: string): ReaderCatalog | null {
       ? (raw.scheduled as ScheduledRelease[]).filter((s) => s && typeof s.chapter === "number" && /^\d{4}-\d{2}-\d{2}$/.test(s.on ?? ""))
       : undefined;
     const questions = raw.questions ? sanitizeChapterQuestions(raw.questions) : undefined;
-    return { updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "", released, files, pronunciations, scheduled, questions };
+    const updateUrl = typeof raw.updateUrl === "string" && raw.updateUrl.startsWith("https://") ? raw.updateUrl : undefined;
+    return { updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "", released, files, pronunciations, scheduled, questions, updateUrl };
   } catch {
     return null;
   }
@@ -126,7 +130,8 @@ export async function publishReaderLinks(
     files,
     pronunciations: loadPronunciations(),
     scheduled: loadScheduledReleases(),
-    questions: loadChapterQuestions()
+    questions: loadChapterQuestions(),
+    updateUrl: getUpdateManifestUrl() || undefined
   };
   onProgress({ stage: "Publishing the catalog", completed, total: shareable.length, skipped: 0 });
   await client.writeText(catalogPath(), JSON.stringify(catalog, null, 2));
@@ -151,6 +156,7 @@ export async function fetchCatalog(): Promise<ReaderCatalog | null> {
     }
     if (catalog.pronunciations) savePronunciations(catalog.pronunciations);
     if (catalog.questions) saveChapterQuestions(catalog.questions);
+    if (catalog.updateUrl) setUpdateManifestUrl(catalog.updateUrl);
   }
   return catalog;
 }

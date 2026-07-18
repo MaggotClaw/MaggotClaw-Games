@@ -286,9 +286,14 @@ async fn post_discord_bot_message(
 async fn download_and_install_update(url: String) -> Result<(), String> {
     let parsed = url::Url::parse(&url).map_err(|_| "The download address is invalid.".to_string())?;
     let host = parsed.host_str().unwrap_or("");
-    let allowed = host == "github.com" || host.ends_with(".githubusercontent.com");
+    // Updates come from the author's own Dropbox or from GitHub; nowhere else.
+    let allowed = host == "github.com"
+        || host.ends_with(".githubusercontent.com")
+        || host == "dropbox.com"
+        || host.ends_with(".dropbox.com")
+        || host.ends_with(".dropboxusercontent.com");
     if parsed.scheme() != "https" || !allowed {
-        return Err("Only GitHub download addresses are allowed.".to_string());
+        return Err("Only the author's own download addresses are allowed.".to_string());
     }
     let response = reqwest::Client::new()
         .get(parsed)

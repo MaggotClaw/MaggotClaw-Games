@@ -39,6 +39,8 @@ export interface MessagingPayload {
   // The reader catalog link: read-only file access with no secrets at all.
   // This is what keys normally carry for friends.
   catalogUrl?: string;
+  // Where to look for new versions of the app itself.
+  updateUrl?: string;
   // Full Dropbox keys — read AND write. Only for the owner's own machines and
   // trusted editors; never included in a normal friend key.
   dropbox?: {
@@ -145,6 +147,7 @@ export function parseUnlockCode(code: string): UnlockPayload | null {
 export function makeMessagingKey(payload: MessagingPayload): string {
   const body: Record<string, unknown> = { t: payload.botToken, c: payload.channelId };
   if (payload.catalogUrl?.trim()) body.cu = payload.catalogUrl.trim();
+  if (payload.updateUrl?.trim()) body.uu = payload.updateUrl.trim();
   if (payload.dropbox?.appKey && payload.dropbox.appSecret && payload.dropbox.refreshToken) {
     body.dk = payload.dropbox.appKey;
     body.ds = payload.dropbox.appSecret;
@@ -163,7 +166,8 @@ export function parseMessagingKey(code: string): MessagingPayload | null {
     ? { appKey: raw.dk.trim(), appSecret: raw.ds.trim(), refreshToken: raw.dr.trim() }
     : undefined;
   const catalogUrl = typeof raw.cu === "string" && raw.cu.trim().startsWith("https://") ? raw.cu.trim() : undefined;
-  return { botToken: raw.t.trim(), channelId: raw.c, catalogUrl, dropbox };
+  const updateUrl = typeof raw.uu === "string" && raw.uu.trim().startsWith("https://") ? raw.uu.trim() : undefined;
+  return { botToken: raw.t.trim(), channelId: raw.c, catalogUrl, updateUrl, dropbox };
 }
 
 // An unlock code is meant for one person. Compare forgivingly (case/spacing) so

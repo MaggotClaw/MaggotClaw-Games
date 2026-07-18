@@ -22,6 +22,20 @@ export interface Walkthrough {
 
 export const WALKTHROUGHS: Walkthrough[] = [
   {
+    id: "dropbox-sharing",
+    name: "Turning On Dropbox Sharing",
+    forOwner: true,
+    why: "Reader Links and app updates can make the read-only links your friends use.",
+    steps: [
+      { say: "Your Dropbox app can read and write your files, but it is not yet allowed to make sharing links. Reader Links and app updates both need that. This fixes it — about three minutes.", screen: "home" },
+      { say: "I have opened the Dropbox App Console. Sign in if it asks, then click your app in the list.", open: "https://www.dropbox.com/developers/apps", heads: "If you see more than one app, pick the one you made for this program." },
+      { say: "Click the Permissions tab along the top." },
+      { say: "Tick sharing.read and sharing.write. Leave everything already ticked exactly as it is. Then press Submit at the bottom.", heads: "Do not untick anything — the app still needs its file permissions." },
+      { say: "Permissions only apply to a new sign-in, so the app needs a fresh key. Tell your assistant \"the Dropbox permissions are done\" and it will run the key script and update everything for you.", heads: "The script prints a link, you approve it in your browser, and paste one code back. Your assistant handles the rest." },
+      { say: "Once the new key is in, Publish Reader Links and app updates will both work. Run First-Time Setup next.", screen: "home" }
+    ]
+  },
+  {
     id: "settings-again",
     name: "Setting Up After An Update",
     forOwner: true,
