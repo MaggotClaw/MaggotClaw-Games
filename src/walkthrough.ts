@@ -7,6 +7,8 @@
 export interface Step {
   say: string;              // what to do, in plain words
   screen?: string;          // the screen to open for them
+  open?: string;            // a web page to open for them
+  copy?: string;            // text put on their clipboard, ready to paste
   heads?: string;           // a warning or aside worth reading first
 }
 
@@ -19,6 +21,22 @@ export interface Walkthrough {
 }
 
 export const WALKTHROUGHS: Walkthrough[] = [
+  {
+    id: "settings-again",
+    name: "Setting Up After An Update",
+    forOwner: true,
+    why: "Everything you had before is back — your name, your role, your keys.",
+    steps: [
+      { say: "This version changed the app's identity, so Windows treats it as new and your settings look empty. Nothing is lost — they are in a file, and this takes about a minute.", screen: "home" },
+      { say: "Press Import My Settings near the bottom of this page. It reads the backup file from your Documents folder and puts everything back.", screen: "settings", heads: "If it says no file was found, carry on — the next steps set things up by hand." },
+      { say: "Check the top of the page: your name should be back, and the who-chip on the main page should say Author / Owner.", screen: "settings" },
+      { say: "If the Discord key did not come back, open the Discord Developer Portal — I will open it for you. Sign in, choose the MaggotClaw Games application, open Bot on the left, and press Reset Token. Copy the new token.", open: "https://discord.com/developers/applications", heads: "Resetting the token stops the old one working. That is fine — only this app uses it." },
+      { say: "Paste that token into Discord bot key under Owner, then press Save.", screen: "settings" },
+      { say: "Now press Import From The Bridge under Owner — Project Files, then Save. That restores the Dropbox connection without typing anything.", screen: "settings" },
+      { say: "Last: press Export My Settings. That writes a fresh backup so the next update is a single button.", screen: "settings" },
+      { say: "You are back. Everything else — people, pronunciations, releases — came back with the import.", screen: "home" }
+    ]
+  },
   {
     id: "reader-start",
     name: "Getting Started",

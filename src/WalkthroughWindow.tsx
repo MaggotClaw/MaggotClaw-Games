@@ -25,6 +25,14 @@ export function WalkthroughWindow({ isOwner, onClose }: { isOwner: boolean; onCl
     if (!chosen) return;
     const step = chosen.steps[clampStep(chosen, index)];
     if (step?.screen) void emit("mcg://go-to-screen", step.screen).catch(() => undefined);
+    // A step can open the page you need and put the text you must paste on
+    // your clipboard, so there is nothing to hunt for or type.
+    if (step?.open) {
+      void import("@tauri-apps/api/core")
+        .then(({ invoke }) => invoke("open_url", { url: step.open }))
+        .catch(() => undefined);
+    }
+    if (step?.copy) void navigator.clipboard?.writeText(step.copy).catch(() => undefined);
   }, [chosen, index]);
 
   function finish() {

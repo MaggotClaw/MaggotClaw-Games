@@ -101,7 +101,7 @@ fn workspace_root() -> Result<PathBuf, String> {
         .ok_or_else(|| "Windows could not locate your user folder.".to_string())?;
     Ok(profile
         .join("Documents")
-        .join("MaggotClaw Games Projects")
+        .join("MaggotClaw Games")
         .join(project_name()))
 }
 
@@ -395,6 +395,41 @@ pub fn save_idea_note(content: String) -> Result<String, String> {
     let body = format!("# Idea\n\n{trimmed}\n");
     write_copy(&folder.join(&name), body.as_bytes())?;
     Ok(format!("02 Working Files/Ideas/{name}"))
+}
+
+/// The settings backup file, kept in Documents beside the projects folder.
+fn settings_backup_path() -> Result<PathBuf, String> {
+    let profile = env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .ok_or_else(|| "Windows could not locate your user folder.".to_string())?;
+    Ok(profile
+        .join("Documents")
+        .join("MaggotClaw Games Settings Backup.json"))
+}
+
+/// Writes every setting worth keeping to one file, so a new install — or a new
+/// computer — can pick them all back up.
+#[tauri::command]
+pub fn export_settings(contents: String) -> Result<String, String> {
+    let path = settings_backup_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|_| "The Documents folder could not be opened.".to_string())?;
+    }
+    fs::write(&path, contents.as_bytes())
+        .map_err(|_| "The settings file could not be saved.".to_string())?;
+    Ok(path.display().to_string())
+}
+
+#[tauri::command]
+pub fn import_settings() -> Result<String, String> {
+    let path = settings_backup_path()?;
+    fs::read_to_string(&path).map_err(|_| {
+        format!(
+            "No settings file was found at {}.",
+            path.display()
+        )
+    })
 }
 
 /// Writes a file anywhere inside the local workspace. Used by the app and by

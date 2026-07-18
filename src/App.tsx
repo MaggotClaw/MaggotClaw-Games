@@ -31,6 +31,7 @@ import { postRelayMessage } from "./discordLink";
 import { latestProgressReports } from "./ChatScreen";
 import { auditForAI, auditProse, humanMakerSharedWithEditors, setHumanMakerSharedWithEditors, type AuditReport } from "./humanMaker";
 import { OkGoButton } from "./OkGoButton";
+import { applySettings, collectSettings, describeBundle } from "./settingsFile";
 import { WalkthroughWindow } from "./WalkthroughWindow";
 import { loadPeople, parseProfileMessage, publishPeople, removePerson, savePeople, sortedPeople, upsertPerson, type Person } from "./people";
 import { addFeedback, diagnosticsReport, FEEDBACK_AREAS, feedbackMessage, loadErrors, loadFeedback, loadUsage, markFeedbackSent, noteUsage, setShareDiagnostics, shareDiagnostics, watchForErrors } from "./feedback";
@@ -2548,6 +2549,7 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
   const [dropboxRefresh, setDropboxRefresh] = useState(savedDropbox?.refreshToken ?? "");
   const [dropboxNote, setDropboxNote] = useState("");
   const [shareHumanMaker, setShareHumanMaker] = useState(humanMakerSharedWithEditors);
+  const [settingsNote, setSettingsNote] = useState("");
 
   async function importFromBridge() {
     try {
@@ -2609,6 +2611,29 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
         </label>)}
       </fieldset>
     </>}
+    <hr/><p className="eyebrow">Your settings</p>
+    <p className="board-hint">Windows ties settings to the app's identity, so an update can leave them out of reach. This carries them across — and to a new computer.</p>
+    <div className="form-actions">
+      <button onClick={() => {
+        void import("@tauri-apps/api/core")
+          .then(({ invoke }) => invoke<string>("export_settings", { contents: JSON.stringify(collectSettings(), null, 1) }))
+          .then((where) => setSettingsNote(`Saved to ${where}. Keep it private — it holds your keys.`))
+          .catch(() => setSettingsNote("The settings file could not be saved."));
+      }}>Export My Settings</button>
+      <button onClick={() => {
+        void import("@tauri-apps/api/core")
+          .then(({ invoke }) => invoke<string>("import_settings"))
+          .then((text) => {
+            const bundle = JSON.parse(text) as Record<string, string>;
+            const restored = applySettings(bundle);
+            setSettingsNote(restored
+              ? `Restored ${restored} settings — ${describeBundle(bundle)}. Close and reopen the app to see everything.`
+              : "That file held nothing this app recognises.");
+          })
+          .catch((error) => setSettingsNote(message(error)));
+      }}>Import My Settings</button>
+    </div>
+    {settingsNote && <small className="board-hint">{settingsNote}</small>}
     <hr/><p className="eyebrow">Updates</p>
     <UpdateChecker configurable />
     {isOwner && <>

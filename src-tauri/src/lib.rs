@@ -499,6 +499,8 @@ pub fn run() {
             project_workspace::archive_approved_upload,
             project_workspace::retire_project_file,
             project_workspace::set_active_project,
+            project_workspace::export_settings,
+            project_workspace::import_settings,
             project_workspace::save_idea_note,
             project_workspace::write_workspace_file,
             project_workspace::move_workspace_file,
