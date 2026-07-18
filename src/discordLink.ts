@@ -141,6 +141,70 @@ export async function postUnlockToDiscord(name: string, roleLabelText: string, u
   return false;
 }
 
+// ---- Approvals that apply themselves ---------------------------------------
+//
+// The owner picks a role and presses Approve. A grant goes into the channel;
+// the person's own app sees it, checks the unlock code really was issued to
+// them, and raises their role on the spot. Nobody copies a code any more.
+
+export interface RoleGrant {
+  messageId: string;
+  name: string;
+  code: string;      // the unlock code, which carries the name and role
+  sentAt: string;
+}
+
+export function grantMessage(name: string, roleLabelText: string, unlockCode: string): string {
+  return `**Approved:** ${name} → ${roleLabelText}\n[GRANT] ${name} :: ${unlockCode}\n${name}, your app will unlock itself the next time you open it — there is nothing to copy.`;
+}
+
+// Pure: find grants among raw Discord messages. Exported for tests.
+export function parseGrants(
+  messages: Array<{ id?: string; content?: string; timestamp?: string }>
+): RoleGrant[] {
+  const found: RoleGrant[] = [];
+  for (const message of messages) {
+    const match = /\[GRANT\]\s+(.+?)\s+::\s+(MCG-KEY-[A-Za-z0-9_-]+-[A-Za-z0-9_-]+)/.exec(message?.content ?? "");
+    if (!match) continue;
+    found.push({
+      messageId: message.id ?? "",
+      name: match[1].trim(),
+      code: match[2],
+      sentAt: message.timestamp ?? ""
+    });
+  }
+  return found;
+}
+
+export async function postRoleGrant(name: string, roleLabelText: string, unlockCode: string): Promise<boolean> {
+  if (!("__TAURI_INTERNALS__" in window)) return false;
+  const { invoke } = await import("@tauri-apps/api/core");
+  const content = grantMessage(name, roleLabelText, unlockCode);
+  try {
+    if (discordReadingConfigured()) {
+      await invoke("post_discord_bot_message", { botToken: getBotToken(), channelId: getRequestsChannelId(), content });
+      return true;
+    }
+    const url = getRequestWebhook();
+    if (isDiscordWebhook(url)) {
+      await invoke("post_discord_webhook", { url, content });
+      return true;
+    }
+  } catch { /* fall through */ }
+  return false;
+}
+
+// Anyone with the messaging key can look for a grant addressed to them.
+export async function fetchRoleGrants(): Promise<RoleGrant[]> {
+  if (!getBotToken() || !("__TAURI_INTERNALS__" in window)) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  const messages = await invoke<Array<{ id?: string; content?: string; timestamp?: string }>>(
+    "fetch_discord_messages",
+    { botToken: getBotToken(), channelId: getRequestsChannelId(), limit: 100, after: null }
+  );
+  return parseGrants(Array.isArray(messages) ? messages : []);
+}
+
 // A decline answered out loud: the requester's wait ends with a message
 // instead of silence.
 export async function postUnlockDecline(name: string): Promise<boolean> {

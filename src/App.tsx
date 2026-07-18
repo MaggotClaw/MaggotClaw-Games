@@ -18,7 +18,7 @@ import type { ParsedDoc, ProjectDocument } from "./projectDocs";
 import { invoke } from "@tauri-apps/api/core";
 import { UpdateChecker } from "./UpdateChecker";
 import { ChatScreen } from "./ChatScreen";
-import { getDiscordName, setDiscordName, getRequestWebhook, setRequestWebhook, isDiscordWebhook, requestAnnouncement, sendRequestToDiscord, fetchDiscordRequests, postUnlockToDiscord, postUnlockDecline, markMessageHandled, discordReadingConfigured, getBotToken, setBotToken, getRequestsChannelId, setRequestsChannelId, getRelayChannelId, setRelayChannelId, messagingConnected, type DiscordRequestMessage } from "./discordLink";
+import { getDiscordName, setDiscordName, getRequestWebhook, setRequestWebhook, isDiscordWebhook, requestAnnouncement, sendRequestToDiscord, fetchDiscordRequests, postUnlockToDiscord, postUnlockDecline, postRoleGrant, fetchRoleGrants, markMessageHandled, discordReadingConfigured, getBotToken, setBotToken, getRequestsChannelId, setRequestsChannelId, getRelayChannelId, setRelayChannelId, messagingConnected, type DiscordRequestMessage } from "./discordLink";
 import { checkProjectSync, syncNote } from "./startupSync";
 import { ACCESS_LEVEL_LABELS, fetchSharedAccessMap, loadAccessMap, publishAccessMap, setFileAccess, type FileAccessMap } from "./fileAccess";
 import { getNickname } from "./profileInfo";
@@ -134,7 +134,7 @@ async function openWalkthroughWindow(): Promise<void> {
   new WebviewWindow("walkthrough", {
     url: "index.html#walkthrough",
     title: "Show Me How",
-    width: 380, height: 340, resizable: true, decorations: false,
+    width: 560, height: 500, resizable: true, decorations: false,
     transparent: true, shadow: false, alwaysOnTop: true, center: false, focus: true
   });
 }
@@ -150,9 +150,9 @@ async function openOkGoWindow(): Promise<void> {
   new WebviewWindow("okgo", {
     url: "index.html#okgo",
     title: "OK GO",
-    width: 250,
-    height: 110,
-    resizable: false,
+    width: 320,
+    height: 140,
+    resizable: true,
     decorations: false,
     transparent: true,
     shadow: false,
@@ -453,6 +453,18 @@ export function App() {
     }
     if (canPerform(realProfileRole(readerName), "manage") && discordReadingConfigured()) {
       void fetchDiscordRequests().then((found) => setDiscordWaiting(found.length)).catch(() => undefined);
+    } else if (messagingConnected()) {
+      // Approved somewhere else? The app unlocks itself — nothing to copy.
+      void fetchRoleGrants().then((grants) => {
+        for (const grant of grants) {
+          const payload = parseUnlockCode(grant.code);
+          if (!payload || !unlockMatchesProfile(payload, readerName)) continue;
+          if (ROLE_ORDER.indexOf(payload.role) <= ROLE_ORDER.indexOf(realProfileRole(readerName))) continue;
+          setProfileRole(readerName, payload.role);
+          setStatus(`MaggotClaw approved you — you are now ${roleLabel(payload.role)}. Everything new is unlocked.`);
+          break;
+        }
+      }).catch(() => undefined);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readerName]);
@@ -1225,7 +1237,7 @@ export function App() {
   }
 
   if (screen === "profile") {
-    return <Profile initial={readerName} onContinue={saveProfile} />;
+    return <Profile initial={readerName} onContinue={saveProfile} onCancel={readerName ? () => setScreen("home") : undefined} />;
   }
 
   if (screen === "talk") {
@@ -1835,7 +1847,7 @@ ${item.transcriptionConfirmed}`;
   );
 }
 
-function Profile({ initial, onContinue }: { initial: string; onContinue: (info: { name: string; discordName: string; wantedRole: ProjectRole; nickname: string; pin: string; readingSpeed: number; details: ReaderProfile }) => void }) {
+function Profile({ initial, onContinue, onCancel }: { initial: string; onCancel?: () => void; onContinue: (info: { name: string; discordName: string; wantedRole: ProjectRole; nickname: string; pin: string; readingSpeed: number; details: ReaderProfile }) => void }) {
   const [name, setName] = useState(initial);
   // A returning person's saved details come back with them — revisiting this
   // screen must never silently reset anything.
@@ -1864,6 +1876,7 @@ function Profile({ initial, onContinue }: { initial: string; onContinue: (info: 
   const pinOk = pinAlreadySet || (isValidPin(pin) && pin === pinAgain);
   const pinProblem = !pinAlreadySet && pin && (!isValidPin(pin) ? "The PIN is exactly four digits." : pin !== pinAgain ? "The two PINs do not match yet." : "");
   return <main className="app-shell profile-screen">
+    {onCancel && <button className="text-button mode-back" onClick={onCancel}>← Back</button>}
     <BrandLogo />
     <div className="love-banner" role="status">Whatever you do, don't forget… <strong>MaggotClaw Loves You!!!</strong></div>
     <div className="step-row" aria-label={`Step ${step} of 3`}>
@@ -2292,6 +2305,7 @@ function OwnerDashboard({ requests, onDecide, onBack, client, onReleasesChanged 
   const [incoming, setIncoming] = useState<ReturnType<typeof parseRequestCode>>(null);
   const [codeError, setCodeError] = useState("");
   const [granted, setGranted] = useState<{ name: string; role: ProjectRole; code: string } | null>(null);
+  const [pastedRole, setPastedRole] = useState<ProjectRole | null>(null);
 
   function readCode() {
     const parsed = parseRequestCode(pasted);
@@ -2306,6 +2320,7 @@ function OwnerDashboard({ requests, onDecide, onBack, client, onReleasesChanged 
   useEffect(() => { if (discordReadingConfigured()) void checkDiscord(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   const [inboxBusy, setInboxBusy] = useState(false);
   const [inboxNote, setInboxNote] = useState("");
+  const [grantRoles, setGrantRoles] = useState<Record<string, ProjectRole>>({});
   const [released, setReleased] = useState<number[]>(loadUnlockedChapters);
   const [releaseBusy, setReleaseBusy] = useState(false);
   const [releaseNote, setReleaseNote] = useState("");
@@ -2387,20 +2402,22 @@ function OwnerDashboard({ requests, onDecide, onBack, client, onReleasesChanged 
     }
   }
 
-  async function decideDiscordRequest(item: DiscordRequestMessage, approve: boolean) {
+  async function decideDiscordRequest(item: DiscordRequestMessage, approve: boolean, chosenRole?: ProjectRole) {
     const parsed = parseRequestCode(item.code);
     if (!parsed) { setInboxNote("That message's code is damaged — handle it by hand in Discord."); return; }
     if (approve) {
+      // The owner's choice wins over whatever they asked for.
+      const role = chosenRole ?? grantRoles[item.messageId] ?? parsed.requestedRole;
       // Codes posted into the shared channel never carry the messaging key —
       // the key travels privately via Copy Messaging Key in Messages.
-      const unlock = makeUnlockCode({ name: parsed.name, role: parsed.requestedRole });
-      recordJoin(parsed.name, "", parsed.requestedRole);
-      const posted = await postUnlockToDiscord(parsed.name, roleLabel(parsed.requestedRole), unlock);
+      const unlock = makeUnlockCode({ name: parsed.name, role });
+      recordJoin(parsed.name, "", role);
+      const posted = await postRoleGrant(parsed.name, roleLabel(role), unlock);
       setInboxNote(posted
-        ? `Approved. The unlock code was posted in Discord for ${parsed.name}.`
+        ? `Approved. ${parsed.name} is now ${roleLabel(role)} — their app unlocks itself, nothing to copy.`
         : "Approved, but Discord could not be reached — the request stays in the inbox; send the code by hand.");
       if (!posted) {
-        setGranted({ name: parsed.name, role: parsed.requestedRole, code: unlock });
+        setGranted({ name: parsed.name, role, code: unlock });
         // Not marked handled: if the owner walks away, the request comes back
         // on the next check instead of vanishing unanswered.
         return;
@@ -2432,6 +2449,9 @@ function OwnerDashboard({ requests, onDecide, onBack, client, onReleasesChanged 
                 {parsed?.reason && <p className="request-reason">"{parsed.reason}"</p>}
                 <time>{item.sentAt ? new Date(item.sentAt).toLocaleString() : ""} · via Discord ({item.author})</time>
                 <div className="request-actions">
+                  <label>Make them<select value={grantRoles[item.messageId] ?? parsed?.requestedRole ?? "reader"} onChange={(event) => setGrantRoles({ ...grantRoles, [item.messageId]: event.target.value as ProjectRole })}>
+                    {ROLE_ORDER.filter((r) => r !== "administrator").map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+                  </select></label>
                   <button onClick={() => void decideDiscordRequest(item, false)}>Decline</button>
                   <button className="primary" onClick={() => void decideDiscordRequest(item, true)}>Approve</button>
                 </div>
@@ -2452,15 +2472,24 @@ function OwnerDashboard({ requests, onDecide, onBack, client, onReleasesChanged 
         <div className="request-who"><strong>{incoming.name}</strong><span>{roleLabel(incoming.currentRole)} → {roleLabel(incoming.requestedRole)}</span></div>
         {incoming.reason && <p className="request-reason">"{incoming.reason}"</p>}
         <div className="request-actions">
-          <button onClick={() => { setIncoming(null); setPasted(""); }}>Decline</button>
-          <button className="primary" onClick={() => { recordJoin(incoming.name, "", incoming.requestedRole); setGranted({ name: incoming.name, role: incoming.requestedRole, code: makeUnlockCode({ name: incoming.name, role: incoming.requestedRole, messaging: ownerMessagingPayload() }) }); }}>Approve</button>
+          <label>Make them<select value={pastedRole ?? incoming.requestedRole} onChange={(event) => setPastedRole(event.target.value as ProjectRole)}>
+            {ROLE_ORDER.filter((r) => r !== "administrator").map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+          </select></label>
+          <button onClick={() => { setIncoming(null); setPasted(""); setPastedRole(null); }}>Decline</button>
+          <button className="primary" onClick={() => {
+            const role = pastedRole ?? incoming.requestedRole;
+            recordJoin(incoming.name, "", role);
+            const unlock = makeUnlockCode({ name: incoming.name, role, messaging: ownerMessagingPayload() });
+            void postRoleGrant(incoming.name, roleLabel(role), unlock);
+            setGranted({ name: incoming.name, role, code: unlock });
+          }}>Approve</button>
         </div>
       </div>}
 
       {granted && <CodeBox
         label={`Unlock code for ${granted.name} — ${roleLabel(granted.role)}`}
         code={granted.code}
-        hint={`Send this back to ${granted.name}. They paste it into “Enter unlock code”.`}
+        hint={`Only needed if their app cannot reach Discord. Normally their app unlocks itself — send this if they say it did not.`}
       />}
     </section>
 

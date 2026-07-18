@@ -42,9 +42,9 @@ export function WalkthroughWindow({ isOwner, onClose }: { isOwner: boolean; onCl
   }
 
   if (!chosen) {
-    return <main className="walk-shell" onPointerDown={(event) => {
-      if ((event.target as HTMLElement).closest("button")) return;
-      if ("__TAURI_INTERNALS__" in window) { event.preventDefault(); void getCurrentWindow().startDragging(); }
+    return <main className="walk-shell" data-tauri-drag-region onMouseDown={(event) => {
+      if ((event.target as HTMLElement).closest("button, input, textarea, select, a")) return;
+      if ("__TAURI_INTERNALS__" in window) void getCurrentWindow().startDragging().catch(() => undefined);
     }}>
       <header className="walk-head"><strong>What can I help you set up?</strong><button className="walk-close" onClick={onClose}>✕</button></header>
       <div className="walk-list">
@@ -57,9 +57,9 @@ export function WalkthroughWindow({ isOwner, onClose }: { isOwner: boolean; onCl
 
   const step = chosen.steps[clampStep(chosen, index)];
   const last = index >= chosen.steps.length - 1;
-  return <main className="walk-shell" onPointerDown={(event) => {
-    if ((event.target as HTMLElement).closest("button")) return;
-    if ("__TAURI_INTERNALS__" in window) { event.preventDefault(); void getCurrentWindow().startDragging(); }
+  return <main className="walk-shell" data-tauri-drag-region onMouseDown={(event) => {
+    if ((event.target as HTMLElement).closest("button, input, textarea, select, a")) return;
+    if ("__TAURI_INTERNALS__" in window) void getCurrentWindow().startDragging().catch(() => undefined);
   }}>
     <header className="walk-head">
       <strong>{chosen.name}</strong>

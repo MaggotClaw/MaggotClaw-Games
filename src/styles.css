@@ -65,14 +65,14 @@ html:has(.walk-shell), body:has(.walk-shell), body:has(.walk-shell) #root { widt
 .walk-head { display: flex; align-items: center; gap: 8px; }
 .walk-head strong { flex: 1; color: var(--mc-green-soft, #7fd9c4); font-size: 1rem; }
 .walk-progress { color: var(--mc-muted, #9aa7a2); font-size: .74rem; white-space: nowrap; }
-.walk-close { padding: 2px 7px; color: #ffb4b4; background: transparent; border: 1px solid #53625e; border-radius: 6px; cursor: pointer; }
-.walk-say { flex: 1; margin: 0; overflow-y: auto; font: 1.02rem/1.6 system-ui, sans-serif; user-select: text; -webkit-user-select: text; }
+.walk-close { -webkit-app-region: no-drag; padding: 2px 7px; color: #ffb4b4; background: transparent; border: 1px solid #53625e; border-radius: 6px; cursor: pointer; }
+.walk-say { flex: 1; margin: 0; overflow-y: auto; font: 1.08rem/1.65 system-ui, sans-serif; user-select: text; -webkit-user-select: text; }
 .walk-heads { margin: 0; padding: 8px 10px; color: #ffd166; background: #1a1710; border: 1px solid #4a3f22; border-radius: 8px; font-size: .84rem; }
 .walk-actions { display: flex; gap: 8px; }
-.walk-actions button { flex: 1; padding: 11px 12px; color: var(--mc-white, #f2f6f4); background: #14201d; border: 1px solid #2c3a35; border-radius: 10px; font-weight: 700; cursor: pointer; }
+.walk-actions button { flex: 1; -webkit-app-region: no-drag; padding: 11px 12px; color: var(--mc-white, #f2f6f4); background: #14201d; border: 1px solid #2c3a35; border-radius: 10px; font-weight: 700; cursor: pointer; }
 .walk-actions button.primary { color: #00140e; background: var(--mc-green, #00efb1); border-color: var(--mc-green, #00efb1); }
 .walk-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
-.walk-list button { display: flex; flex-direction: column; gap: 3px; padding: 11px 13px; text-align: left; color: var(--mc-white, #f2f6f4); background: #0d1614; border: 1px solid #24352f; border-radius: 10px; cursor: pointer; }
+.walk-list button { -webkit-app-region: no-drag; display: flex; flex-direction: column; gap: 3px; padding: 11px 13px; text-align: left; color: var(--mc-white, #f2f6f4); background: #0d1614; border: 1px solid #24352f; border-radius: 10px; cursor: pointer; }
 .walk-list button:hover { border-color: var(--mc-green, #00efb1); }
 .walk-list small { color: var(--mc-muted, #9aa7a2); }
 .person-rows { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0; color: var(--mc-green-soft, #7fd9c4); font-size: .88rem; }
@@ -97,16 +97,16 @@ html:has(.walk-shell), body:has(.walk-shell), body:has(.walk-shell) #root { widt
 /* The OK GO button — floats over Claude, dragged anywhere, counts down. */
 html:has(.okgo-shell), body:has(.okgo-shell), body:has(.okgo-shell) #root { width: 100%; height: 100%; overflow: hidden; background: transparent; }
 .okgo-shell { width: calc(100vw - 10px); height: calc(100vh - 10px); margin: 5px; display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: linear-gradient(180deg, #101614f5, #030706fa); border: 1px solid #315a50; border-radius: 20px; box-shadow: inset 0 1px #ffffff18, 0 4px 12px #000a; cursor: move; user-select: none; -webkit-user-select: none; }
-.okgo-button { flex: 1; height: 100%; color: #00140e; background: linear-gradient(180deg, #00efb1, #00b98a); border: 0; border-radius: 14px; font: 900 26px/1 system-ui, sans-serif; letter-spacing: .04em; cursor: pointer; box-shadow: 0 0 14px #00efb166; }
+.okgo-button { -webkit-app-region: no-drag; flex: 1; height: 100%; color: #00140e; background: linear-gradient(180deg, #00efb1, #00b98a); border: 0; border-radius: 14px; font: 900 32px/1 system-ui, sans-serif; letter-spacing: .04em; cursor: pointer; box-shadow: 0 0 14px #00efb166; }
 .okgo-button:hover { filter: brightness(1.08); }
-.okgo-shell.counting .okgo-button { background: linear-gradient(180deg, #ffd166, #f0a500); font-size: 42px; animation: okgo-tick .5s ease-in-out infinite alternate; }
+.okgo-shell.counting .okgo-button { background: linear-gradient(180deg, #ffd166, #f0a500); font-size: 54px; animation: okgo-tick .5s ease-in-out infinite alternate; }
 .okgo-shell.sending .okgo-button { background: linear-gradient(180deg, #7fd9c4, #4bb39c); }
 .okgo-shell.sent .okgo-button { background: linear-gradient(180deg, #00efb1, #00916c); font-size: 20px; }
 .okgo-shell.failed .okgo-button { background: linear-gradient(180deg, #ff8b8b, #c94b4b); color: #fff; font-size: 30px; }
 @keyframes okgo-tick { from { transform: scale(1); } to { transform: scale(1.06); } }
 .okgo-side { display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; height: 100%; }
-.okgo-note { max-width: 84px; color: var(--mc-muted, #9aa7a2); font-size: .62rem; line-height: 1.25; text-align: right; }
-.okgo-close { padding: 2px 6px; color: #ffb4b4; background: transparent; border: 1px solid #53625e; border-radius: 6px; font-size: .7rem; cursor: pointer; }
+.okgo-note { max-width: 100px; color: var(--mc-muted, #9aa7a2); font-size: .62rem; line-height: 1.25; text-align: right; }
+.okgo-close { -webkit-app-region: no-drag; padding: 2px 6px; color: #ffb4b4; background: transparent; border: 1px solid #53625e; border-radius: 6px; font-size: .7rem; cursor: pointer; }
 .okgo-close:hover { color: #fff; border-color: #ff6b6b; }
 .directive-box { margin: 8px 0; padding: 14px 16px; background: #0d1614; border: 1px solid #1e2c28; border-radius: 12px; }
 .directive-box p { margin: 0 0 8px; color: var(--mc-white, #f2f6f4); font-size: .92rem; line-height: 1.55; }

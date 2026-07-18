@@ -81,11 +81,11 @@ export function OkGoButton({ readerName, onClose }: { readerName: string; onClos
   return <main
     className={`okgo-shell ${phase}`}
     // Dragging anywhere but the buttons moves the whole thing.
-    onPointerDown={(event) => {
+    data-tauri-drag-region
+    onMouseDown={(event) => {
       if ((event.target as HTMLElement).closest("button")) return;
       if (!("__TAURI_INTERNALS__" in window)) return;
-      event.preventDefault();
-      void getCurrentWindow().startDragging();
+      void getCurrentWindow().startDragging().catch(() => undefined);
     }}
   >
     <button className="okgo-button" onClick={press} title={phase === "counting" ? "Press again to call it off" : "Press to approve — three seconds to change your mind"}>

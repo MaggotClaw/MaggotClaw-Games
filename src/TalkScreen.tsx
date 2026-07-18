@@ -542,7 +542,7 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
   return <main className={`voice-floater ${companion ? "companion" : ""} ${listening ? "is-listening" : ""} ${reading ? "is-reading" : ""}`} title={status}
     onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }}
     onDrop={(event) => { event.preventDefault(); readDroppedText(event.dataTransfer.getData("text/plain")); }}
-    onPointerDown={(event) => { if (!(event.target as HTMLElement).closest("button") && "__TAURI_INTERNALS__" in window) { event.preventDefault(); void getCurrentWindow().startDragging(); } }}>
+    data-tauri-drag-region onMouseDown={(event) => { if (!(event.target as HTMLElement).closest("button") && "__TAURI_INTERNALS__" in window) void getCurrentWindow().startDragging().catch(() => undefined); }}>
     <button className="icon-control main-mic" aria-label="Start talking" title="Talk" disabled={busy || !targetReady || !speechReady || listening} onClick={startTalking} />
     <button className="icon-control" aria-label={`Add ${settings.addSeconds} seconds`} title={`Add ${settings.addSeconds} seconds`} disabled={!listening} onClick={addTime}>＋</button>
     <span className={`voice-wave ${listening && audioLevel <= 3 ? "no-mic-sound" : ""}`} aria-label={listening ? `Microphone level ${audioLevel}` : "Voice waveform"}>{waveHeights.map((height, index) => <i key={index} style={listening ? { height: `${Math.max(3, Math.round(height * liveScale))}px` } : undefined} />)}</span>
