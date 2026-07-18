@@ -30,6 +30,7 @@ import { loadScheduledReleases, saveScheduledReleases } from "./readerCopies";
 import { postRelayMessage } from "./discordLink";
 import { latestProgressReports } from "./ChatScreen";
 import { auditForAI, auditProse, humanMakerSharedWithEditors, setHumanMakerSharedWithEditors, type AuditReport } from "./humanMaker";
+import { OkGoButton } from "./OkGoButton";
 import { recordJoin } from "./contacts";
 import { hasProfilePin, isValidPin, setNickname, setProfilePin } from "./profileInfo";
 import { ReadSelectionButton } from "./ReadSelectionButton";
@@ -102,6 +103,34 @@ export async function openContentWindow(kind: "doc" | "file", relative: string, 
 
 const IS_COMPANION_WINDOW =
   typeof window !== "undefined" && window.location.hash.replace(/^#/, "") === "companion";
+
+// The OK GO button lives in its own small always-on-top window so it can float
+// over Claude and be dragged anywhere on the screen.
+const IS_OKGO_WINDOW =
+  typeof window !== "undefined" && window.location.hash.replace(/^#/, "") === "okgo";
+
+async function openOkGoWindow(): Promise<void> {
+  const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  const existing = await WebviewWindow.getByLabel("okgo");
+  if (existing) {
+    try { await existing.show(); await existing.setFocus(); } catch { /* ignore */ }
+    return;
+  }
+  // eslint-disable-next-line no-new
+  new WebviewWindow("okgo", {
+    url: "index.html#okgo",
+    title: "OK GO",
+    width: 250,
+    height: 110,
+    resizable: false,
+    decorations: false,
+    transparent: true,
+    shadow: false,
+    alwaysOnTop: true,
+    center: false,
+    focus: true
+  });
+}
 
 async function openCompanionWindow(): Promise<void> {
   const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
@@ -820,11 +849,13 @@ export function App() {
   }
 
   async function openProjects() {
-    // Projects is the working area. A reader is offered the request instead of a
-    // door they cannot walk through.
+    // Projects is the working area. A reader is told plainly why the door is
+    // shut and offered the way through it, rather than being silently moved.
     if (!canPerform(role, "review")) {
-      setRequestCode("");
-      setScreen("request-access");
+      if (window.confirm("Projects is the working area — editing the book needs the owner's approval.\n\nWould you like to ask MaggotClaw for access now?")) {
+        setRequestCode("");
+        setScreen("request-access");
+      }
       return;
     }
     setScreen("projects");
@@ -982,6 +1013,10 @@ export function App() {
     return <FileWindow relative={FILE_WINDOW_PATH} />;
   }
 
+  if (IS_OKGO_WINDOW) {
+    return <OkGoButton readerName={readerName || "Reader"} onClose={() => { void closeCurrentWindow(); }} />;
+  }
+
   if (IS_COMPANION_WINDOW) {
     // This window shows only the compact voice bar; the hub lives in its own window.
     return <TalkScreen
@@ -1069,6 +1104,8 @@ export function App() {
         {canPerform(role, "manage") && <article className="owner-directions"><h2>For MaggotClaw — One-Time Setup</h2><p>1. Settings → Owner → Project Files → <strong>Import From The Bridge</strong>, then Save. Your computer now talks to Dropbox itself — the bridge no longer needs to run.<br/>2. Projects → The Long Rot → View The File List → rate the files → <strong>Publish Reader Links</strong>. This makes the read-only links friends download the book through.<br/>3. Messages → <strong>Copy Messaging Key</strong>. Send that one key privately to each friend — it connects their chat and their book downloads.</p></article>}
         {canPerform(role, "manage") && <article className="owner-directions"><h2>For MaggotClaw — Everyday</h2><p><strong>Release a chapter:</strong> Owner Dashboard → Released Chapters → tick it → Publish. Every reader's app picks it up when it next opens.<br/><strong>Someone asks for access:</strong> the alert appears when the app opens; approve from the dashboard and the unlock code posts back to Discord by itself.<br/><strong>Push your writing:</strong> Download or Update pulls the latest; files you drop in 05 Approved Uploads go up with Upload Approved. Revised chapters reach readers automatically — links always serve the newest version.<br/><strong>New app version for everyone:</strong> ask your assistant to build and push the update; friends get it from Check For Updates.</p></article>}
         <article><h2>Settings</h2><p>Voice Companion choices, updates and the share link, and for the owner: Discord keys and View as — see the whole app the way a Reader or Editor sees it, then click your name to come back.</p></article>
+        <article><h2>The OK GO Button</h2><p>A small green button that floats over everything and can be dragged anywhere you like. Press it and it counts down three, two, one before "OK GO" goes through to the AI — press again during the countdown to call it off. Nothing is ever approved by accident.</p></article>
+        {canPerform(role, "manage") && <article className="owner-directions"><h2>For MaggotClaw — Human Maker</h2><p>Your prose bench. Pick a chapter or paste a passage and press Run The Audit: it scans against your own Human Maker codex — all forty-five tells, your numbering, your fixes — entirely on this computer.<br/>The mechanical tells are caught automatically. The ones no machine can judge (voice, flair, subtext, dialogue friction) are listed underneath to read aloud for.<br/><strong>Copy Audit For The Rewrite</strong> puts the findings, the Ward Directive, and the canon protections on your clipboard — paste that to Claude with the passage and say Ok Go.</p></article>}
       </section>
     </main>;
   }
@@ -1088,6 +1125,8 @@ export function App() {
         {/* The author's own bench — owner-only unless he shares it with editors. */}
         {(canPerform(role, "manage") || (humanMakerSharedWithEditors() && canPerform(role, "upload"))) &&
           <button className="pill-button chip" onClick={() => setScreen("human-maker")}>Human Maker</button>}
+        {"__TAURI_INTERNALS__" in window && canPerform(role, "propose") &&
+          <button className="pill-button chip" onClick={() => { void openOkGoWindow(); }}>OK GO Button</button>}
       </section>
       {readerName === "Test Profile" && <div className="test-mode-banner">TEST PROFILE — LOCAL ONLY — NOTHING IS SYNCHRONIZED</div>}
       {discordWaiting > 0 && canPerform(role, "manage") && <section className="welcome-strip">
@@ -2145,11 +2184,14 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
       {filesDirectConfigured() && <small className="update-status ok">Direct file access is on — downloads and uploads work without the bridge.</small>}
       {discordReadingConfigured() && <small className="update-status ok">Two-way Discord is on: the Owner Dashboard can pull requests and post approvals.</small>}
     </>}
-    <hr/><p className="eyebrow">ADVANCED CONNECTION</p>
-    <label>Connection address<input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} /></label>
-    {endpoint.trim() !== defaultSettings.endpoint && <button className="text-button" onClick={() => setEndpoint(defaultSettings.endpoint)}>Reset To The Standard Address</button>}
-    <label>Temporary bearer credential<input type="password" value={bearerToken} onChange={(event) => setBearerToken(event.target.value)} autoComplete="off" /></label>
-    <p className="warning">These technical controls will move behind administrator support access in a future build.</p>
+    {/* Technical plumbing stays with the owner and technical support — a
+        reader can only break their own downloads with it. */}
+    {canPerform(realProfileRole(profile), "manage") && <>
+      <hr/><p className="eyebrow">ADVANCED CONNECTION</p>
+      <label>Connection address<input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} /></label>
+      {endpoint.trim() !== defaultSettings.endpoint && <button className="text-button" onClick={() => setEndpoint(defaultSettings.endpoint)}>Reset To The Standard Address</button>}
+      <label>Temporary bearer credential<input type="password" value={bearerToken} onChange={(event) => setBearerToken(event.target.value)} autoComplete="off" /></label>
+    </>}
     <div className="form-actions"><button onClick={onCancel}>Cancel</button><button className="primary" onClick={saveAll}>Save</button></div>
   </main>;
 }

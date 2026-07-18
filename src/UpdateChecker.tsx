@@ -61,7 +61,7 @@ export function UpdateChecker({ configurable = false }: { configurable?: boolean
     </div>
 
     {result?.state === "current" && <span className="update-status ok">You're on the latest version.</span>}
-    {result?.state === "unconfigured" && <span className="update-status warn">No update source set yet{configurable ? " — add your GitHub repo below." : "."}</span>}
+    {result?.state === "unconfigured" && <span className="update-status warn">No update source is set on this build.</span>}
     {result?.state === "error" && <span className="update-status warn">{result.message}</span>}
     {result?.state === "available" && <div className="update-available">
       <span className="update-status new">Update ready: version {result.info.version}</span>
@@ -89,6 +89,14 @@ export function UpdateChecker({ configurable = false }: { configurable?: boolean
             invoke("open_url", { url: "mailto:?subject=" + encodeURIComponent("MaggotClaw Games") + "&body=" + encodeURIComponent("Download MaggotClaw Games here: " + link) })
           );
         }}>Email</button>
+        <button className="primary tiny" onClick={() => {
+          const link = downloadShareLink(repo)!;
+          const number = window.prompt("Their phone number (leave blank to just open your messaging app):") ?? "";
+          const clean = number.replace(/[^\d+]/g, "");
+          void import("@tauri-apps/api/core").then(({ invoke }) =>
+            invoke("open_url", { url: `sms:${clean}?body=` + encodeURIComponent("Download MaggotClaw Games here: " + link) })
+          ).catch(() => void copyShareLink(link));
+        }}>Text</button>
         <button className="primary tiny" onClick={() => {
           void copyShareLink(downloadShareLink(repo)!);
           void import("@tauri-apps/api/webviewWindow").then(async ({ WebviewWindow }) => {

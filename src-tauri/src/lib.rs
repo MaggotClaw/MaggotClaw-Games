@@ -139,8 +139,9 @@ async fn fetch_latest_release(repo: String) -> Result<Value, String> {
 // plain http(s) URL, and rejects shell metacharacters so nothing can be injected.
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
-    // mailto: opens the user's email program with the share link prefilled.
-    if url.starts_with("mailto:") && !url.contains(['|','^','<','>','"']) {
+    // mailto: and sms: open the user's own email or messaging program with the
+    // share link prefilled — the app never sends anything itself.
+    if (url.starts_with("mailto:") || url.starts_with("sms:")) && !url.contains(['|','^','<','>','"']) {
         // rundll32 takes the address directly — no shell, so & in the link is safe.
         return std::process::Command::new("rundll32")
             .args(["url.dll,FileProtocolHandler", &url])
