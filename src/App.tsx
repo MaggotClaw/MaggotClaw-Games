@@ -1160,6 +1160,10 @@ ${item.transcriptionConfirmed}`;
         <button className="pill-button chip" onClick={() => setScreen("home")}>← Back</button>
         <button className="pill-button chip" onClick={openSavedComments}>My Comments</button>
         <button className="pill-button chip" onClick={() => openSettingsFrom("library")}>Settings</button>
+        {"__TAURI_INTERNALS__" in window && <button className="pill-button chip" disabled={workspaceBusy || loading} onClick={() => {
+          // The reader's own download door — Projects is gated, the shelf is not.
+          void (async () => { await downloadWorkspace(); await refreshCopies(); })();
+        }}>{workspaceBusy ? "Updating…" : "Get The Latest Chapters"}</button>}
         <button className="pill-button chip" onClick={refreshCopies} disabled={loading}>{loading ? "Loading…" : "Refresh"}</button>
         <span className="who-chip">{readerName} · {roleLabel(role)}</span>
       </section>
