@@ -11,24 +11,84 @@ export interface ProjectEntry {
   type: "file" | "folder";
 }
 
+// Direct Dropbox access: with the project file keys on this machine, the app
+// talks to Dropbox itself and the local bridge no longer needs to be running.
+export interface DropboxCreds {
+  appKey: string;
+  appSecret: string;
+  refreshToken: string;
+}
+
+const DROPBOX_CREDS_KEY = "mcg-dropbox-creds";
+
+export function getDropboxCreds(): DropboxCreds | null {
+  try {
+    const raw = JSON.parse(localStorage.getItem(DROPBOX_CREDS_KEY) || "null") as DropboxCreds | null;
+    return raw && raw.appKey && raw.appSecret && raw.refreshToken ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setDropboxCreds(creds: DropboxCreds | null): void {
+  try {
+    if (creds && creds.appKey.trim() && creds.appSecret.trim() && creds.refreshToken.trim()) {
+      localStorage.setItem(DROPBOX_CREDS_KEY, JSON.stringify({
+        appKey: creds.appKey.trim(), appSecret: creds.appSecret.trim(), refreshToken: creds.refreshToken.trim()
+      }));
+    } else {
+      localStorage.removeItem(DROPBOX_CREDS_KEY);
+    }
+  } catch { /* ignore */ }
+}
+
+export function filesDirectConfigured(): boolean {
+  return Boolean(getDropboxCreds());
+}
+
 export class LongRotMcpClient {
   constructor(private readonly settings: ConnectionSettings) {}
 
+  private direct(): DropboxCreds | null {
+    return "__TAURI_INTERNALS__" in window ? getDropboxCreds() : null;
+  }
+
   async listFolder(path = "/The Long Rot"): Promise<ProjectEntry[]> {
+    const creds = this.direct();
+    if (creds) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      return invoke<ProjectEntry[]>("dropbox_list_folder", { creds, path });
+    }
     const content = await this.callTool("list_dropbox_folder", { path });
     return JSON.parse(content) as ProjectEntry[];
   }
 
   // Owner-approved upload: writes a UTF-8 text file in place on Dropbox.
   async writeText(path: string, content: string): Promise<void> {
+    const creds = this.direct();
+    if (creds) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("dropbox_write_text", { creds, path, content });
+      return;
+    }
     await this.callTool("write_dropbox_text_file", { path, content, overwrite: true });
   }
 
   async readText(path: string): Promise<string> {
+    const creds = this.direct();
+    if (creds) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      return invoke<string>("dropbox_read_text", { creds, path });
+    }
     return this.callTool("read_dropbox_text_file", { path });
   }
 
   async currentRevision(path: string): Promise<string | null> {
+    const creds = this.direct();
+    if (creds) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      return invoke<string | null>("dropbox_current_revision", { creds, path });
+    }
     const content = await this.callTool("list_dropbox_revisions", { path });
     const revisions = JSON.parse(content) as Array<{ revision_id: string }>;
     return revisions[0]?.revision_id ?? null;

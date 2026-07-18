@@ -2,6 +2,7 @@ use serde_json::Value;
 use std::time::Duration;
 
 mod desktop_companion;
+mod dropbox;
 mod native_speech;
 mod piper_speech;
 mod project_workspace;
@@ -496,7 +497,12 @@ pub fn run() {
             project_workspace::read_approved_upload,
             project_workspace::archive_approved_upload,
             project_workspace::retire_project_file,
-            project_workspace::search_project_documents
+            project_workspace::search_project_documents,
+            dropbox::dropbox_list_folder,
+            dropbox::dropbox_read_text,
+            dropbox::dropbox_current_revision,
+            dropbox::dropbox_write_text,
+            dropbox::read_bridge_env
         ])
         .build(tauri::generate_context!())
         .expect("error while building The Long Rot Voice")

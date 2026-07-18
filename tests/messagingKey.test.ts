@@ -15,6 +15,18 @@ describe("messaging keys", () => {
     expect(parseMessagingKey("")).toBeNull();
   });
 
+  it("carries the project file keys when the owner has them", () => {
+    const code = makeMessagingKey({
+      botToken: "tok", channelId: "42",
+      dropbox: { appKey: "key1", appSecret: "sec1", refreshToken: "ref1" }
+    });
+    const parsed = parseMessagingKey(code);
+    expect(parsed?.dropbox).toEqual({ appKey: "key1", appSecret: "sec1", refreshToken: "ref1" });
+
+    const plain = parseMessagingKey(makeMessagingKey({ botToken: "tok", channelId: "42" }));
+    expect(plain?.dropbox).toBeUndefined();
+  });
+
   it("carries messaging inside an unlock code and leaves old codes valid", () => {
     const withMessaging = parseUnlockCode(makeUnlockCode({
       name: "Sam", role: "editor", messaging: { botToken: "tok", channelId: "42" }

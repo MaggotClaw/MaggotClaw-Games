@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LongRotMcpClient } from "./mcp";
+import { filesDirectConfigured, getDropboxCreds, LongRotMcpClient, setDropboxCreds } from "./mcp";
 import { contentHash, segmentDocument, unwrapHardLines } from "./segmenter";
 import { BrowserSpeechPlayer } from "./speech";
 import { CommentRecorder } from "./recorder";
@@ -1613,6 +1613,24 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
   const [botToken, setBotTokenState] = useState(getBotToken);
   const [channelId, setChannelIdState] = useState(getRequestsChannelId);
   const [relayChannel, setRelayChannelState] = useState(getRelayChannelId);
+  const savedDropbox = getDropboxCreds();
+  const [dropboxKey, setDropboxKey] = useState(savedDropbox?.appKey ?? "");
+  const [dropboxSecret, setDropboxSecret] = useState(savedDropbox?.appSecret ?? "");
+  const [dropboxRefresh, setDropboxRefresh] = useState(savedDropbox?.refreshToken ?? "");
+  const [dropboxNote, setDropboxNote] = useState("");
+
+  async function importFromBridge() {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const found = await invoke<{ appKey: string; appSecret: string; refreshToken: string }>("read_bridge_env");
+      setDropboxKey(found.appKey);
+      setDropboxSecret(found.appSecret);
+      setDropboxRefresh(found.refreshToken);
+      setDropboxNote("Keys imported from the bridge. Press Save to keep them.");
+    } catch (error) {
+      setDropboxNote(message(error));
+    }
+  }
   function updateVoice(changes: Partial<VoiceSettings>) { setVoice((current) => ({ ...current, ...changes })); }
   // A cleared or nonsense number must never save: 0 seconds of silence would
   // send a message after the very first word.
@@ -1629,6 +1647,11 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
       setBotToken(botToken);
       setRequestsChannelId(channelId);
       setRelayChannelId(relayChannel);
+    }
+    if (dropboxKey.trim() && dropboxSecret.trim() && dropboxRefresh.trim()) {
+      setDropboxCreds({ appKey: dropboxKey, appSecret: dropboxSecret, refreshToken: dropboxRefresh });
+    } else if (!dropboxKey.trim() && !dropboxSecret.trim() && !dropboxRefresh.trim()) {
+      setDropboxCreds(null);
     }
     onSave({ endpoint: endpoint.trim() || defaultSettings.endpoint, bearerToken });
   }
@@ -1674,6 +1697,20 @@ function Settings({ initial, onSave, onCancel }: { initial: ConnectionSettings; 
         <input value={relayChannel} placeholder="Uses the requests channel unless you set one" onChange={(event) => setRelayChannelState(event.target.value)} autoComplete="off" />
       </label>
       <small className="board-hint">These Discord details are stored when you press Save — Cancel leaves them untouched.</small>
+      <hr/><p className="eyebrow">Owner — project files (Dropbox)</p>
+      <p className="board-hint">With these keys saved, the app reads and writes the project files itself — the bridge no longer needs to be running, here or on anyone else's computer. Copy Messaging Key in Messages carries them to your friends.</p>
+      <div className="form-actions"><button onClick={() => void importFromBridge()}>Import From The Bridge</button></div>
+      <label>Dropbox app key
+        <input value={dropboxKey} onChange={(event) => setDropboxKey(event.target.value)} autoComplete="off" />
+      </label>
+      <label>Dropbox app secret
+        <input type="password" value={dropboxSecret} onChange={(event) => setDropboxSecret(event.target.value)} autoComplete="off" />
+      </label>
+      <label>Dropbox refresh token
+        <input type="password" value={dropboxRefresh} onChange={(event) => setDropboxRefresh(event.target.value)} autoComplete="off" />
+      </label>
+      {dropboxNote && <small className="board-hint">{dropboxNote}</small>}
+      {filesDirectConfigured() && <small className="update-status ok">Direct file access is on — downloads and uploads work without the bridge.</small>}
       {discordReadingConfigured() && <small className="update-status ok">Two-way Discord is on: the Owner Dashboard can pull requests and post approvals.</small>}
     </>}
     <hr/><p className="eyebrow">ADVANCED CONNECTION</p>

@@ -31,10 +31,16 @@ export interface UnlockPayload {
 }
 
 // The messaging key: what an app needs to read and post in the team's Discord
-// relay channel. Handed out by the owner as a pasteable code.
+// relay channel — and, when the owner has them, the project file keys, so one
+// pasted code connects both chat and Dropbox downloads. Handed out privately.
 export interface MessagingPayload {
   botToken: string;
   channelId: string;
+  dropbox?: {
+    appKey: string;
+    appSecret: string;
+    refreshToken: string;
+  };
 }
 
 function b64urlEncode(text: string): string {
@@ -132,14 +138,25 @@ export function parseUnlockCode(code: string): UnlockPayload | null {
 // A standalone messaging key, for people who already have the role they want
 // but still need the team chat connected.
 export function makeMessagingKey(payload: MessagingPayload): string {
-  return pack(MESSAGING_PREFIX, { t: payload.botToken, c: payload.channelId });
+  const body: Record<string, unknown> = { t: payload.botToken, c: payload.channelId };
+  if (payload.dropbox?.appKey && payload.dropbox.appSecret && payload.dropbox.refreshToken) {
+    body.dk = payload.dropbox.appKey;
+    body.ds = payload.dropbox.appSecret;
+    body.dr = payload.dropbox.refreshToken;
+  }
+  return pack(MESSAGING_PREFIX, body);
 }
 
 export function parseMessagingKey(code: string): MessagingPayload | null {
   const raw = unpack(MESSAGING_PREFIX, code) as Record<string, unknown> | null;
   if (!raw || typeof raw.t !== "string" || !raw.t.trim()) return null;
   if (typeof raw.c !== "string" || !/^\d+$/.test(raw.c)) return null;
-  return { botToken: raw.t.trim(), channelId: raw.c };
+  const dropbox = typeof raw.dk === "string" && raw.dk.trim()
+    && typeof raw.ds === "string" && raw.ds.trim()
+    && typeof raw.dr === "string" && raw.dr.trim()
+    ? { appKey: raw.dk.trim(), appSecret: raw.ds.trim(), refreshToken: raw.dr.trim() }
+    : undefined;
+  return { botToken: raw.t.trim(), channelId: raw.c, dropbox };
 }
 
 // An unlock code is meant for one person. Compare forgivingly (case/spacing) so
