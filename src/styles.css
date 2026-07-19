@@ -813,3 +813,13 @@ button.who-chip:hover { color: var(--mc-green-soft); }
 /* The close button matches the microphone: same size, and the same distance
    from its own corner of the frame — top, bottom, and its own side. */
 .voice-floater .close-control { width: 34px; height: 34px; font-size: 1rem; }
+
+/* What is actually connected, asked rather than assumed. */
+.link-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid #17231f; font-size: .88rem; }
+.link-row strong { min-width: 110px; color: var(--mc-white); }
+.link-row span:last-child { color: var(--mc-muted); }
+.link-dot { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; }
+.link-dot.on { background: var(--mc-green); box-shadow: 0 0 7px #00efb1aa; }
+.link-dot.off { background: var(--mc-red); box-shadow: 0 0 7px #ff5a4daa; }
+/* The profile keeps its banner, centred like the main one. */
+.profile-screen .brand-logo { margin: 0 auto 14px; }

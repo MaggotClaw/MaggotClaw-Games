@@ -1383,9 +1383,9 @@ export function App() {
         <article><h2>Projects</h2><p>The working side. Open a project to see its workspace: Explore Files browses every chapter and codex, Chapters shows what is finished, Codex is the story brain, and the search finds every mention of anything. Download or Update refreshes your local copies from Dropbox.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("projects-tour"); }}>Show Me →</button></article>
         <article><h2>Messages</h2><p>Rooms for readers, editors, and the author. Post in a room, or open the full Messages window (Discord) for voice calls. Access requests also land there for the owner.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("messages-tour"); }}>Show Me →</button></article>
         <article><h2>Requesting more access</h2><p>Everyone starts as a Reader. Request access sends your ask to the owner; when approved you get an unlock code — paste it under Enter unlock code and your new role is live.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("ask-for-access"); }}>Show Me →</button></article>
-        <article><h2>Owner Dashboard</h2><p>Owner only: approvals waiting, requests pulled from Discord, and the paste-a-code fallback. Approving posts the unlock code back automatically.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("release-chapter"); }}>Show Me →</button></article>
+        <article><h2>Dashboard</h2><p>For the author and managers: approvals waiting, requests pulled from Discord, and what is connected. Approving posts the unlock code back automatically.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("release-chapter"); }}>Show Me →</button></article>
         {canPerform(role, "manage") && <article className="owner-directions"><h2>For MaggotClaw — One-Time Setup</h2><p>1. Settings → Owner → Project Files → <strong>Import From The Bridge</strong>, then Save. Your computer now talks to Dropbox itself — the bridge no longer needs to run.<br/>2. Projects → your project → View The File List → rate the files → <strong>Publish Reader Links</strong>. This makes the read-only links friends download the book through.<br/>3. Messages → <strong>Copy Messaging Key</strong>. Send that one key privately to each friend — it connects their chat and their book downloads.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("owner-setup"); }}>Show Me →</button></article>}
-        {canPerform(role, "manage") && <article className="owner-directions"><h2>For MaggotClaw — Everyday</h2><p><strong>Release a chapter:</strong> Owner Dashboard → Released Chapters → tick it → Publish. Every reader's app picks it up when it next opens.<br/><strong>Someone asks for access:</strong> the alert appears when the app opens; approve from the dashboard and the unlock code posts back to Discord by itself.<br/><strong>Push your writing:</strong> Download or Update pulls the latest; files you drop in 05 Approved Uploads go up with Upload Approved. Revised chapters reach readers automatically — links always serve the newest version.<br/><strong>New app version for everyone:</strong> ask your assistant to build and push the update; friends get it from Check For Updates.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("release-chapter"); }}>Show Me →</button></article>}
+        {canPerform(role, "manage") && <article className="owner-directions"><h2>For MaggotClaw — Everyday</h2><p><strong>Release a chapter:</strong> Dashboard → Released Chapters → tick it → Publish. Every reader's app picks it up when it next opens.<br/><strong>Someone asks for access:</strong> the alert appears when the app opens; approve from the dashboard and the unlock code posts back to Discord by itself.<br/><strong>Push your writing:</strong> Download or Update pulls the latest; files you drop in 05 Approved Uploads go up with Upload Approved. Revised chapters reach readers automatically — links always serve the newest version.<br/><strong>New app version for everyone:</strong> ask your assistant to build and push the update; friends get it from Check For Updates.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("release-chapter"); }}>Show Me →</button></article>}
         <article><h2>Settings</h2><p>Voice Companion choices, updates and the share link, and for the owner: Discord keys and View as — see the whole app the way a Reader or Editor sees it, then click your name to come back.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("settings-again"); }}>Show Me →</button></article>
         <article><h2>The OK GO Button</h2><p>A small green button that floats over everything and can be dragged anywhere you like. Press it and it counts down three, two, one before "OK GO" goes through to the AI — press again during the countdown to call it off. Nothing is ever approved by accident.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("okgo-button"); }}>Show Me →</button></article>
         {canPerform(role, "manage") && <article className="owner-directions"><h2>For MaggotClaw — Human Maker</h2><p>Your prose bench. Pick a chapter or paste a passage and press Run The Audit: it scans against your own Human Maker codex — all forty-five tells, your numbering, your fixes — entirely on this computer.<br/>The mechanical tells are caught automatically. The ones no machine can judge (voice, flair, subtext, dialogue friction) are listed underneath to read aloud for.<br/><strong>Copy Audit For The Rewrite</strong> puts the findings, the Ward Directive, and the canon protections on your clipboard — paste that to Claude with the passage and say Ok Go.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("human-maker-tour"); }}>Show Me →</button></article>}
@@ -1452,7 +1452,7 @@ export function App() {
         <button className="primary" onClick={() => setScreen("things-to-do")}>Show Me</button>
       </section>}
       {discordWaiting > 0 && canPerform(role, "manage") && <section className="welcome-strip">
-        <span className="reader-note"><strong>{discordWaiting} Access Request{discordWaiting === 1 ? " Is" : "s Are"} Waiting On Discord.</strong> <button className="text-button inline" onClick={openDashboard}>Open The Owner Dashboard</button></span>
+        <span className="reader-note"><strong>{discordWaiting} Access Request{discordWaiting === 1 ? " Is" : "s Are"} Waiting On Discord.</strong> <button className="text-button inline" onClick={openDashboard}>Open The Dashboard</button></span>
       </section>}
       {/* "Up to date" is housekeeping, not news — it belongs with
           the files, and it already appears there. Only the case that needs
@@ -1469,7 +1469,7 @@ export function App() {
         {canPerform(role, "manage") && <button className="mode-card files-mode" onClick={() => openFilesFrom("home")}><span className="mode-icon files-mark" aria-hidden="true" /><span><strong>Project Files</strong><small>Choose who downloads each file, which file readers open for a chapter, and see who changed what.</small></span><span>→</span></button>}
         {(canPerform(role, "manage") || (canPerform(role, "upload") && humanMakerAllows(humanMakerNames(), readerName))) &&
           <button className="mode-card maker-mode" onClick={() => setScreen("human-maker")}><span className="mode-icon maker-mark" aria-hidden="true" /><span><strong>Human Maker</strong><small>Audit a chapter against your own codex, then send the findings straight to Claude for the rewrite.</small></span><span>→</span></button>}
-        {canPerform(role, "manage") && <button className="mode-card owner-mode" onClick={openDashboard}><span className="mode-icon owner-mark" aria-hidden="true" /><span><strong>Owner Dashboard</strong><small>Approvals waiting on you, requests pulled from Discord, and which chapters are released.</small></span>
+        {canPerform(role, "manage") && <button className="mode-card owner-mode" onClick={openDashboard}><span className="mode-icon owner-mark" aria-hidden="true" /><span><strong>Dashboard</strong><small>Approvals waiting on you, requests pulled from Discord, and which chapters are released.</small></span>
           {(requests.length + discordWaiting) > 0 ? <span className="pending-badge">{requests.length + discordWaiting}</span> : <span>→</span>}</button>}
         {canPerform(role, "manage") && <button className="mode-card people-mode" onClick={() => setScreen("people")}><span className="mode-icon people-mark" aria-hidden="true" /><span><strong>People</strong><small>Everyone who reads or works on the book, and what each of them is allowed to do.</small></span><span>→</span></button>}
         {canPerform(role, "manage") && <button className="mode-card ai-mode" onClick={() => setScreen("claude-access")}><span className="mode-icon ai-mark" aria-hidden="true" /><span><strong>AI Settings</strong><small>How every assistant should talk to you, what each is allowed to do, and what Claude has done.</small></span>
@@ -2137,7 +2137,14 @@ function Profile({ initial, role, onContinue, onCancel }: { initial: string; rol
   const pinOk = pinAlreadySet || (isValidPin(pin) && pin === pinAgain);
   const pinProblem = !pinAlreadySet && pin && (!isValidPin(pin) ? "The PIN is exactly four digits." : pin !== pinAgain ? "The two PINs do not match yet." : "");
   return <main className="app-shell profile-screen">
-    {onCancel && <button className="text-button mode-back" onClick={onCancel}>← Back</button>}
+    {/* The same top row as everywhere else once there is a name to show. On
+        first run there is nobody yet and nowhere to go back to. */}
+    {onCancel && <header className="topbar">
+      <button className="text-button" onClick={onCancel}>← Back</button>
+      <span className="eyebrow">Your Profile</span>
+      <span className="who-chip">{name || "Guest"} · {roleLabel(role)}</span>
+    </header>}
+    <BrandLogo compact />
     <div className="love-banner" role="status">Whatever you do, don't forget… <strong>MaggotClaw Loves You!!!</strong></div>
     <div className="step-row" aria-label={`Step ${step} of 3`}>
       {[1, 2, 3].map((n) => <span key={n} className={n === step ? "step-dot on" : n < step ? "step-dot done" : "step-dot"}>{n}</span>)}
@@ -2706,6 +2713,46 @@ function OwnerDashboard({ requests, onDecide, onDismiss, onBack, client, onRelea
   useEffect(() => { if (discordReadingConfigured()) void checkDiscord(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   const [inboxBusy, setInboxBusy] = useState(false);
   const [inboxNote, setInboxNote] = useState("");
+  const [links, setLinks] = useState<Array<{ name: string; ok: boolean; detail: string }>>([]);
+  const [checkingLinks, setCheckingLinks] = useState(false);
+
+  // Each one is a real request. Being unable to ask is reported as its own
+  // answer rather than quietly counting as working.
+  async function checkConnections() {
+    setCheckingLinks(true);
+    const found: Array<{ name: string; ok: boolean; detail: string }> = [];
+    try {
+      await client.listFolder();
+      found.push({ name: "Project files", ok: true, detail: "Reachable." });
+    } catch {
+      found.push({ name: "Project files", ok: false, detail: "Cannot be reached. Check the keys in Settings." });
+    }
+    const creds = getDropboxCreds();
+    if (!creds) found.push({ name: "Sharing", ok: false, detail: "No project keys saved on this computer yet." });
+    else {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const able = await invoke<boolean>("dropbox_sharing_available", { creds });
+        found.push(able
+          ? { name: "Sharing", ok: true, detail: "Reader Links and updates can be shared." }
+          : { name: "Sharing", ok: false, detail: "Permission missing. Show Me How has the steps." });
+      } catch {
+        found.push({ name: "Sharing", ok: false, detail: "Could not be checked just now." });
+      }
+    }
+    if (!discordReadingConfigured()) {
+      found.push({ name: "Discord", ok: false, detail: "One-way only. Requests arrive but cannot be read back." });
+    } else {
+      try {
+        await fetchDiscordRequests();
+        found.push({ name: "Discord", ok: true, detail: "Two-way. Requests and approvals travel by themselves." });
+      } catch {
+        found.push({ name: "Discord", ok: false, detail: "Configured, but the channel could not be read." });
+      }
+    }
+    setLinks(found);
+    setCheckingLinks(false);
+  }
   const [grantRoles, setGrantRoles] = useState<Record<string, ProjectRole>>({});
   const [released, setReleased] = useState<number[]>(loadUnlockedChapters);
   const [releaseBusy, setReleaseBusy] = useState(false);
@@ -2818,8 +2865,8 @@ function OwnerDashboard({ requests, onDecide, onDismiss, onBack, client, onRelea
   }
 
   return <main className="app-shell dashboard-shell">
-    <header className="topbar"><button className="text-button" onClick={onBack}>← Back</button><span className="eyebrow">Owner Dashboard</span><span className="who-chip">{(localStorage.getItem("long-rot-reader-name") || "Owner")} · Author / Owner</span></header>
-    <section className="projects-heading"><p className="eyebrow">Owner Dashboard</p><h1>Owner Dashboard</h1></section>
+    <header className="topbar"><button className="text-button" onClick={onBack}>← Back</button><span className="eyebrow">Dashboard</span><span className="who-chip">{(localStorage.getItem("long-rot-reader-name") || "Owner")} · Author / Owner</span></header>
+    <section className="projects-heading"><p className="eyebrow">Dashboard</p><h1>Dashboard</h1></section>
 
     <section className="dash-section">
       <h2>Requests From Discord</h2>
@@ -2963,14 +3010,22 @@ function OwnerDashboard({ requests, onDecide, onDismiss, onBack, client, onRelea
       <div className="form-actions"><button className="primary" disabled={!questionChapter} onClick={saveQuestions}>Save Chapter Questions</button></div>
     </section>
 
+    {/* A sentence saying a thing is on is not the same as the thing being on.
+        These are asked, not assumed, and a red line means it is really down. */}
     <section className="dash-section">
-      <h2>Messages</h2>
-      <div className="empty-state"><strong>Team chat lives in Messages</strong><p>Rooms and direct messages are on the main page under Messages. Anything sent to MaggotClaw arrives in your direct messages there.</p></div>
+      <h2>Connections</h2>
+      <div className="form-actions">
+        <button className="primary" disabled={checkingLinks} onClick={() => { void checkConnections(); }}>{checkingLinks ? "Checking…" : "Check Connections"}</button>
+      </div>
+      {links.length === 0 && !checkingLinks && <p className="board-hint">Press Check Connections to see what is really working.</p>}
+      {links.map((link) => <div key={link.name} className="link-row">
+        <span className={link.ok ? "link-dot on" : "link-dot off"} aria-hidden="true" />
+        <strong>{link.name}</strong>
+        <span>{link.detail}</span>
+      </div>)}
     </section>
 
-    <footer className="safe-status">{discordReadingConfigured()
-      ? "Two-way Discord is on: requests and approvals travel automatically."
-      : "Approvals are recorded on this computer. Add the Discord keys in Settings → Owner to receive requests from other machines automatically."}</footer>
+    <footer className="safe-status">{status}</footer>
   </main>;
 }
 
@@ -3222,7 +3277,7 @@ function Settings({ initial, voiceOnly, onSave, onCancel, onRequestAccess, onEnt
       </label>
       {dropboxNote && <small className="board-hint">{dropboxNote}</small>}
       {filesDirectConfigured() && <small className="update-status ok">Direct file access is on — downloads and uploads work without the bridge.</small>}
-      {discordReadingConfigured() && <small className="update-status ok">Two-way Discord is on: the Owner Dashboard can pull requests and post approvals.</small>}
+      {discordReadingConfigured() && <small className="update-status ok">Two-way Discord is on: the Dashboard can pull requests and post approvals.</small>}
     </>}
     {/* Technical plumbing stays with the owner and technical support — a
         reader can only break their own downloads with it. */}
