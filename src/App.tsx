@@ -1876,15 +1876,18 @@ export function App() {
         <div><span>Uploads</span><strong>{canPerform(role, "manage") ? "Owner Only" : "Locked"}</strong><small>{canPerform(role, "manage") ? "Upload Approved sends everything in 05 Approved Uploads to the shared copy." : "Uploads run from the owner\u2019s account."}</small></div>
       </section>
       {workspaceProgress && <section className="download-progress"><strong>{workspaceProgress.stage}</strong><p>{workspaceProgress.completed} of {workspaceProgress.total || "?"} text files saved · {workspaceProgress.skipped} other files recorded</p></section>}
+      {/* One shape for all of them. Three had the green treatment and three
+          did not, which read as three being more important rather than as an
+          accident. A mark beside each says what it does at a glance. */}
       <section className="workspace-actions">
-        <button className="primary" onClick={() => setScreen("project-explorer")} disabled={!workspace?.downloadedFiles}>Explore Files</button>
-        {!workspace?.initialized && <button onClick={prepareWorkspace} disabled={workspaceBusy}>Prepare Local Folders</button>}
-        {canPerform(role, "download") && <button className="primary" onClick={downloadWorkspace} disabled={workspaceBusy}>{workspaceBusy ? "Working…" : "Download or Update"}</button>}
-        {canPerform(role, "review") && <button onClick={() => setScreen("project-review")} disabled={workspaceBusy}>Review Changes</button>}
+        <button onClick={() => setScreen("project-explorer")} disabled={!workspace?.downloadedFiles}><span className="act-mark files" aria-hidden="true" />Explore Files</button>
+        {!workspace?.initialized && <button onClick={prepareWorkspace} disabled={workspaceBusy}><span className="act-mark prepare" aria-hidden="true" />Prepare Local Folders</button>}
+        {canPerform(role, "download") && <button onClick={downloadWorkspace} disabled={workspaceBusy}><span className="act-mark down" aria-hidden="true" />{workspaceBusy ? "Working…" : "Download Or Update"}</button>}
+        {canPerform(role, "review") && <button onClick={() => setScreen("project-review")} disabled={workspaceBusy}><span className="act-mark review" aria-hidden="true" />Review Changes</button>}
         {canPerform(role, "manage")
-          ? <button className="primary" onClick={() => { if (window.confirm("Upload everything in 05 Approved Uploads? This changes the real project files everyone sees.")) void uploadApproved(); }} disabled={workspaceBusy}>Upload Approved</button>
-          : canPerform(role, "upload") && <button title="Uploads run from the owner's account for now." disabled>Upload Approved</button>}
-        <button onClick={() => void openWorkspace()} disabled={!workspace?.initialized || workspaceBusy}>Open Local Folder</button>
+          ? <button onClick={() => { if (window.confirm("Upload everything in 05 Approved Uploads? This changes the real project files everyone sees.")) void uploadApproved(); }} disabled={workspaceBusy}><span className="act-mark up" aria-hidden="true" />Upload Approved</button>
+          : canPerform(role, "upload") && <button title="Uploads run from the owner's account for now." disabled><span className="act-mark up" aria-hidden="true" />Upload Approved</button>}
+        <button onClick={() => void openWorkspace()} disabled={!workspace?.initialized || workspaceBusy}><span className="act-mark folder" aria-hidden="true" />Open Local Folder</button>
       </section>
       <footer className="safe-status">{status}</footer>
     </main>;
@@ -2352,6 +2355,19 @@ function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: Proj
   }, []);
   // Which chapter this file could stand in for, if any. Only a Reader Copy is
   // offered — a blueprint or a draft is never what a reader opens.
+  // What the file is for, in the author's own naming: A blueprint, B
+  // development, P a draft part, R the copy readers open.
+  const kindOf = (file: ProjectDocument): string => {
+    const parsed = parseDoc(file);
+    if (parsed.typeCode === "A") return "Blueprint";
+    if (parsed.typeCode === "B") return "Development";
+    if (parsed.typeCode === "P") return parsed.draftPart ? `Draft part ${parsed.draftPart}` : "Draft";
+    if (parsed.typeCode === "R") return "Reader copy";
+    if (parsed.typeCode === "codex") return "Codex";
+    if (parsed.typeCode === "master") return "Master codex";
+    return "";
+  };
+
   const chapterOf = (file: ProjectDocument): number | null => {
     const parsed = parseDoc(file);
     return parsed.typeCode === "R" ? parsed.chapter : null;
@@ -2413,6 +2429,9 @@ function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: Proj
               {name}
               {folder && <small>{folder}</small>}
             </span>
+            {/* Only on a wide window: the same row on a narrow one keeps the
+                name, which is the part nobody can do without. */}
+            {kindOf(file) && <span className="file-kind">{kindOf(file)}</span>}
             {/* A codex belongs to every project, so say so before someone
                 rates one as if it were this project's own. */}
             {file.localRelativePath.startsWith(SHARED_FOLDER) && <span className="shared-chip">Shared</span>}

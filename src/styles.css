@@ -569,7 +569,9 @@ button.text-button.mode-back:hover { color: #00140e; background: var(--mc-green-
 .mode-icon.voice-mic-mark::after { content: ""; position: absolute; left: 17px; top: 26px; width: 27px; height: 22px; border: 3px solid #cbd4d1; border-top: 0; border-radius: 0 0 18px 18px; box-shadow: 0 9px 0 -5px var(--mc-green); }
 @media (max-width: 700px) { .brand-logo { width: min(460px, 94vw); height: 128px; } .brand-logo.compact { width: min(300px, 78vw); height: 88px; } }
 
+/* A long list earns the whole window when there is one. */
 .project-shell { max-width: 980px; }
+.project-shell:has(.file-row) { max-width: none; }
 .project-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 42px 0 24px; }
 .project-heading h1 { margin: 4px 0 10px; font: 700 clamp(2.4rem, 6vw, 4.8rem)/.95 Georgia, serif; }
 .project-heading p { max-width: 660px; color: var(--mc-muted); }
@@ -580,8 +582,8 @@ button.text-button.mode-back:hover { color: #00140e; background: var(--mc-green-
 .workspace-card strong { font: 700 1.35rem Georgia, serif; }
 .workspace-card small { color: var(--mc-muted); line-height: 1.5; overflow-wrap: anywhere; }
 .workspace-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 12px; margin: 22px 0; }
-.workspace-actions button { min-height: 54px; padding: 12px 16px; color: var(--mc-white); background: #0e1715; border: 1px solid var(--mc-border); border-radius: 10px; font-weight: 800; }
-.workspace-actions .primary { color: #00140e; background: var(--mc-green); border-color: var(--mc-green-soft); }
+.workspace-actions button { display: flex; align-items: center; justify-content: flex-start; gap: 10px; min-height: 44px; padding: 9px 14px; text-align: left; color: var(--mc-white); background: #0e1715; border: 1px solid var(--mc-border); border-radius: 10px; font-weight: 800; }
+.workspace-actions button:not(:disabled):hover { border-color: var(--mc-green); background: #101c19; }
 .workspace-actions button:disabled { opacity: .45; cursor: not-allowed; }
 .download-progress { margin: 18px 0 0; padding: 16px 18px; color: #d9fff4; background: #10231e; border: 1px solid #2e8d75; border-radius: 12px; }
 .download-progress p { margin: 5px 0 0; color: var(--mc-muted); }
@@ -833,3 +835,24 @@ textarea.grows { resize: vertical; min-height: 84px; overflow: auto; }
 .app-shell textarea::-webkit-scrollbar-track, .app-shell pre::-webkit-scrollbar-track { background: transparent; }
 .app-shell textarea::-webkit-scrollbar-thumb, .app-shell pre::-webkit-scrollbar-thumb { background: #2c4b41; border: 2px solid transparent; background-clip: content-box; border-radius: 999px; }
 .app-shell textarea::-webkit-scrollbar-thumb:hover, .app-shell pre::-webkit-scrollbar-thumb:hover { background: var(--mc-green); background-clip: content-box; }
+
+/* A small mark on each action, drawn rather than lettered so it reads at a
+   glance and never changes with the language. */
+.act-mark { flex: 0 0 auto; position: relative; width: 18px; height: 18px; }
+.act-mark::before, .act-mark::after { content: ""; position: absolute; }
+.act-mark.files::before { left: 1px; top: 1px; width: 11px; height: 15px; border: 1.5px solid var(--mc-green); border-radius: 2px; }
+.act-mark.files::after { left: 5px; top: 4px; width: 11px; height: 15px; border: 1.5px solid #7d8a86; border-radius: 2px; background: #0e1715; }
+.act-mark.prepare::before { left: 0; top: 4px; width: 16px; height: 11px; border: 1.5px solid var(--mc-green); border-radius: 2px 2px 3px 3px; }
+.act-mark.prepare::after { left: 0; top: 1px; width: 7px; height: 3px; border: 1.5px solid var(--mc-green); border-bottom: 0; border-radius: 2px 2px 0 0; }
+.act-mark.down::before { left: 7px; top: 0; width: 2px; height: 11px; background: var(--mc-green); }
+.act-mark.down::after { left: 3px; top: 7px; width: 10px; height: 10px; border-right: 2px solid var(--mc-green); border-bottom: 2px solid var(--mc-green); transform: rotate(45deg) scale(.62); }
+.act-mark.up::before { left: 7px; top: 6px; width: 2px; height: 11px; background: var(--mc-green); }
+.act-mark.up::after { left: 3px; top: 1px; width: 10px; height: 10px; border-left: 2px solid var(--mc-green); border-top: 2px solid var(--mc-green); transform: rotate(45deg) scale(.62); }
+.act-mark.review::before { left: 1px; top: 1px; width: 11px; height: 11px; border: 1.5px solid var(--mc-green); border-radius: 50%; }
+.act-mark.review::after { left: 10px; top: 10px; width: 7px; height: 1.5px; background: var(--mc-green); transform: rotate(45deg); }
+.act-mark.folder::before { left: 0; top: 3px; width: 16px; height: 12px; border: 1.5px solid #7d8a86; border-radius: 2px; }
+.act-mark.folder::after { left: 0; top: 1px; width: 7px; height: 3px; background: #7d8a86; border-radius: 2px 2px 0 0; }
+
+/* Says what the file is for, and steps aside when the window cannot spare it. */
+.file-kind { flex: 0 0 auto; width: 108px; color: var(--mc-green-soft); font-size: .74rem; font-weight: 700; }
+@media (max-width: 900px) { .file-kind { display: none; } }
