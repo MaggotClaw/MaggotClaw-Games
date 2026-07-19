@@ -700,8 +700,7 @@ button.danger:disabled { opacity: .45; cursor: default; filter: none; }
 .send-target select { padding: 9px 12px; color: var(--mc-white); background: #0e1715; border: 1px solid var(--mc-border); border-radius: 10px; }
 
 /* Who changed a file, newest first. Quiet — it sits under the real controls. */
-.change-log { margin-top: 12px; padding-top: 10px; border-top: 1px solid #1e2c28; }
-.change-log .eyebrow { display: block; margin-bottom: 6px; }
+.change-log { margin: 6px 0 2px 4px; padding: 6px 0 2px 10px; border-left: 2px solid #24352f; }
 .change-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 3px 0; font-size: .85rem; }
 .change-line strong { color: var(--mc-white); }
 .change-line time { color: var(--mc-muted); font-size: .78rem; }
@@ -709,3 +708,45 @@ button.danger:disabled { opacity: .45; cursor: default; filter: none; }
 
 /* Marks a file that belongs to every project, not just this one. */
 .shared-chip { padding: 2px 9px; color: #17100a; background: #d5a85f; border-radius: 999px; font-weight: 800; font-size: .72rem; }
+
+/* The owner's view-as switch: a chip that holds a dropdown, so looking through
+   someone else's eyes never removes the way back. */
+.viewing-as { display: inline-flex; align-items: center; gap: 8px; }
+.viewing-as select { padding: 4px 8px; color: inherit; background: transparent; border: 0; border-bottom: 1px solid currentColor; font-weight: 700; cursor: pointer; }
+.viewing-as select option { color: var(--mc-white); background: var(--mc-panel); }
+
+/* The downloaded-files list: one tight line per file, so a long project can be
+   scanned by running an eye down it rather than scrolling through cards. */
+.file-row { padding: 5px 10px; border-bottom: 1px solid #17231f; }
+.file-row:hover { background: #0d1614; }
+.file-line { display: flex; align-items: center; gap: 10px; min-height: 30px; }
+.file-name { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.file-name > small { color: var(--mc-muted); font-size: .68rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-row .file-name { color: var(--mc-white); font-size: .88rem; white-space: nowrap; text-overflow: ellipsis; }
+.file-size { flex: 0 0 auto; width: 62px; text-align: right; color: var(--mc-muted); font-size: .74rem; }
+.file-access { flex: 0 0 auto; max-width: 190px; padding: 3px 8px; color: var(--mc-white); background: #0e1715; border: 1px solid var(--mc-border); border-radius: 8px; font-size: .78rem; }
+.file-access-flat { flex: 0 0 auto; color: var(--mc-muted); font-size: .78rem; }
+.file-pick { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; color: var(--mc-green-soft); font-size: .76rem; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.log-toggle { flex: 0 0 auto; padding: 2px 8px; color: var(--mc-muted); background: transparent; border: 1px solid #24352f; border-radius: 999px; font-size: .72rem; }
+.log-toggle:hover { color: var(--mc-green-soft); border-color: var(--mc-green); }
+.left-chip { flex: 0 0 auto; padding: 1px 8px; color: var(--mc-muted); background: #16201d; border-radius: 999px; font-size: .68rem; font-weight: 700; }
+.file-row .shared-chip { flex: 0 0 auto; }
+@media (max-width: 700px) { .file-size { display: none; } .file-access { max-width: 120px; } }
+
+/* Two more rooms of the app, drawn to match the cards already there: a stack
+   of files, and the maker's nib. */
+.mode-icon.files-mark, .mode-icon.maker-mark { position: relative; overflow: hidden; background: radial-gradient(circle at 38% 30%, #3b4844 0 8%, #111816 39%, #010403 76%); border: 2px solid var(--mc-green); box-shadow: inset 0 1px #ffffff38, 0 0 0 3px #aebbb72b, 0 0 24px #00efb15c; }
+.mode-icon.files-mark::before { content: ""; position: absolute; left: 17px; top: 15px; width: 24px; height: 30px; background: linear-gradient(150deg, #2b3331 0 45%, #131a18 100%); border: 2px solid #cbd4d1; border-radius: 3px; box-shadow: 5px -4px 0 -2px #7d8a86, inset 0 1px #ffffff22; }
+.mode-icon.files-mark::after { content: ""; position: absolute; left: 22px; top: 24px; width: 14px; height: 2px; background: var(--mc-green); box-shadow: 0 6px 0 var(--mc-green), 0 12px 0 #7d8a86; filter: drop-shadow(0 0 4px #00efb188); }
+.mode-icon.maker-mark::before { content: ""; position: absolute; left: 20px; top: 14px; width: 18px; height: 24px; background: linear-gradient(150deg, #cbd4d1 0 40%, #7d8a86 100%); border-radius: 3px 3px 0 0; box-shadow: inset 0 1px #ffffff55; }
+.mode-icon.maker-mark::after { content: ""; position: absolute; left: 20px; top: 37px; width: 0; height: 0; border-left: 9px solid transparent; border-right: 9px solid transparent; border-top: 13px solid var(--mc-green); filter: drop-shadow(0 0 6px #00efb1aa); }
+
+/* The remaining rooms, drawn in the same hand: a key for the owner's desk,
+   two figures for people, a speech mark for telling MaggotClaw. */
+.mode-icon.owner-mark, .mode-icon.people-mark, .mode-icon.tell-mark { position: relative; overflow: hidden; background: radial-gradient(circle at 38% 30%, #3b4844 0 8%, #111816 39%, #010403 76%); border: 2px solid var(--mc-green); box-shadow: inset 0 1px #ffffff38, 0 0 0 3px #aebbb72b, 0 0 24px #00efb15c; }
+.mode-icon.owner-mark::before { content: ""; position: absolute; left: 16px; top: 22px; width: 15px; height: 15px; border: 3px solid var(--mc-green); border-radius: 50%; filter: drop-shadow(0 0 5px #00efb188); }
+.mode-icon.owner-mark::after { content: ""; position: absolute; left: 30px; top: 27px; width: 16px; height: 3px; background: var(--mc-green); box-shadow: -3px 6px 0 -1px var(--mc-green), 4px 6px 0 -1px var(--mc-green); filter: drop-shadow(0 0 5px #00efb188); }
+.mode-icon.people-mark::before { content: ""; position: absolute; left: 17px; top: 17px; width: 13px; height: 13px; background: #cbd4d1; border-radius: 50%; box-shadow: 16px 3px 0 -1px #7d8a86; }
+.mode-icon.people-mark::after { content: ""; position: absolute; left: 12px; top: 33px; width: 23px; height: 13px; background: var(--mc-green); border-radius: 12px 12px 3px 3px; box-shadow: 15px 3px 0 -3px #7d8a86; filter: drop-shadow(0 0 5px #00efb166); }
+.mode-icon.tell-mark::before { content: ""; position: absolute; left: 14px; top: 17px; width: 32px; height: 22px; background: linear-gradient(150deg, #2b3331 0 45%, #131a18 100%); border: 2px solid var(--mc-green); border-radius: 8px; box-shadow: inset 0 1px #ffffff22, 0 0 10px #00efb133; }
+.mode-icon.tell-mark::after { content: ""; position: absolute; left: 21px; top: 37px; width: 0; height: 0; border-left: 8px solid transparent; border-right: 4px solid transparent; border-top: 10px solid var(--mc-green); filter: drop-shadow(0 0 4px #00efb188); }

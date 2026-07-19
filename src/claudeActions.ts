@@ -152,6 +152,19 @@ export function updateLogState(id: string, state: ActionRecord["state"], note: s
 }
 
 // The instruction sheet the author hands to Claude so it knows the protocol.
+// Where the same instructions live on Dropbox, so an assistant with the
+// project connected reads them instead of being handed them in every chat.
+export const ACTIONS_GUIDE_PATH =
+  "/MaggotClaw Games/Operations/02 AI Behavior Profile Specification/Claude App Actions - Chris Emmert v1.0.txt";
+
+// The short version: one line an assistant can act on when it can reach the
+// project files itself. Pasted once into a Project's instructions, it holds
+// for every conversation instead of being re-pasted into each one.
+export function claudePointer(): string {
+  return `You can act inside the MaggotClaw Games app. Read ${ACTIONS_GUIDE_PATH} for how, and follow it. Anything that changes the book waits for the author's OK GO.`;
+}
+
+// The whole manual, for an assistant that cannot reach Dropbox yet.
 export function claudeInstructions(): string {
   return `You can act inside the MaggotClaw Games app.
 

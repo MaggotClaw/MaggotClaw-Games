@@ -41,7 +41,7 @@ import { loadPeople, parseProfileMessage, publishPeople, removePerson, savePeopl
 import { addFeedback, diagnosticsReport, FEEDBACK_AREAS, feedbackMessage, loadErrors, loadFeedback, loadUsage, markFeedbackSent, noteUsage, setShareDiagnostics, shareDiagnostics, watchForErrors } from "./feedback";
 import { activeProject, addProject, allProjects, applyActiveProject, isSafeDropboxRoot, isSafeProjectName, removeProject, setActiveProjectId, SHARED_FOLDER } from "./projects";
 import {
-  actionsPath, actionLog, claudeAccessOn, claudeInstructions, describeAction,
+  actionsPath, actionLog, claudeAccessOn, claudeInstructions, claudePointer, describeAction,
   handledIds, logAction, markHandled, needsOkGo, parseActions, setClaudeAccess,
   updateLogState, type ActionRecord, type ClaudeAction
 } from "./claudeActions";
@@ -291,6 +291,7 @@ export function App() {
   const refreshRequests = useCallback(() => setRequests(pendingRequests()), []);
   const startupRan = useRef(false);
   const settingsReturn = useRef<Screen>("home");
+  const filesReturn = useRef<Screen>("project-workspace");
   // Comment dictation runs through the bundled Windows helper — the browser
   // speech engine does not exist inside the installed app.
   const commentDictation = useRef(new NativeTranscriptAssembler());
@@ -299,6 +300,14 @@ export function App() {
   function openSettingsFrom(from: Screen) {
     settingsReturn.current = from;
     setScreen("settings");
+  }
+
+  // Back has to mean "where I actually came from". The file list is reachable
+  // from the main screen and from inside the workspace, and sending everyone
+  // to the workspace made the way out longer than the way in.
+  function openFilesFrom(from: Screen) {
+    filesReturn.current = from;
+    setScreen("workspace-files");
   }
 
   function openVoiceTarget(target: VoiceSettings["target"]) {
@@ -1353,24 +1362,35 @@ export function App() {
       <span className="who-chip home-corner">{readerName || "Guest"} · {roleLabel(role)}</span>
       <header className="hero"><BannerWithVersion /></header>
       <section className="home-toolbar">
-        {canPerform(role, "manage") && <button className="pill-button chip" onClick={openDashboard}>Owner Dashboard{(requests.length + discordWaiting) > 0 && <span className="pending-badge">{requests.length + discordWaiting}</span>}</button>}
         <button className="pill-button chip" onClick={() => openSettingsFrom("home")}>Settings</button>
         <button className="pill-button chip" onClick={() => setScreen("directions")}>Directions</button>
-        {getViewAs()
-          ? <button className="pill-button chip" onClick={() => { setViewAs(null); window.location.reload(); }}>Viewing as {roleLabel(role)} — back</button>
+        {/* The switch stays on the real owner's authority, never the borrowed
+            one — otherwise looking through a reader's eyes takes away the very
+            control needed to stop looking, and only a restart gets you out. */}
+        {canPerform(realProfileRole(readerName), "manage") && getViewAs()
+          ? <label className="pill-button chip viewing-as">Viewing as
+              <select value={getViewAs() ?? "administrator"} onChange={(event) => {
+                const option = event.target.value as ProjectRole;
+                setViewAs(option === "administrator" ? null : option);
+                window.location.reload();
+              }}>
+                <option value="administrator">Myself — Author / Owner</option>
+                {(["support", "manager", "editor", "reviewer", "contributor", "reader"] as ProjectRole[])
+                  .map((option) => <option key={option} value={option}>{roleLabel(option)}</option>)}
+              </select>
+            </label>
           : <button className="pill-button chip" onClick={() => setScreen("profile")}>{readerName || "Start Here"}</button>}
         {"__TAURI_INTERNALS__" in window && <button className="pill-button chip" onClick={() => { setIdeaText(""); setScreen("idea"); }}>Note To Self</button>}
-        {/* Deciding who downloads what, and which file readers open, is
-            everyday owner work — it does not belong three screens deep. */}
-        {canPerform(role, "manage") && <button className="pill-button chip" onClick={() => setScreen("workspace-files")}>Project Files</button>}
-        {/* The author's own bench — owner-only unless he shares it with editors. */}
-        {(canPerform(role, "manage") || (canPerform(role, "upload") && humanMakerAllows(humanMakerNames(), readerName))) &&
-          <button className="pill-button chip" onClick={() => setScreen("human-maker")}>Human Maker</button>}
+        {/* Anywhere you go and do work is a card below, with the other rooms
+            of the app. Only small controls belong up here — the ones you press
+            and stay where you are.
+
+            Show Me How is gone from the toolbar on purpose: a guide is only
+            worth offering when something actually needs doing, and Things To
+            Do already puts it in front of you then. A standing button for it
+            implies there is always something outstanding. */}
         {"__TAURI_INTERNALS__" in window && canPerform(role, "propose") &&
           <button className="pill-button chip" onClick={() => { void openOkGoWindow(); }}>OK GO Button</button>}
-        {"__TAURI_INTERNALS__" in window && <button className="pill-button chip" onClick={() => { void openWalkthroughWindow(); }}>Show Me How</button>}
-        <button className="pill-button chip" onClick={() => setScreen("feedback")}>Tell MaggotClaw</button>
-        {canPerform(role, "manage") && <button className="pill-button chip" onClick={() => setScreen("people")}>People</button>}
         {canPerform(role, "manage") && <button className="pill-button chip" onClick={() => setScreen("claude-access")}>
           Claude{claudeLog.some((r) => r.state === "waiting") && <span className="pending-badge">{claudeLog.filter((r) => r.state === "waiting").length}</span>}
         </button>}
@@ -1394,6 +1414,14 @@ export function App() {
         <button className="mode-card voice-mode" onClick={() => setScreen("voice-targets")}><span className="mode-icon voice-mic-mark" aria-hidden="true" /><span><strong>Voice Companion</strong><small>Talk with Claude or Codex now. ChatGPT will be added later.</small></span><span>→</span></button>
         <button className="mode-card project-mode" onClick={openProjects}><img className="mode-icon image-icon" src="/mcg-social-circle.png" alt="MaggotClaw Games" /><span><strong>Projects</strong><small>{canPerform(role, "review") ? "Open a project, review its local files, and use the actions allowed for your role." : "Editing the project files needs approval from the owner."}</small></span><span>→</span></button>
         <button className="mode-card chat-mode" onClick={() => setScreen("chat")}><span className="mode-icon chat-mark" aria-hidden="true" /><span><strong>Messages</strong><small>Rooms and voice calls for readers, editors, and the author.</small></span><span>→</span></button>
+        {/* Rooms of the app, not controls: you go here and work. */}
+        {canPerform(role, "manage") && <button className="mode-card files-mode" onClick={() => openFilesFrom("home")}><span className="mode-icon files-mark" aria-hidden="true" /><span><strong>Project Files</strong><small>Choose who downloads each file, which file readers open for a chapter, and see who changed what.</small></span><span>→</span></button>}
+        {(canPerform(role, "manage") || (canPerform(role, "upload") && humanMakerAllows(humanMakerNames(), readerName))) &&
+          <button className="mode-card maker-mode" onClick={() => setScreen("human-maker")}><span className="mode-icon maker-mark" aria-hidden="true" /><span><strong>Human Maker</strong><small>Audit a chapter against your own codex, then send the findings straight to Claude for the rewrite.</small></span><span>→</span></button>}
+        {canPerform(role, "manage") && <button className="mode-card owner-mode" onClick={openDashboard}><span className="mode-icon owner-mark" aria-hidden="true" /><span><strong>Owner Dashboard</strong><small>Approvals waiting on you, requests pulled from Discord, and which chapters are released.</small></span>
+          {(requests.length + discordWaiting) > 0 ? <span className="pending-badge">{requests.length + discordWaiting}</span> : <span>→</span>}</button>}
+        {canPerform(role, "manage") && <button className="mode-card people-mode" onClick={() => setScreen("people")}><span className="mode-icon people-mark" aria-hidden="true" /><span><strong>People</strong><small>Everyone who reads or works on the book, and what each of them is allowed to do.</small></span><span>→</span></button>}
+        <button className="mode-card tell-mode" onClick={() => setScreen("feedback")}><span className="mode-icon tell-mark" aria-hidden="true" /><span><strong>Tell MaggotClaw</strong><small>Report anything wrong with the program, or ask for something you wish it did.</small></span><span>→</span></button>
       </section>
     </main>;
   }
@@ -1610,7 +1638,14 @@ export function App() {
       <section className="dash-section">
         <label className="check-setting"><input type="checkbox" checked={claudeOn} onChange={(event) => { setClaudeOn(event.target.checked); setClaudeAccess(event.target.checked); }} /> Let Claude act inside this app</label>
         <p className="board-hint">When this is on, the app checks Dropbox every few seconds for Claude's requests. Opening screens, changing settings, teaching the narrator, saving notes and new files happen straight away. Rewrites, file moves, and chapter releases wait for your OK GO below.</p>
-        <div className="form-actions"><button className="primary" onClick={() => { void navigator.clipboard?.writeText(claudeInstructions()).then(() => setStatus("Instructions copied — paste them to Claude.")).catch(() => undefined); }}>Copy The Instructions For Claude</button></div>
+        {/* The manual itself lives on Dropbox now. Handing over one line that
+            points at it means Claude reads the current version rather than
+            whatever was pasted into some conversation months ago. */}
+        <p className="board-hint">The full instructions live on Dropbox, at <strong>Operations → 02 AI Behavior Profile Specification → Claude App Actions</strong>. Claude reads them from there, so they are never out of date.</p>
+        <div className="form-actions">
+          <button className="primary" onClick={() => { void navigator.clipboard?.writeText(claudePointer()).then(() => setStatus("Copied. Paste it into Claude's Project instructions once — every conversation in that project will have it from then on.")).catch(() => undefined); }}>Copy The One Line For Claude</button>
+          <button onClick={() => { void navigator.clipboard?.writeText(claudeInstructions()).then(() => setStatus("Full instructions copied. Only needed if Claude cannot reach your Dropbox.")).catch(() => undefined); }}>Copy The Whole Manual Instead</button>
+        </div>
       </section>
 
       <section className="dash-section">
@@ -1654,7 +1689,7 @@ export function App() {
   }
 
   if (screen === "workspace-files") {
-    return <WorkspaceFilesScreen role={role} readerName={readerName} client={client} onBack={() => setScreen("project-workspace")} />;
+    return <WorkspaceFilesScreen role={role} readerName={readerName} client={client} onBack={() => setScreen(filesReturn.current)} />;
   }
 
   if (screen === "project-workspace") {
@@ -1663,7 +1698,7 @@ export function App() {
       <section className="project-heading"><div><p className="eyebrow">The Long Rot</p><h1>Project Workspace</h1><p>Dropbox stays the shared source. The AI works from safe copies on this computer.</p></div></section>
       <section className="workspace-card">
         <div><span>Local workspace</span><strong>{workspace?.initialized ? "Ready" : "Not prepared yet"}</strong><small>{workspace?.workspacePath || "The standard MaggotClaw Games Projects folder will be used."}</small></div>
-        <div><span>Files downloaded</span><strong>{workspace?.downloadedFiles || 0}</strong><small>{workspace?.pendingBinaryFiles || 0} Word, PDF, image, or other binary files waiting for expanded MCP download support.<br/>Last completed file save: {formatWorkspaceTime(workspace?.lastDownloadAt || null)}{syncMessage ? <><br/>{syncMessage}</> : null}<br/><button className="text-button inline" onClick={() => setScreen("workspace-files")} disabled={!workspace?.downloadedFiles}>View The File List →</button></small></div>
+        <div><span>Files downloaded</span><strong>{workspace?.downloadedFiles || 0}</strong><small>{workspace?.pendingBinaryFiles || 0} Word, PDF, image, or other binary files left on Dropbox: pictures and other kinds the app cannot open.<br/>Last completed file save: {formatWorkspaceTime(workspace?.lastDownloadAt || null)}{syncMessage ? <><br/>{syncMessage}</> : null}<br/><button className="text-button inline" onClick={() => openFilesFrom("project-workspace")} disabled={!workspace?.downloadedFiles}>View The File List →</button></small></div>
         <div><span>Dropbox Uploads</span><strong>{canPerform(role, "manage") ? "Owner Only" : "Locked"}</strong><small>{canPerform(role, "manage") ? "Upload Approved sends everything in 05 Approved Uploads to Dropbox." : "Uploads run from the owner\u2019s account."}</small></div>
       </section>
       {workspaceProgress && <section className="download-progress"><strong>{workspaceProgress.stage}</strong><p>{workspaceProgress.completed} of {workspaceProgress.total || "?"} text files saved · {workspaceProgress.skipped} other files recorded</p></section>}
@@ -2071,6 +2106,8 @@ function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: Proj
   const [access, setAccess] = useState<FileAccessMap>(loadAccessMap);
   const [picks, setPicks] = useState<ChapterFileMap>(loadChapterFiles);
   const [changes, setChanges] = useState<ChangeLogMap>(loadChangeLog);
+  // One file's history at a time; the list stays scannable.
+  const [openLog, setOpenLog] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -2137,40 +2174,61 @@ function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: Proj
     {note && <p className="board-hint">{note}</p>}
     <section className="comments-list">
       {docs.length === 0 && <div className="empty-state"><strong>Nothing downloaded yet</strong><p>Run Download or Update in the workspace first.</p></div>}
-      {docs.map((file) => <article key={file.dropboxPath} className="saved-comment">
-        <div className="comment-meta">
-          <span>{file.status === "downloaded" ? "Downloaded" : "Left On Dropbox"}</span>
-          {/* A codex belongs to every project, so it is worth saying which
-              files are shared before someone rates one as if it were theirs. */}
-          {file.localRelativePath.startsWith(SHARED_FOLDER) && <span className="shared-chip">Shared Codex</span>}
-          <span>{file.byteCount ? `${Math.max(1, Math.round(file.byteCount / 1024))} KB` : ""}</span>
-        </div>
-        <h2>{file.localRelativePath}</h2>
-        {isOwner
-          ? <>
-              <label>Who needs this file<select value={access[file.dropboxPath] ?? "reader"} onChange={(event) => setAccess(setFileAccess(file.dropboxPath, event.target.value as FileAccessMap[string]))}>
-                {ACCESS_LEVEL_LABELS.map((level) => <option key={level.value} value={level.value}>{level.label}</option>)}
-              </select></label>
-              {/* Only a Reader Copy of a chapter can BE the chapter people open. */}
-              {chapterOf(file) != null && <label className="check-setting">
-                <input
-                  type="checkbox"
-                  checked={picks[chapterOf(file)!] === file.dropboxPath}
-                  onChange={(event) => setPicks(setChapterFile(chapterOf(file)!, event.target.checked ? file.dropboxPath : ""))}
-                /> This is what readers open for Chapter {chapterOf(file)}
-              </label>}
-            </>
-          : <small>{levelLabel(file.dropboxPath)}</small>}
-        {/* A working tool for people who change things — readers just read. */}
-        {canPerform(role, "review") && changesFor(changes, file.dropboxPath).length > 0 && <div className="change-log">
-          <span className="eyebrow">Last {Math.min(KEPT_PER_FILE, changesFor(changes, file.dropboxPath).length)} Changes</span>
-          {changesFor(changes, file.dropboxPath).map((change) => <div key={`${change.who}-${change.at}`} className="change-line">
-            <strong>{change.who}</strong>
-            <time>{new Date(change.at).toLocaleString()}</time>
-            {change.note && <em>"{change.note}"</em>}
-          </div>)}
-        </div>}
-      </article>)}
+      {/* One line per file. A long list is for scanning, so the name carries
+          the row and everything else stays out of the way until wanted. */}
+      {docs.map((file) => {
+        const parts = file.localRelativePath.split(/[\\/]/);
+        const name = parts[parts.length - 1];
+        const folder = parts.length > 1 ? parts.slice(0, -1).join(" / ") : "";
+        const history = changesFor(changes, file.dropboxPath);
+        const chapter = chapterOf(file);
+        return <article key={file.dropboxPath} className="file-row">
+          <div className="file-line">
+            <span className="file-name" title={file.localRelativePath}>
+              {name}
+              {folder && <small>{folder}</small>}
+            </span>
+            {/* A codex belongs to every project, so say so before someone
+                rates one as if it were this project's own. */}
+            {file.localRelativePath.startsWith(SHARED_FOLDER) && <span className="shared-chip">Shared</span>}
+            {file.status !== "downloaded" && <span className="left-chip">On Dropbox</span>}
+            <span className="file-size">{file.byteCount ? `${Math.max(1, Math.round(file.byteCount / 1024))} KB` : ""}</span>
+            {isOwner
+              ? <>
+                  <select
+                    className="file-access"
+                    title="Who needs this file"
+                    value={access[file.dropboxPath] ?? "reader"}
+                    onChange={(event) => setAccess(setFileAccess(file.dropboxPath, event.target.value as FileAccessMap[string]))}
+                  >
+                    {ACCESS_LEVEL_LABELS.map((level) => <option key={level.value} value={level.value}>{level.label}</option>)}
+                  </select>
+                  {/* Only a Reader Copy of a chapter can BE the chapter people open. */}
+                  {chapter != null && <label className="file-pick" title={`Make this what readers open for Chapter ${chapter}`}>
+                    <input
+                      type="checkbox"
+                      checked={picks[chapter] === file.dropboxPath}
+                      onChange={(event) => setPicks(setChapterFile(chapter, event.target.checked ? file.dropboxPath : ""))}
+                    /> Ch {chapter}
+                  </label>}
+                </>
+              : <span className="file-access-flat">{levelLabel(file.dropboxPath)}</span>}
+            {/* A working tool for people who change things — readers just read. */}
+            {canPerform(role, "review") && history.length > 0 && <button
+              className="log-toggle"
+              title="Who changed this file"
+              onClick={() => setOpenLog(openLog === file.dropboxPath ? "" : file.dropboxPath)}
+            >{history.length} ⌄</button>}
+          </div>
+          {openLog === file.dropboxPath && <div className="change-log">
+            {history.map((change) => <div key={`${change.who}-${change.at}`} className="change-line">
+              <strong>{change.who}</strong>
+              <time>{new Date(change.at).toLocaleString()}</time>
+              {change.note && <em>"{change.note}"</em>}
+            </div>)}
+          </div>}
+        </article>;
+      })}
     </section>
   </main>;
 }
