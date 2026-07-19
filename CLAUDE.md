@@ -58,6 +58,24 @@ the two newest** — the current build and one fallback. He installs it himself.
 - Say what is safe: when something fails, tell the person what was *not*
   changed.
 
+## Never change the identifier
+
+`identifier` in `src-tauri/tauri.conf.json` is `com.maggotclaw.games`. Every
+setting the app has — keys, profiles, ratings, chapter picks, reading position
+— lives in `%LOCALAPPDATA%\<identifier>`, because that is where WebView2 keeps
+the storage. The installer never touches that folder, which is why upgrading
+keeps everything.
+
+Change the identifier and all of it vanishes in the same instant, with the app
+reporting nothing wrong — it simply looks brand new. That is exactly what
+happened when the project was renamed from the-long-rot-voice, and it cost a
+re-import from the settings backup.
+
+If it ever genuinely must change, copy the old folder to the new name first.
+
+Installers are `currentUser` NSIS, so an upgrade installs over the top with no
+admin prompt and no separate uninstall.
+
 ## Every new window
 
 Add it to `src-tauri/capabilities/default.json` or Tauri silently refuses
