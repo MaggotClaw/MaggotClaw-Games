@@ -68,7 +68,7 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
       // The companion bar is sized to hug its buttons — no dead space at
       // either end. This runs on a timer, so it must match the width the
       // window was created with or it undoes the fit.
-      safe(() => appWindow.setSize(new LogicalSize(companion ? 430 : 590, 84)));
+      safe(() => appWindow.setSize(new LogicalSize(companion ? 460 : 620, 84)));
       safe(() => appWindow.setAlwaysOnTop(true));
       // Above full-screen programs too, not just ordinary windows.
       safe(() => appWindow.setVisibleOnAllWorkspaces(true));

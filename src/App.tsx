@@ -169,7 +169,7 @@ async function openOkGoWindow(): Promise<void> {
   new WebviewWindow("okgo", {
     url: "index.html#okgo",
     title: "OK GO",
-    width: 236,
+    width: 300,
     height: 104,
     resizable: true,
     decorations: false,
@@ -199,7 +199,7 @@ async function openCompanionWindow(): Promise<void> {
     dragDropEnabled: false,
     // Sized to hug the buttons: mic almost touching the left curve, Close (✕)
     // right at the rounded end. Must match applyCompact in TalkScreen.
-    width: 430,
+    width: 460,
     height: 84,
     resizable: true,
     decorations: false,
