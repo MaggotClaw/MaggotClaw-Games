@@ -460,3 +460,77 @@ pub async fn copy_latest_conversation_response(target: Option<String>) -> Result
         .await
         .map_err(|_| background_error())?
 }
+
+/// Looks at what the assistant's window is actually made of, and reports it.
+///
+/// Reading a reply while it is still arriving means taking the text straight
+/// from the window rather than waiting for a Copy button that only appears when
+/// the message is finished. Whether that is possible depends on how the window
+/// exposes its text, which cannot be known without looking at a real one —
+/// guessing would mean an app that quietly reads the wrong thing.
+///
+/// Read-only. It clicks nothing and changes nothing.
+#[tauri::command]
+pub async fn inspect_conversation_text(target: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || inspect_conversation_text_blocking(target))
+        .await
+        .map_err(|_| background_error())?
+}
+
+fn inspect_conversation_text_blocking(target: Option<String>) -> Result<String, String> {
+    let automation = automation()?;
+    let (target, window) = resolve_target(&automation, target.as_deref())?;
+    let bounds = window
+        .get_bounding_rectangle()
+        .map_err(|_| "The window's position could not be read.".to_string())?;
+    let midpoint = bounds.get_left() + bounds.get_width() / 2;
+
+    let mut report = format!(
+        "{} window — {} wide, midpoint at {}\n\n",
+        target.short_name(),
+        bounds.get_width(),
+        midpoint
+    );
+
+    for (label, control) in [
+        ("Text", ControlType::Text),
+        ("Document", ControlType::Document),
+        ("Group", ControlType::Group),
+        ("Edit", ControlType::Edit),
+    ] {
+        let found = automation
+            .create_matcher()
+            .from(window.clone())
+            .control_type(control)
+            .depth(40)
+            .timeout(0)
+            .find_all()
+            .unwrap_or_default();
+        // Only elements carrying real prose are interesting; a window is full
+        // of empty containers and one-word labels.
+        let mut carrying: Vec<(i32, usize, String)> = found
+            .iter()
+            .filter_map(|element| {
+                let name = element.get_name().ok()?;
+                let trimmed = name.trim();
+                if trimmed.len() < 40 {
+                    return None;
+                }
+                let left = element.get_bounding_rectangle().ok()?.get_left();
+                Some((left, trimmed.chars().count(), trimmed.chars().take(70).collect()))
+            })
+            .collect();
+        carrying.sort_by_key(|(left, _, _)| *left);
+        report.push_str(&format!(
+            "{label}: {} found, {} carrying text\n",
+            found.len(),
+            carrying.len()
+        ));
+        for (left, length, sample) in carrying.iter().take(6) {
+            let side = if *left < midpoint { "LEFT (assistant)" } else { "RIGHT (yours)" };
+            report.push_str(&format!("   x={left:<6} {length:>6} chars  {side}  {sample}…\n"));
+        }
+        report.push('\n');
+    }
+    Ok(report)
+}

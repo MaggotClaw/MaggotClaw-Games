@@ -291,6 +291,8 @@ export function App() {
   const [arrived, setArrived] = useState<ArrivedFeedback[]>([]);
   const [arrivedBusy, setArrivedBusy] = useState(false);
   const [arrivedNote, setArrivedNote] = useState("");
+  const [inspectBusy, setInspectBusy] = useState(false);
+  const [inspectNote, setInspectNote] = useState("");
   const [behaviourBusy, setBehaviourBusy] = useState(false);
   // Which assistant the page is talking about. The behaviour rules are shared
   // by all of them; only what each one can actually DO differs.
@@ -1773,6 +1775,22 @@ export function App() {
           }}>Load What Is Saved</button>
         </div>
         {behaviourNote && <p className="board-hint">{behaviourNote}</p>}
+      </section>
+
+      <section className="dash-section">
+        <h2>Reading Out Loud</h2>
+        <p className="board-hint">The companion waits for a reply to finish before it starts reading. To read while the words are still arriving it has to take them from the window directly, and whether that is possible depends on how the window is built. This looks and reports back. It presses nothing.</p>
+        <div className="form-actions">
+          <button disabled={inspectBusy} onClick={() => {
+            setInspectBusy(true); setInspectNote("");
+            void import("@tauri-apps/api/core")
+              .then(({ invoke }) => invoke<string>("inspect_conversation_text", { target: aiTarget === "codex" ? "codex" : "claude" }))
+              .then((report) => { setInspectNote(report); void navigator.clipboard?.writeText(report).catch(() => undefined); })
+              .catch((error) => setInspectNote(message(error)))
+              .finally(() => setInspectBusy(false));
+          }}>{inspectBusy ? "Looking…" : "Check What Can Be Read"}</button>
+        </div>
+        {inspectNote && <pre className="file-text">{inspectNote}</pre>}
       </section>
 
       <section className="dash-section">

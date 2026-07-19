@@ -486,6 +486,7 @@ pub fn run() {
             desktop_companion::conversation_response_state,
             desktop_companion::conversation_is_foreground,
             desktop_companion::copy_latest_conversation_response,
+            desktop_companion::inspect_conversation_text,
             native_speech::prepare_native_dictation,
             native_speech::start_native_dictation,
             native_speech::stop_native_dictation,
