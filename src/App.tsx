@@ -1868,7 +1868,7 @@ export function App() {
 
   if (screen === "project-workspace") {
     return <main className="app-shell project-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("projects")}>← Back</button><span className="eyebrow">Local Project Workspace</span><button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button></header>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("projects")}>← Back</button><span className="eyebrow">{activeProject().name}</span><button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button></header>
       <section className="project-heading"><div><p className="eyebrow">The Long Rot</p><h1>Project Workspace</h1><p>The shared copy stays the source. The AI works from safe copies on this computer.</p></div></section>
       <section className="workspace-card">
         <div><span>Local workspace</span><strong>{workspace?.initialized ? "Ready" : "Not prepared yet"}</strong><small>{workspace?.workspacePath || "The standard MaggotClaw Games Projects folder will be used."}</small></div>
@@ -1886,7 +1886,6 @@ export function App() {
           : canPerform(role, "upload") && <button title="Uploads run from the owner's account for now." disabled>Upload Approved</button>}
         <button onClick={() => void openWorkspace()} disabled={!workspace?.initialized || workspaceBusy}>Open Local Folder</button>
       </section>
-      <section className="folder-map"><h2>What the app creates</h2><ol><li><strong>01 Originals</strong><span>Exact downloaded text files. The AI does not edit these.</span></li><li><strong>03 AI Context</strong><span>Markdown copies with source, revision, and checksum information.</span></li><li><strong>04 Proposed Changes</strong><span>Future AI and human drafts—not official project files.</span></li><li><strong>07 Backups</strong><span>Old local originals saved before a changed download replaces them.</span></li></ol></section>
       <footer className="safe-status">{status}</footer>
     </main>;
   }
