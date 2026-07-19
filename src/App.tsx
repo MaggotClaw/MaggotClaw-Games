@@ -1317,11 +1317,14 @@ export function App() {
 
   if (screen === "idea") {
     return <main className="app-shell settings-panel">
-      <button className="text-button mode-back" onClick={() => {
-        if (ideaListening) { commentDictationActive.current = false; setIdeaListening(false); void stopNativeDictation().catch(() => undefined); }
-        setScreen("home");
-      }}>← Back</button>
-      <BrandLogo compact /><p className="eyebrow">Suggestions</p><h1>Suggestions</h1>
+      <header className="topbar">
+        <button className="text-button" onClick={() => {
+          if (ideaListening) { commentDictationActive.current = false; setIdeaListening(false); void stopNativeDictation().catch(() => undefined); }
+          setScreen("home");
+        }}>← Back</button>
+        <span className="eyebrow">Suggestions</span>
+        <button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button>
+      </header>
       <p>Anything you thought of and do not want to lose. Speak it or type it.</p>
       <label>Your suggestion<textarea rows={8} value={ideaText} placeholder="Speak, or type here…" onChange={(event) => setIdeaText(event.target.value)} /></label>
       <div className="form-actions">
@@ -2069,7 +2072,7 @@ ${item.transcriptionConfirmed}`;
         <button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button>
       </section>
       <header className="hero">
-        <div><BrandLogo compact /><h1>Reader Mode</h1><p>{status}</p>
+        <div><h1>Reader Mode</h1><p>{status}</p>
         {listeningLine(loadListeningStats(readerName)) && <p className="board-hint">{listeningLine(loadListeningStats(readerName))}</p>}</div>
       </header>
       {recoverable && <section className="recovery-banner"><div><strong>Unfinished comment found</strong><p>Your recording and reading position are safe on this device.</p></div><button onClick={resumeRecoverable}>Recover</button></section>}
@@ -2135,7 +2138,6 @@ function Profile({ initial, role, onContinue, onCancel }: { initial: string; rol
   const pinProblem = !pinAlreadySet && pin && (!isValidPin(pin) ? "The PIN is exactly four digits." : pin !== pinAgain ? "The two PINs do not match yet." : "");
   return <main className="app-shell profile-screen">
     {onCancel && <button className="text-button mode-back" onClick={onCancel}>← Back</button>}
-    <BrandLogo />
     <div className="love-banner" role="status">Whatever you do, don't forget… <strong>MaggotClaw Loves You!!!</strong></div>
     <div className="step-row" aria-label={`Step ${step} of 3`}>
       {[1, 2, 3].map((n) => <span key={n} className={n === step ? "step-dot on" : n < step ? "step-dot done" : "step-dot"}>{n}</span>)}
@@ -2654,7 +2656,7 @@ function RequestAccess({ role, code, onSend, onCancel }: { role: ProjectRole; co
 
   if (code) {
     return <main className="app-shell settings-panel">
-      <BrandLogo compact /><p className="eyebrow">Request Access</p><h1>Send this to the owner</h1>
+      <p className="eyebrow">Request Access</p><h1>Send this to the owner</h1>
       <p>Copy the code below and send it to the owner any way you like — text, email, chat. They approve it and send you back an unlock code.</p>
       <CodeBox label="Your request code" code={code} hint="Send it to the owner, then use “Enter unlock code” when they reply." />
       <div className="form-actions"><button className="primary" onClick={onCancel}>Done</button></div>
@@ -2662,7 +2664,7 @@ function RequestAccess({ role, code, onSend, onCancel }: { role: ProjectRole; co
   }
 
   return <main className="app-shell settings-panel">
-    <BrandLogo compact /><p className="eyebrow">Request Access</p><h1>Ask For More Access</h1>
+    <p className="eyebrow">Request Access</p><h1>Ask For More Access</h1>
     <p>You are a <strong>{roleLabel(role)}</strong>. Your request goes to the owner for approval — access is never granted automatically.</p>
     <label>Access you're requesting<select value={requested} onChange={(event) => setRequested(event.target.value as ProjectRole)}>
       {options.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
@@ -2676,7 +2678,7 @@ function RedeemUnlock({ name, onRedeem, onCancel }: { name: string; onRedeem: (c
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   return <main className="app-shell settings-panel">
-    <BrandLogo compact /><p className="eyebrow">Unlock Access</p><h1>Enter your unlock code</h1>
+    <p className="eyebrow">Unlock Access</p><h1>Enter your unlock code</h1>
     <p>Paste the unlock code the owner sent you. It was issued to <strong>{name}</strong>.</p>
     <label>Unlock code<textarea rows={3} value={code} placeholder="MCG-KEY-…" onChange={(event) => { setCode(event.target.value); setError(""); }} /></label>
     {error && <p className="update-status warn">{error}</p>}
@@ -3073,8 +3075,11 @@ function Settings({ initial, voiceOnly, onSave, onCancel, onRequestAccess, onEnt
     onSave({ endpoint: endpoint.trim() || defaultSettings.endpoint, bearerToken });
   }
   return <main className="app-shell settings-panel">
-    <button className="text-button mode-back" onClick={onCancel}>← Back</button>
-    <BrandLogo compact /><p className="eyebrow">Settings</p><h1>Settings</h1>
+    <header className="topbar">
+      <button className="text-button" onClick={onCancel}>← Back</button>
+      <span className="eyebrow">Settings</span>
+      <span className="who-chip">{profile} · {roleLabel(profileRole(profile))}</span>
+    </header>
     <p>Saved for {profile} on this computer when you press Save.</p>
     {voiceOnly && <>
     <p className="eyebrow">Voice Companion</p>
