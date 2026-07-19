@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { auditProse, auditForAI, splitParagraphs, splitSentences, TELLS } from "../src/humanMaker";
+import { auditProse, auditForAI, humanMakerAllows, LEGACY_EVERYONE, splitParagraphs, splitSentences, TELLS } from "../src/humanMaker";
 
 const machineish = `The old house stood against the grey sky. The wind moved across the field slowly. The door was opened by the wind again. It is worth noting that the house had stood there for years.
 
@@ -84,5 +84,39 @@ describe("human maker — the catalogue and the AI handoff", () => {
     expect(brief).toContain("Ward");
     expect(brief).toContain("locked lines");
     expect(brief).toContain("Tell 8");
+  });
+});
+
+describe("who may use the Human Maker", () => {
+  it("lets in only the people named", () => {
+    expect(humanMakerAllows(["Chris"], "Chris")).toBe(true);
+    expect(humanMakerAllows(["Chris"], "Sam")).toBe(false);
+  });
+
+  it("lets nobody in when no one is named", () => {
+    expect(humanMakerAllows([], "Chris")).toBe(false);
+  });
+
+  it("ignores case and stray spaces in a name", () => {
+    expect(humanMakerAllows(["Chris Emmert"], "  chris emmert ")).toBe(true);
+    expect(humanMakerAllows([" Chris "], "Chris")).toBe(true);
+  });
+
+  it("never lets an empty name in", () => {
+    // A profile with no name must not slip through by matching nothing.
+    expect(humanMakerAllows([""], "")).toBe(false);
+    expect(humanMakerAllows(["Chris"], "   ")).toBe(false);
+  });
+
+  it("honours the old all-editors setting so nobody loses access on upgrade", () => {
+    expect(humanMakerAllows([LEGACY_EVERYONE], "Anyone At All")).toBe(true);
+  });
+
+  it("stops being everyone once a real name is chosen", () => {
+    // The Settings screen drops the legacy marker the moment a name is ticked;
+    // both must never be in force at once.
+    const afterPicking = [LEGACY_EVERYONE].filter((n) => n !== LEGACY_EVERYONE).concat("Chris");
+    expect(humanMakerAllows(afterPicking, "Chris")).toBe(true);
+    expect(humanMakerAllows(afterPicking, "Sam")).toBe(false);
   });
 });

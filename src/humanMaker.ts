@@ -314,17 +314,47 @@ function rank(s: Finding["severity"]): number {
 
 // ---- Who may use it --------------------------------------------------------
 // The Human Maker is the author's tool: owner-only by default. The door is
-// built but closed — the owner can hand it to trusted editors with one switch.
+// built but closed — the owner opens it for particular people by name, not for
+// a whole rank at once. Trusting one editor is not the same as trusting every
+// editor there will ever be.
 
 const SHARE_KEY = "mcg-human-maker-editors";
 
-export function humanMakerSharedWithEditors(): boolean {
-  try { return localStorage.getItem(SHARE_KEY) === "true"; } catch { return false; }
+// Older builds stored a single "true" here, meaning every editor. That is
+// still honoured on read so nobody loses access on upgrade, and the Settings
+// screen turns it into real names the first time it is saved.
+export const LEGACY_EVERYONE = "true";
+
+export function humanMakerNames(): string[] {
+  try {
+    const raw = localStorage.getItem(SHARE_KEY);
+    if (!raw || raw === "false") return [];
+    if (raw === LEGACY_EVERYONE) return [LEGACY_EVERYONE];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((n): n is string => typeof n === "string" && Boolean(n.trim())) : [];
+  } catch {
+    return [];
+  }
 }
 
-export function setHumanMakerSharedWithEditors(on: boolean): void {
-  try { localStorage.setItem(SHARE_KEY, on ? "true" : "false"); } catch { /* ignore */ }
+export function setHumanMakerNames(names: string[]): void {
+  try {
+    const clean = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+    localStorage.setItem(SHARE_KEY, JSON.stringify(clean));
+  } catch { /* ignore */ }
 }
+
+// Pure: may this person open the Human Maker? The owner always can — the
+// question only ever arises for everybody else.
+export function humanMakerAllows(names: string[], person: string): boolean {
+  if (names.includes(LEGACY_EVERYONE)) return true;
+  const wanted = person.trim().toLowerCase();
+  return Boolean(wanted) && names.some((n) => n.trim().toLowerCase() === wanted);
+}
+
+// True while the old all-editors setting is still in force, so the Settings
+// screen can say so plainly instead of showing an empty list.
+export const humanMakerSharedWithEveryEditor = (): boolean => humanMakerNames().includes(LEGACY_EVERYONE);
 
 // A prompt-ready block the author can hand to the AI for the rewrite pass.
 export function auditForAI(report: AuditReport, chapterName: string): string {

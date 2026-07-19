@@ -514,6 +514,7 @@ pub fn run() {
             project_workspace::search_project_documents,
             dropbox::dropbox_list_folder,
             dropbox::dropbox_read_text,
+            dropbox::dropbox_sharing_available,
             dropbox::dropbox_current_revision,
             dropbox::dropbox_write_text,
             dropbox::dropbox_move,

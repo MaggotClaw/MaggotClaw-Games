@@ -32,7 +32,7 @@ import { loadChapterQuestions, questionsForChapter, saveChapterQuestions } from 
 import { loadScheduledReleases, saveScheduledReleases } from "./readerCopies";
 import { postRelayMessage } from "./discordLink";
 import { latestProgressReports } from "./ChatScreen";
-import { auditForAI, auditProse, humanMakerSharedWithEditors, setHumanMakerSharedWithEditors, type AuditReport } from "./humanMaker";
+import { auditForAI, auditProse, humanMakerAllows, humanMakerNames, humanMakerSharedWithEveryEditor, setHumanMakerNames, LEGACY_EVERYONE, type AuditReport } from "./humanMaker";
 import { OkGoButton } from "./OkGoButton";
 import { applySettings, collectSettings, describeBundle } from "./settingsFile";
 import { outstandingTasks, readerLinksPublished, setReaderLinksPublished, setSettingsBackedUp, setSharingWorks, settingsBackedUp, sharingWorks, tasksHeadline, type SetupTask } from "./setupTasks";
@@ -322,10 +322,24 @@ export function App() {
   const documentRef = useRef<DocumentRecord | null>(null);
   const client = useMemo(() => new LongRotMcpClient(settings), [settings]);
   const role = profileRole(readerName);
+  // Sharing is switched on outside the app, in the Dropbox console. Asking
+  // Dropbox directly is the only honest answer — a remembered flag goes stale
+  // the moment the owner fixes it, and the app carries on telling him to do a
+  // job he has already done.
+  const [sharingChecked, setSharingChecked] = useState(sharingWorks);
+  useEffect(() => {
+    const creds = getDropboxCreds();
+    if (!creds || !("__TAURI_INTERNALS__" in window)) return;
+    void import("@tauri-apps/api/core")
+      .then(({ invoke }) => invoke<boolean>("dropbox_sharing_available", { creds }))
+      .then((available) => { setSharingWorks(available); setSharingChecked(available); })
+      // Offline or rate-limited is not a definite no; leave what was remembered.
+      .catch(() => undefined);
+  }, []);
   const setupTasks = useMemo<SetupTask[]>(() => outstandingTasks({
     isOwner: canPerform(role, "manage"),
     hasProjectKeys: Boolean(getDropboxCreds()),
-    sharingWorks: sharingWorks(),
+    sharingWorks: sharingChecked,
     readerLinksPublished: readerLinksPublished(),
     hasMessaging: messagingConnected(),
     hasCatalog: readerLinksConfigured(),
@@ -333,7 +347,7 @@ export function App() {
     releasedChapters: unlockedChapters.length,
     settingsBackedUp: settingsBackedUp(),
     peopleCount: people.length
-  }), [role, workspace, unlockedChapters, people]);
+  }), [role, workspace, unlockedChapters, people, sharingChecked]);
 
   useEffect(() => {
     indexRef.current = segmentIndex;
@@ -1350,7 +1364,7 @@ export function App() {
             everyday owner work — it does not belong three screens deep. */}
         {canPerform(role, "manage") && <button className="pill-button chip" onClick={() => setScreen("workspace-files")}>Project Files</button>}
         {/* The author's own bench — owner-only unless he shares it with editors. */}
-        {(canPerform(role, "manage") || (humanMakerSharedWithEditors() && canPerform(role, "upload"))) &&
+        {(canPerform(role, "manage") || (canPerform(role, "upload") && humanMakerAllows(humanMakerNames(), readerName))) &&
           <button className="pill-button chip" onClick={() => setScreen("human-maker")}>Human Maker</button>}
         {"__TAURI_INTERNALS__" in window && canPerform(role, "propose") &&
           <button className="pill-button chip" onClick={() => { void openOkGoWindow(); }}>OK GO Button</button>}
@@ -2716,7 +2730,12 @@ function Settings({ initial, onSave, onCancel, onRequestAccess, onEnterCode }: {
   const [dropboxSecret, setDropboxSecret] = useState(savedDropbox?.appSecret ?? "");
   const [dropboxRefresh, setDropboxRefresh] = useState(savedDropbox?.refreshToken ?? "");
   const [dropboxNote, setDropboxNote] = useState("");
-  const [shareHumanMaker, setShareHumanMaker] = useState(humanMakerSharedWithEditors);
+  const [shareHumanMaker, setShareHumanMaker] = useState<string[]>(humanMakerNames);
+  // Only people who could actually use it: the Human Maker needs upload
+  // authority, and the owner already has it without being on any list.
+  const humanMakerPeople = loadPeople()
+    .filter((person) => canPerform(person.role, "upload") && !canPerform(person.role, "manage"))
+    .sort((a, b) => a.name.localeCompare(b.name));
   const [settingsNote, setSettingsNote] = useState("");
 
   async function importFromBridge() {
@@ -2815,7 +2834,29 @@ function Settings({ initial, onSave, onCancel, onRequestAccess, onEnterCode }: {
     <UpdateChecker configurable />
     {isOwner && <>
       <hr/><p className="eyebrow">Owner — Human Maker</p>
-      <label className="check-setting"><input type="checkbox" checked={shareHumanMaker} onChange={(event) => { setShareHumanMaker(event.target.checked); setHumanMakerSharedWithEditors(event.target.checked); }} /> Let editors use the Human Maker too</label>
+      <p className="board-hint">Your prose bench stays yours. Tick anyone you want to hand it to — trusting one editor is not the same as trusting every editor.</p>
+      {humanMakerPeople.length === 0
+        ? <p className="board-hint">Nobody is an editor yet. Approve someone first and they will appear here.</p>
+        : <fieldset className="role-picker compact"><legend>Who may use the Human Maker</legend>
+            {humanMakerPeople.map((person) => <label key={person.name} className={humanMakerAllows(shareHumanMaker, person.name) ? "role-option picked" : "role-option"}>
+              <input
+                type="checkbox"
+                checked={humanMakerAllows(shareHumanMaker, person.name)}
+                onChange={(event) => {
+                  // Ticking anyone by name retires the old all-editors
+                  // setting: from here the list is the whole truth.
+                  const base = shareHumanMaker.filter((n) => n !== LEGACY_EVERYONE);
+                  const next = event.target.checked
+                    ? [...base, person.name]
+                    : base.filter((n) => n.trim().toLowerCase() !== person.name.trim().toLowerCase());
+                  setShareHumanMaker(next);
+                  setHumanMakerNames(next);
+                }}
+              />
+              <span><strong>{person.name}</strong><small>{roleLabel(person.role)}</small></span>
+            </label>)}
+          </fieldset>}
+      {humanMakerSharedWithEveryEditor() && <p className="update-status warn">Every editor can use it at the moment, carried over from an older version. Tick names above to narrow it to particular people.</p>}
       <small className="board-hint">Off by default — the prose bench is yours alone. Turn it on to hand it to a trusted editor.</small>
       <hr/><p className="eyebrow">Owner — Access Requests Via Discord</p>
       <label>Discord webhook for the requests channel

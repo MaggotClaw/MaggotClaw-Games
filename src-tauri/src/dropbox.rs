@@ -152,6 +152,29 @@ pub(crate) async fn download_bytes(creds: &DropboxCreds, path: &str) -> Result<V
         .map_err(|_| "The file could not be read from Dropbox.".to_string())
 }
 
+/// Does this Dropbox app actually hold the sharing permission?
+///
+/// Read-only, and it asks Dropbox rather than trusting anything remembered
+/// locally. The permission is granted outside the app, in the Dropbox console,
+/// so a remembered flag goes stale the moment the owner fixes it — and the app
+/// carries on telling him to do a job he has already done.
+#[tauri::command]
+pub async fn dropbox_sharing_available(creds: DropboxCreds) -> Result<bool, String> {
+    match api_call(
+        &creds,
+        "sharing/list_shared_links",
+        serde_json::json!({ "direct_only": true }),
+    )
+    .await
+    {
+        Ok(_) => Ok(true),
+        // A missing scope is a definite no. Anything else — offline, rate
+        // limited — is unknown, and must not be reported as a definite no.
+        Err(message) if message.contains("scope") || message.contains("(409)") => Ok(false),
+        Err(message) => Err(message),
+    }
+}
+
 #[tauri::command]
 pub async fn dropbox_read_text(creds: DropboxCreds, path: String) -> Result<String, String> {
     let bytes = download_bytes(&creds, &path).await?;
