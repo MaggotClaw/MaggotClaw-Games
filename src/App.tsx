@@ -1312,7 +1312,7 @@ export function App() {
   }
 
   if (screen === "settings") {
-    return <Settings initial={settings} onSave={saveSettings} onCancel={() => setScreen(settingsReturn.current)} onRequestAccess={() => { setRequestCode(""); setScreen("request-access"); }} onEnterCode={() => setScreen("unlock")} />;
+    return <Settings initial={settings} voiceOnly={settingsReturn.current === "voice-targets" || settingsReturn.current === "talk"} onSave={saveSettings} onCancel={() => setScreen(settingsReturn.current)} onRequestAccess={() => { setRequestCode(""); setScreen("request-access"); }} onEnterCode={() => setScreen("unlock")} />;
   }
 
   if (screen === "idea") {
@@ -1321,9 +1321,9 @@ export function App() {
         if (ideaListening) { commentDictationActive.current = false; setIdeaListening(false); void stopNativeDictation().catch(() => undefined); }
         setScreen("home");
       }}>← Back</button>
-      <BrandLogo compact /><p className="eyebrow">Catch An Idea</p><h1>Catch The Idea</h1>
-      <p>Speak or type it. It lands dated in 02 Working Files → Ideas — never touching the book until you promote it.</p>
-      <label>The idea<textarea rows={8} value={ideaText} placeholder="Speak, or type here…" onChange={(event) => setIdeaText(event.target.value)} /></label>
+      <BrandLogo compact /><p className="eyebrow">Suggestions</p><h1>Suggestions</h1>
+      <p>Anything you thought of and do not want to lose. Speak it or type it.</p>
+      <label>Your suggestion<textarea rows={8} value={ideaText} placeholder="Speak, or type here…" onChange={(event) => setIdeaText(event.target.value)} /></label>
       <div className="form-actions">
         {"__TAURI_INTERNALS__" in window && <button onClick={() => {
           if (ideaListening) {
@@ -1427,7 +1427,7 @@ export function App() {
                   .map((option) => <option key={option} value={option}>{roleLabel(option)}</option>)}
               </select>
             </label>}
-        {"__TAURI_INTERNALS__" in window && <button className="pill-button chip" onClick={() => { setIdeaText(""); setScreen("idea"); }}>Catch An Idea</button>}
+        {"__TAURI_INTERNALS__" in window && <button className="pill-button chip" onClick={() => { setIdeaText(""); setScreen("idea"); }}>Suggestions</button>}
         {/* Anywhere you go and do work is a card below, with the other rooms
             of the app. Only small controls belong up here — the ones you press
             and stay where you are.
@@ -2994,7 +2994,7 @@ function SavedCommentCard({ comment, onDelete }: { comment: ReaderComment; onDel
   </article>;
 }
 
-function Settings({ initial, onSave, onCancel, onRequestAccess, onEnterCode }: { initial: ConnectionSettings; onSave: (value: ConnectionSettings) => void; onCancel: () => void; onRequestAccess: () => void; onEnterCode: () => void }) {
+function Settings({ initial, voiceOnly, onSave, onCancel, onRequestAccess, onEnterCode }: { initial: ConnectionSettings; voiceOnly: boolean; onSave: (value: ConnectionSettings) => void; onCancel: () => void; onRequestAccess: () => void; onEnterCode: () => void }) {
   const [endpoint, setEndpoint] = useState(initial.endpoint);
   const [bearerToken, setBearerToken] = useState(initial.bearerToken);
   const profile = localStorage.getItem("long-rot-reader-name") || "local";
@@ -3069,6 +3069,7 @@ function Settings({ initial, onSave, onCancel, onRequestAccess, onEnterCode }: {
     <button className="text-button mode-back" onClick={onCancel}>← Back</button>
     <BrandLogo compact /><p className="eyebrow">Settings</p><h1>Settings</h1>
     <p>Saved for {profile} on this computer when you press Save.</p>
+    {voiceOnly && <>
     <p className="eyebrow">Voice Companion</p>
     <label>Talk to<select value={voice.target} onChange={(event) => updateVoice({ target: event.target.value as VoiceSettings["target"] })}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
     <label>Send after silence<input type="number" min="0.5" max="30" step="0.5" value={voice.silenceSeconds} onChange={(event) => updateVoice({ silenceSeconds: Number(event.target.value) })} /></label>
@@ -3107,6 +3108,8 @@ function Settings({ initial, onSave, onCancel, onRequestAccess, onEnterCode }: {
     <label className="check-setting"><input type="checkbox" checked={voice.listenAfterReading} onChange={(event) => updateVoice({ listenAfterReading: event.target.checked })} /> Listen again after reading</label>
     <label className="check-setting"><input type="checkbox" checked={voice.skipContentBoxes} onChange={(event) => updateVoice({ skipContentBoxes: event.target.checked })} /> Skip code and output boxes</label>
     <label className="check-setting"><input type="checkbox" checked={voice.includeStoryContext} onChange={(event) => updateVoice({ includeStoryContext: event.target.checked })} /> Send story context with my words (who mentioned names are, from the codex)</label>
+    </>}
+    {!voiceOnly && <>
     {isOwner && <>
       <hr/><p className="eyebrow">View The App As Someone Else</p>
       <label>View the app as<select value={viewAs ?? "administrator"} onChange={(event) => {
@@ -3216,6 +3219,7 @@ function Settings({ initial, onSave, onCancel, onRequestAccess, onEnterCode }: {
       <label>Connection address<input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} /></label>
       {endpoint.trim() !== defaultSettings.endpoint && <button className="text-button" onClick={() => setEndpoint(defaultSettings.endpoint)}>Reset To The Standard Address</button>}
       <label>Temporary bearer credential<input type="password" value={bearerToken} onChange={(event) => setBearerToken(event.target.value)} autoComplete="off" /></label>
+    </>}
     </>}
     <div className="form-actions"><button onClick={onCancel}>Cancel</button><button className="primary" onClick={saveAll}>Save</button></div>
   </main>;
