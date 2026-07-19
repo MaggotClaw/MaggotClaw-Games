@@ -39,6 +39,7 @@ import { outstandingTasks, readerLinksPublished, setReaderLinksPublished, setSet
 import { WalkthroughWindow } from "./WalkthroughWindow";
 import { BEHAVIOUR_CHOICES, behaviourFile, behaviourPath, composeBehaviour, conflicts, labelOf, loadBehaviour, parseBehaviourFile, saveBehaviour, TOO_MANY, type BehaviourDraft } from "./aiBehaviour";
 import { completeness, loadAnswers, newlyAsked, questionsFor, saveAnswers, unanswered, type ProfileAnswers } from "./profileQuestions";
+import { chosenVoice, setChosenVoice, voiceByFile, voiceUrls, VOICES } from "./voices";
 import { walkthroughsFor } from "./walkthrough";
 import { WordDocument } from "./WordDocument";
 import { loadPeople, parseProfileMessage, publishPeople, removePerson, savePeople, sortedPeople, upsertPerson, type Person } from "./people";
@@ -2998,6 +2999,17 @@ function Settings({ initial, onSave, onCancel, onRequestAccess, onEnterCode }: {
     .filter((person) => canPerform(person.role, "upload") && !canPerform(person.role, "manage"))
     .sort((a, b) => a.name.localeCompare(b.name));
   const [settingsNote, setSettingsNote] = useState("");
+  const [voiceFile, setVoiceFile] = useState(chosenVoice);
+  const [voiceNote, setVoiceNote] = useState("");
+  const [voiceBusy, setVoiceBusy] = useState(false);
+  const [installedVoices, setInstalledVoices] = useState<string[]>([VOICES[0].file]);
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    void import("@tauri-apps/api/core")
+      .then(({ invoke }) => invoke<string[]>("installed_piper_voices"))
+      .then(setInstalledVoices)
+      .catch(() => undefined);
+  }, []);
 
   async function importFromBridge() {
     try {
@@ -3043,7 +3055,35 @@ function Settings({ initial, onSave, onCancel, onRequestAccess, onEnterCode }: {
     <label>Talk to<select value={voice.target} onChange={(event) => updateVoice({ target: event.target.value as VoiceSettings["target"] })}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
     <label>Send after silence<input type="number" min="0.5" max="30" step="0.5" value={voice.silenceSeconds} onChange={(event) => updateVoice({ silenceSeconds: Number(event.target.value) })} /></label>
     <label>Add Time button<input type="number" min="1" max="120" step="1" value={voice.addSeconds} onChange={(event) => updateVoice({ addSeconds: Number(event.target.value) })} /></label>
-    <div className="voice-choice"><span>Reading voice</span><strong>Cori Neural · Local</strong><small>Natural UK English. Runs privately on this computer with no API charge.</small></div>
+    {/* One voice ships in the installer; the rest are fetched once, so a
+        friend's download is not swollen by voices they never chose. */}
+    <label>Reading voice<select value={voiceFile} onChange={(event) => {
+      const file = event.target.value;
+      setVoiceFile(file); setChosenVoice(file); setVoiceNote("");
+      if (!installedVoices.includes(file)) setVoiceNote(`${voiceByFile(file)?.name} is not on this computer yet — press Get This Voice.`);
+    }}>
+      {VOICES.map((voice) => <option key={voice.file} value={voice.file}>
+        {voice.name} · {voice.accent}{installedVoices.includes(voice.file) ? "" : ` (${voice.megabytes} MB to fetch)`}
+      </option>)}
+    </select></label>
+    <p className="board-hint">{voiceByFile(voiceFile)?.note} Every voice runs on this computer, with no charge and nothing sent anywhere.</p>
+    {!installedVoices.includes(voiceFile) && <div className="form-actions">
+      <button className="primary" disabled={voiceBusy} onClick={() => {
+        const urls = voiceUrls(voiceFile);
+        if (!urls) { setVoiceNote("That voice cannot be fetched."); return; }
+        setVoiceBusy(true);
+        setVoiceNote(`Fetching ${voiceByFile(voiceFile)?.name}. This happens once — it works offline afterwards.`);
+        void import("@tauri-apps/api/core")
+          .then(({ invoke }) => invoke<number>("download_piper_voice", { fileName: voiceFile, modelUrl: urls.model, configUrl: urls.config }))
+          .then((bytes) => {
+            setInstalledVoices((current) => [...current, voiceFile]);
+            setVoiceNote(`${voiceByFile(voiceFile)?.name} is ready — ${Math.round(bytes / 1048576)} MB. It will read to you from now on.`);
+          })
+          .catch((error) => setVoiceNote(`${message(error)} The voice you had is still in place.`))
+          .finally(() => setVoiceBusy(false));
+      }}>{voiceBusy ? "Fetching…" : "Get This Voice"}</button>
+    </div>}
+    {voiceNote && <small className="board-hint">{voiceNote}</small>}
     <label>Reading speed<select value={voice.speechRate} onChange={(event) => updateVoice({ speechRate: Number(event.target.value) })}><option value="0.8">Slower</option><option value="1">Normal</option><option value="1.2">Faster</option><option value="1.4">Much faster</option></select></label>
     <label className="check-setting"><input type="checkbox" checked={voice.readRepliesAutomatically} onChange={(event) => updateVoice({ readRepliesAutomatically: event.target.checked })} /> Read replies automatically</label>
     <label className="check-setting"><input type="checkbox" checked={voice.listenAfterReading} onChange={(event) => updateVoice({ listenAfterReading: event.target.checked })} /> Listen again after reading</label>

@@ -1,3 +1,4 @@
+import { chosenVoice } from "./voices";
 import { invoke } from "@tauri-apps/api/core";
 import { pronounce } from "./pronunciation";
 
@@ -26,7 +27,7 @@ export class BrowserSpeechPlayer {
       return;
     }
 
-    void invoke<ArrayBuffer>("synthesize_piper_speech", { text, rate })
+    void invoke<ArrayBuffer>("synthesize_piper_speech", { text, rate, voice: chosenVoice() })
       .then((bytes) => {
         if (generation !== this.generation) return;
         const audioUrl = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));

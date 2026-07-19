@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { auditProse, auditForAI, humanMakerAllows, LEGACY_EVERYONE, splitParagraphs, splitSentences, stripFileHeader, TELLS } from "../src/humanMaker";
+import { VOICES, voiceUrls } from "../src/voices";
 import { parseArrivedFeedback } from "../src/feedback";
 
 const machineish = `The old house stood against the grey sky. The wind moved across the field slowly. The door was opened by the wind again. It is worth noting that the house had stood there for years.
@@ -208,5 +209,36 @@ describe("feedback that arrived from other people", () => {
 
   it("ignores anything that is not feedback", () => {
     expect(parseArrivedFeedback([msg("just chatting"), msg(""), msg("**Approved:** Sam → Reader")])).toEqual([]);
+  });
+});
+
+describe("downloadable voices", () => {
+  it("builds the two file addresses a voice needs", () => {
+    const urls = voiceUrls("en_GB-alba-medium.onnx");
+    expect(urls?.model).toBe("https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alba/medium/en_GB-alba-medium.onnx");
+    // Piper cannot speak with the model alone; the settings file sits beside it.
+    expect(urls?.config).toBe(urls?.model + ".json");
+  });
+
+  it("offers nothing to download for the voice already installed", () => {
+    expect(voiceUrls("en_GB-cori-high.onnx")).toBeNull();
+  });
+
+  it("refuses a voice it does not know", () => {
+    expect(voiceUrls("en_GB-made-up-high.onnx")).toBeNull();
+    expect(voiceUrls("../escape.onnx")).toBeNull();
+  });
+
+  it("every listed voice can be fetched, or is the bundled one", () => {
+    for (const voice of VOICES) {
+      if (voice.bundled) expect(voiceUrls(voice.file)).toBeNull();
+      else expect(voiceUrls(voice.file)?.model).toContain(voice.file);
+    }
+  });
+
+  it("only fetches over a secure link", () => {
+    for (const voice of VOICES.filter((v) => !v.bundled)) {
+      expect(voiceUrls(voice.file)?.model.startsWith("https://")).toBe(true);
+    }
   });
 });

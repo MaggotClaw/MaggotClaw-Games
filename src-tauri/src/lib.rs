@@ -490,6 +490,8 @@ pub fn run() {
             native_speech::start_native_dictation,
             native_speech::stop_native_dictation,
             piper_speech::synthesize_piper_speech,
+            piper_speech::download_piper_voice,
+            piper_speech::installed_piper_voices,
             project_workspace::initialize_project_workspace,
             project_workspace::project_workspace_status,
             project_workspace::save_project_text_file,
