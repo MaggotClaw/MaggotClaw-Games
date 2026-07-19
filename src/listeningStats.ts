@@ -48,7 +48,12 @@ export function recordChapterFinished(profile: string): void {
 export function listeningLine(stats: ListeningStats): string {
   if (!stats.secondsListened && !stats.chaptersFinished) return "";
   const hours = stats.secondsListened / 3600;
-  const listened = hours >= 1 ? `${hours.toFixed(1)} Hours Listened` : `${Math.max(1, Math.round(stats.secondsListened / 60))} Minutes Listened`;
+  // "1 Minutes" reads like a machine wrote it. One of anything gets its own
+  // word, and a flat 1.0 hours is simply "1 Hour".
+  const minutes = Math.max(1, Math.round(stats.secondsListened / 60));
+  const listened = hours >= 1
+    ? `${hours.toFixed(1).replace(/\.0$/, "")} Hour${hours.toFixed(1) === "1.0" ? "" : "s"} Listened`
+    : `${minutes} Minute${minutes === 1 ? "" : "s"} Listened`;
   const parts = [listened];
   if (stats.chaptersFinished) parts.push(`${stats.chaptersFinished} Chapter${stats.chaptersFinished === 1 ? "" : "s"} Finished`);
   if (stats.streakDays > 1) parts.push(`${stats.streakDays}-Day Streak`);

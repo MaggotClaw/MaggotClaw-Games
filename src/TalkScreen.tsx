@@ -68,7 +68,7 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
       // The companion bar is sized to hug its buttons — no dead space at
       // either end. This runs on a timer, so it must match the width the
       // window was created with or it undoes the fit.
-      safe(() => appWindow.setSize(new LogicalSize(companion ? 406 : 566, 96)));
+      safe(() => appWindow.setSize(new LogicalSize(companion ? 430 : 590, 84)));
       safe(() => appWindow.setAlwaysOnTop(true));
       // Above full-screen programs too, not just ordinary windows.
       safe(() => appWindow.setVisibleOnAllWorkspaces(true));
@@ -223,7 +223,10 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
         const finishedAfterBusy = sawBusy.current && !responseState.busy && responseState.hasCompletedResponse;
         const finishedByCount = !responseState.busy && responseState.hasCompletedResponse
           && responseState.completedResponseCount > baselineResponseCount.current
-          && waited > 8000;
+          // Two seconds, not eight. The count already proves a new answer
+          // arrived; the long floor was only guarding against a miscount, and
+          // it cost several silent seconds on every single reply.
+          && waited > 2000;
         if (finishedAfterBusy || finishedByCount) {
           const latest = await adapter.readCopiedResponse();
           if (cycle !== playbackCycle.current) { window.clearInterval(timer); return; }
@@ -257,7 +260,7 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
       } finally {
         checking = false;
       }
-    }, 1200);
+    }, 300);
     return () => window.clearInterval(timer);
   }, [state, adapter, targetName]);
 

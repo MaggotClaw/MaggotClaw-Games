@@ -5,9 +5,12 @@ import { clampStep, findWalkthrough, markCompleted, progressLine, walkthroughsFo
 
 // The guide window: floats above everything, takes you to the right screen,
 // and tells you what to do there in plain words.
-export function WalkthroughWindow({ isOwner, onClose }: { isOwner: boolean; onClose: () => void }) {
+export function WalkthroughWindow({ isOwner, startWith = "", onClose }: { isOwner: boolean; startWith?: string; onClose: () => void }) {
   const guides = walkthroughsFor(isOwner);
-  const [chosen, setChosen] = useState<Walkthrough | null>(null);
+  // Named by whoever opened the window: go straight to it. Pressing Show Me on
+  // an alert already said which guide it meant, so offering a list again would
+  // be asking a question that has just been answered.
+  const [chosen, setChosen] = useState<Walkthrough | null>(() => guides.find((g) => g.id === startWith) ?? null);
   const [index, setIndex] = useState(0);
 
   // Stays on top even when Windows tries to take it back.

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { auditProse, auditForAI, humanMakerAllows, LEGACY_EVERYONE, splitParagraphs, splitSentences, TELLS } from "../src/humanMaker";
+import { auditProse, auditForAI, humanMakerAllows, LEGACY_EVERYONE, splitParagraphs, splitSentences, stripFileHeader, TELLS } from "../src/humanMaker";
+import { parseArrivedFeedback } from "../src/feedback";
 
 const machineish = `The old house stood against the grey sky. The wind moved across the field slowly. The door was opened by the wind again. It is worth noting that the house had stood there for years.
 
@@ -118,5 +119,94 @@ describe("who may use the Human Maker", () => {
     const afterPicking = [LEGACY_EVERYONE].filter((n) => n !== LEGACY_EVERYONE).concat("Chris");
     expect(humanMakerAllows(afterPicking, "Chris")).toBe(true);
     expect(humanMakerAllows(afterPicking, "Sam")).toBe(false);
+  });
+});
+
+describe("reading a manuscript file correctly", () => {
+  const header = "═════════════════════════════════════════════\nTHE LONG ROT\n\nChapter 01 - The Bounty\nVersion 2.1\n═════════════════════════════════════════════\n\n";
+
+  it("does not count the file's title banner as prose", () => {
+    const body = "The heat did not break.\nHe stood.";
+    expect(stripFileHeader(header + body).trim()).toBe(body);
+    // The banner was being reported as a staccato one-line paragraph.
+    expect(splitParagraphs(header + body).some((p) => p.includes("THE LONG ROT"))).toBe(false);
+  });
+
+  it("leaves prose alone when there is no banner", () => {
+    const plain = "The heat did not break.\nHe stood.";
+    expect(stripFileHeader(plain).trim()).toBe(plain);
+  });
+
+  it("counts a paragraph per line when the file separates them that way", () => {
+    // The real shape of the author's chapters: one paragraph per line, no
+    // blank line between. Splitting only on blank lines read a 253-paragraph
+    // chapter as 13.
+    const long = (n: number) => `Paragraph ${n} ` + "the swamp held it all and the heat did not break and the water shifted somewhere beneath the duckweed as he listened. ".repeat(2);
+    expect(splitParagraphs([long(1), long(2), long(3)].join("\n"))).toHaveLength(3);
+  });
+
+  it("still joins a hard-wrapped paragraph into one", () => {
+    // Older files wrap a single paragraph across short lines; those must not
+    // become three paragraphs.
+    const wrapped = "The heat in the Saint Barrow bottoms did not\nbreak. It settled there like a living thing,\nthick and breathing, pressing down.";
+    const paragraphs = splitParagraphs(wrapped);
+    expect(paragraphs).toHaveLength(1);
+    expect(paragraphs[0]).toContain("pressing down");
+  });
+
+  it("handles blank-line separated paragraphs as it always did", () => {
+    expect(splitParagraphs("First one.\n\nSecond one.\n\nThird one.")).toHaveLength(3);
+  });
+
+  it("keeps the banner out of the word count, so rates are not softened", () => {
+    const body = "He stood. The heat did not break.";
+    expect(auditProse(header + body).stats.words).toBe(auditProse(body).stats.words);
+  });
+
+  it("reports the same score with or without the banner", () => {
+    const body = "He stood. The heat did not break. He waited on the bank.";
+    expect(auditProse(header + body).score).toBe(auditProse(body).score);
+  });
+});
+
+describe("feedback that arrived from other people", () => {
+  const msg = (content: string, at = "2026-07-19T10:00:00Z", who = "chris") =>
+    ({ content, timestamp: at, author: { username: who } });
+
+  it("picks feedback out of a channel that also carries request codes", () => {
+    const found = parseArrivedFeedback([
+      msg("MCG-REQ-abc123 :: Sam :: reader"),
+      msg("**Problem** — Reader Mode\nFrom: Sam\n\nThe refresh button does nothing."),
+      msg("**Approved:** Sam → Reader")
+    ]);
+    expect(found).toHaveLength(1);
+    expect(found[0].kind).toBe("problem");
+    expect(found[0].area).toBe("Reader Mode");
+    expect(found[0].text).toBe("The refresh button does nothing.");
+    expect(found[0].from).toBe("Sam");
+  });
+
+  it("reads the stars off a rating", () => {
+    const found = parseArrivedFeedback([msg("**Rating** ★★★★☆ — Voice Companion\nFrom: Jo\n\nNearly perfect.")]);
+    expect(found[0].rating).toBe(4);
+    expect(found[0].kind).toBe("rating");
+  });
+
+  it("puts problems before ideas before ratings", () => {
+    const found = parseArrivedFeedback([
+      msg("**Rating** ★★★★★ — Messages\nFrom: A\n\nGood."),
+      msg("**Idea** — Reader Mode\nFrom: B\n\nBigger text please."),
+      msg("**Problem** — Projects\nFrom: C\n\nIt crashed.")
+    ]);
+    expect(found.map((f) => f.kind)).toEqual(["problem", "idea", "rating"]);
+  });
+
+  it("falls back to the Discord name when nobody signed it", () => {
+    expect(parseArrivedFeedback([msg("**Idea** — Settings\n\nMore voices.", "2026-07-19T10:00:00Z", "billy")])[0].from)
+      .toBe("billy");
+  });
+
+  it("ignores anything that is not feedback", () => {
+    expect(parseArrivedFeedback([msg("just chatting"), msg(""), msg("**Approved:** Sam → Reader")])).toEqual([]);
   });
 });

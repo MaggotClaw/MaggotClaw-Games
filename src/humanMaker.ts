@@ -146,8 +146,51 @@ const CONTRACTIONS: Array<[RegExp, string]> = [
 
 // ---- Text helpers ----------------------------------------------------------
 
-export function splitParagraphs(text: string): string[] {
-  return text.split(/\r?\n\s*\r?\n+/).map((p) => p.replace(/\s+/g, " ").trim()).filter(Boolean);
+// The banner every project file opens with. It is bookkeeping, not prose, and
+// counting it produced nonsense: the title block was reported as a staccato
+// one-line paragraph, and its lines were audited for voice.
+//
+//   ═════════════════════════
+//   THE LONG ROT
+//
+//   Chapter 01 - The Bounty
+//   Version 2.1
+//   ═════════════════════════
+export function stripFileHeader(text: string): string {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const isRule = (line: string) => /^[═=—–_-]{8,}\s*$/.test(line.trim());
+  const first = lines.findIndex(isRule);
+  if (first !== -1) {
+    const second = lines.findIndex((line, index) => index > first && isRule(line));
+    // Only a genuine header: a rule, a short title block, and a closing rule.
+    if (second !== -1 && second - first <= 8) return lines.slice(second + 1).join("\n");
+  }
+  // No banner. Drop a bare "Version 1.2" line if the file opens with one.
+  const start = lines.findIndex((line) => line.trim() && !/^(version\s+[\d.]+|chapter\s+\d+.*)$/i.test(line.trim()));
+  return start > 0 ? lines.slice(start).join("\n") : lines.join("\n");
+}
+
+// Manuscripts arrive in three shapes, and guessing wrong changes every count
+// that follows:
+//   · hard-wrapped  — one paragraph spans several short lines, blank line between
+//   · one line each — a whole paragraph per line, blank line between
+//   · one line each — a whole paragraph per line, NO blank line between
+// Splitting only on blank lines read the third kind as a handful of enormous
+// paragraphs: a 253-paragraph chapter came back as 13.
+export function splitParagraphs(text: string, stripHeader = true): string[] {
+  const body = stripHeader ? stripFileHeader(text) : text;
+  const tidy = (value: string) => value.replace(/\s+/g, " ").trim();
+  const blocks = body.split(/\r?\n\s*\r?\n+/).map((block) => block.replace(/\r\n/g, "\n")).filter((block) => block.trim());
+  const paragraphs: string[] = [];
+  for (const block of blocks) {
+    const lines = block.split("\n").filter((line) => line.trim());
+    // Hard-wrapped lines are short by definition — they were broken to fit a
+    // margin. Long ones are whole paragraphs that happen to sit together.
+    const longest = Math.max(...lines.map((line) => line.trim().length));
+    if (lines.length > 1 && longest > 160) paragraphs.push(...lines.map(tidy));
+    else paragraphs.push(tidy(block));
+  }
+  return paragraphs.filter(Boolean);
 }
 
 export function splitSentences(text: string): string[] {
@@ -184,9 +227,13 @@ function countMatches(text: string, needle: string): number {
 
 export function auditProse(text: string): AuditReport {
   const findings: Finding[] = [];
-  const paragraphs = splitParagraphs(text);
-  const sentences = splitSentences(text);
-  const allWords = words(text);
+  // Every count below is a rate against the word total, so the header has to
+  // go once, here — leaving it in inflates the word count and quietly softens
+  // every per-thousand figure in the report.
+  const body = stripFileHeader(text);
+  const paragraphs = splitParagraphs(body, false);
+  const sentences = splitSentences(body);
+  const allWords = words(body);
   const wordCount = allWords.length || 1;
   const per1000 = (n: number) => (n / wordCount) * 1000;
 
@@ -196,7 +243,7 @@ export function auditProse(text: string): AuditReport {
   };
 
   // Tell 1 — em-dash overuse
-  const emDashes = (text.match(/—|--|–/g) ?? []).length;
+  const emDashes = (body.match(/—|--|–/g) ?? []).length;
   const emPer1000 = per1000(emDashes);
   if (emPer1000 > 6) {
     add(1, emPer1000 > 12 ? "high" : "medium", `${emDashes} em-dashes — about ${emPer1000.toFixed(1)} per 1,000 words (a human runs one or two a page).`, "");
@@ -219,7 +266,7 @@ export function auditProse(text: string): AuditReport {
   // Tell 5 — missing contractions
   let missing = 0; let firstMissing = "";
   for (const [pattern, suggestion] of CONTRACTIONS) {
-    const hits = text.match(pattern);
+    const hits = body.match(pattern);
     if (hits) { missing += hits.length; if (!firstMissing) firstMissing = `"${hits[0]}" → "${suggestion}"`; }
   }
   // Density, not a flat count: three in a short passage matters, five across a
@@ -229,7 +276,7 @@ export function auditProse(text: string): AuditReport {
   }
 
   // Tell 6 — passive voice
-  const passive = text.match(/\b(was|were|is|are|been|being|be)\s+(\w+ed|\w+en|born|done|made|known|held|kept|told|built|found|given|taken|shown)\b/gi) ?? [];
+  const passive = body.match(/\b(was|were|is|are|been|being|be)\s+(\w+ed|\w+en|born|done|made|known|held|kept|told|built|found|given|taken|shown)\b/gi) ?? [];
   if (per1000(passive.length) > 12) add(6, "medium", `${passive.length} likely passive constructions. Prefer somebody doing something.`, trim(passive[0] ?? ""));
 
   // Tell 7 — repetitive sentence openings
@@ -247,7 +294,7 @@ export function auditProse(text: string): AuditReport {
   const scanList = (n: number, list: string[], severity: Finding["severity"], label: string) => {
     const hits: string[] = [];
     for (const term of list) {
-      const c = countMatches(text, term);
+      const c = countMatches(body, term);
       if (c > 0) hits.push(`${term}${c > 1 ? ` (×${c})` : ""}`);
     }
     if (hits.length) add(n, severity, `${label}: ${hits.slice(0, 8).join(", ")}${hits.length > 8 ? "…" : ""}.`, "");
@@ -274,11 +321,11 @@ export function auditProse(text: string): AuditReport {
     }
   }
   // Also "X, Y, and Z" adjective triplets, flagged only if several appear
-  const adjTriplets = text.match(/\b(\w+ly|\w+ed|\w+ing|\w+)\s*,\s*(\w+)\s*,\s+and\s+(\w+)/gi) ?? [];
+  const adjTriplets = body.match(/\b(\w+ly|\w+ed|\w+ing|\w+)\s*,\s*(\w+)\s*,\s+and\s+(\w+)/gi) ?? [];
   if (adjTriplets.length >= 3) add(13, "low", `${adjTriplets.length} three-part "X, Y, and Z" groupings. Break some into twos or fours.`, trim(adjTriplets[0] ?? ""));
 
   // Tell 29 — personified inanimate callbacks ("a pan that still remembered")
-  const personified = text.match(/\b(that|which|who)\s+(still\s+)?(remembered|knew|waited|watched|listened|understood|wanted)\b/gi) ?? [];
+  const personified = body.match(/\b(that|which|who)\s+(still\s+)?(remembered|knew|waited|watched|listened|understood|wanted)\b/gi) ?? [];
   if (personified.length) add(29, "low", `Objects handed human memory or intent (${personified.length}). Let characters carry the meaning instead.`, trim(personified[0] ?? ""));
 
   // Tell 37 — uniform paragraph lengths

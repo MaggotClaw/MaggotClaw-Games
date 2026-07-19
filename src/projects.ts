@@ -54,6 +54,13 @@ export function allProjects(): Project[] {
 }
 
 // A project's folder name must be a plain name — never a path.
+// A new project's folder is simply its name, sitting beside the others. The
+// author names the thing he is working on; where it lives is the app's job to
+// know, not his to type.
+export function projectFolderFor(name: string): string {
+  return `/MaggotClaw Games/${name.trim()}`;
+}
+
 export function isSafeProjectName(name: string): boolean {
   return Boolean(name.trim()) && !/[\\/:*?"<>|]/.test(name);
 }

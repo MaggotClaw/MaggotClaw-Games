@@ -15,6 +15,10 @@ export interface Segment {
 
 export interface DocumentRecord {
   html?: string;
+  // Where the file sits in the local workspace. Word documents are rendered
+  // from their own bytes so the reader shows the author's real formatting,
+  // and that needs the file itself, not a converted copy of it.
+  localPath?: string;
   id: string;
   path: string;
   name: string;

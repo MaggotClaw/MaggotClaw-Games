@@ -96,15 +96,22 @@ html:has(.walk-shell), body:has(.walk-shell), body:has(.walk-shell) #root { widt
 
 /* The OK GO button — floats over Claude, dragged anywhere, counts down. */
 html:has(.okgo-shell), body:has(.okgo-shell), body:has(.okgo-shell) #root { width: 100%; height: 100%; overflow: hidden; background: transparent; }
-.okgo-shell { position: relative; width: calc(100vw - 10px); height: calc(100vh - 10px); margin: 5px; display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: linear-gradient(180deg, #101614f5, #030706fa); border: 1px solid #315a50; border-radius: 20px; box-shadow: inset 0 1px #ffffff18, 0 4px 12px #000a; cursor: move; user-select: none; -webkit-user-select: none; }
-.okgo-button { -webkit-app-region: no-drag; flex: 1; height: 100%; color: #00140e; background: linear-gradient(180deg, #00efb1, #00b98a); border: 0; border-radius: 14px; font: 900 32px/1 system-ui, sans-serif; letter-spacing: .04em; cursor: pointer; box-shadow: 0 0 14px #00efb166; }
+/* Tighter all round. The right gutter keeps the closing X off the button —
+   pressing OK GO should never risk shutting the thing — and the bottom strip
+   leaves somewhere to take hold of when dragging it about. */
+.okgo-shell { position: relative; width: calc(100vw - 8px); height: calc(100vh - 8px); margin: 4px; display: flex; align-items: stretch; padding: 5px 24px 13px 7px; background: linear-gradient(180deg, #101614f5, #030706fa); border: 1px solid #315a50; border-radius: 16px; box-shadow: inset 0 1px #ffffff18, 0 4px 12px #000a; cursor: move; user-select: none; -webkit-user-select: none; }
+.okgo-button { -webkit-app-region: no-drag; flex: 1; min-width: 0; color: #00140e; background: linear-gradient(180deg, #00efb1, #00b98a); border: 0; border-radius: 11px; font: 900 32px/1 system-ui, sans-serif; letter-spacing: .04em; white-space: nowrap; cursor: pointer; box-shadow: 0 0 14px #00efb166; }
 .okgo-button:hover { filter: brightness(1.08); }
 .okgo-shell.counting .okgo-button { background: linear-gradient(180deg, #ffd166, #f0a500); font-size: 54px; animation: okgo-tick .5s ease-in-out infinite alternate; }
 .okgo-shell.sending .okgo-button { background: linear-gradient(180deg, #7fd9c4, #4bb39c); }
 .okgo-shell.sent .okgo-button { background: linear-gradient(180deg, #00efb1, #00916c); font-size: 20px; }
 .okgo-shell.failed .okgo-button { background: linear-gradient(180deg, #ff8b8b, #c94b4b); color: #fff; font-size: 30px; }
 @keyframes okgo-tick { from { transform: scale(1); } to { transform: scale(1.06); } }
-.okgo-close { position: absolute; top: 6px; right: 8px; padding: 1px 6px; color: #ffb4b4; background: transparent; border: 1px solid #53625e; border-radius: 6px; font-size: .7rem; cursor: pointer; }
+/* In the gutter beside the button, never on top of it. */
+.okgo-close { -webkit-app-region: no-drag; position: absolute; top: 50%; right: 4px; transform: translateY(-50%); padding: 2px 5px; color: #ffb4b4; background: transparent; border: 1px solid #53625e; border-radius: 6px; font-size: .68rem; line-height: 1; cursor: pointer; }
+
+/* The grip: three marks along the bottom saying this bar can be dragged. */
+.okgo-grip { position: absolute; left: 50%; bottom: 4px; transform: translateX(-50%); width: 34px; height: 3px; border-radius: 3px; background: #53625e; box-shadow: -9px 0 0 -1px #3c4a46, 9px 0 0 -1px #3c4a46; pointer-events: none; }
 .okgo-close:hover { color: #fff; border-color: #ff6b6b; }
 .directive-box { margin: 8px 0; padding: 14px 16px; background: #0d1614; border: 1px solid #1e2c28; border-radius: 12px; }
 .directive-box p { margin: 0 0 8px; color: var(--mc-white, #f2f6f4); font-size: .92rem; line-height: 1.55; }
@@ -331,7 +338,7 @@ kbd { padding: 2px 7px; color: #2b241d; background: #fffaf0; border: 1px solid #
 .stable-controls .add-time-button { color: #24160b; background: #e1b45e; border-color: #9d6c2c; }
 .stable-controls .cancel-control { color: #fff5ef; background: #71362e; border-color: #9b5147; }
 .stable-controls button:disabled { cursor: not-allowed; filter: grayscale(.75); opacity: .35; }
-.voice-floater { width: calc(100vw - 12px); height: calc(100vh - 12px); display: grid; grid-template-columns: 38px 26px 40px 52px repeat(5, 26px); align-items: center; justify-content: space-evenly; gap: 4px; margin: 6px; padding: 4px 14px; overflow: hidden; color: #f5eee2; background: linear-gradient(180deg, #211f1fee, #111214f5); border: 1px solid #52565d; border-radius: 44px; box-shadow: inset 0 1px #ffffff18, 0 3px 8px #0008; cursor: move; user-select: none; -webkit-user-select: none; }
+.voice-floater { width: calc(100vw - 12px); height: calc(100vh - 12px); display: grid; grid-template-columns: 38px 26px 40px 52px repeat(6, 26px); align-items: center; justify-content: space-evenly; gap: 4px; margin: 6px; padding: 4px 12px; overflow: hidden; color: #f5eee2; background: linear-gradient(180deg, #211f1fee, #111214f5); border: 1px solid #52565d; border-radius: 44px; box-shadow: inset 0 1px #ffffff18, 0 3px 8px #0008; cursor: move; user-select: none; -webkit-user-select: none; }
 .voice-floater button { width: 22px; height: 22px; align-self: center; justify-self: center; padding: 0; color: #f7f8fb; background: linear-gradient(180deg, #292b2f, #17181b); border: 1px solid #4c4f55; border-radius: 50%; box-shadow: inset 0 1px #ffffff18, 0 2px 4px #0008; font: 700 10px/1 Arial, sans-serif; cursor: pointer; }
 .voice-floater button:disabled { opacity: .22; }
 .voice-floater .main-mic { position: relative; width: 34px; height: 34px; color: #fff; background: radial-gradient(circle, #25272c 45%, #14151a 70%); border: 2px solid #318cff; box-shadow: 0 0 0 2px #763bff66, 0 0 9px #287cff99; font-size: 0; }
@@ -717,8 +724,10 @@ button.danger:disabled { opacity: .45; cursor: default; filter: none; }
 
 /* The downloaded-files list: one tight line per file, so a long project can be
    scanned by running an eye down it rather than scrolling through cards. */
-.file-row { padding: 5px 10px; border-bottom: 1px solid #17231f; }
-.file-row:hover { background: #0d1614; }
+.file-row { padding: 6px 11px; background: #0d1614; border: 1px solid #24352f; border-radius: 10px; }
+.file-row:hover { border-color: var(--mc-green); background: #101c19; }
+/* Its own little case again, just a fraction of the height it used to be. */
+.comments-list:has(.file-row) { display: flex; flex-direction: column; gap: 6px; }
 .file-line { display: flex; align-items: center; gap: 10px; min-height: 30px; }
 .file-name { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 .file-name > small { color: var(--mc-muted); font-size: .68rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -750,3 +759,48 @@ button.danger:disabled { opacity: .45; cursor: default; filter: none; }
 .mode-icon.people-mark::after { content: ""; position: absolute; left: 12px; top: 33px; width: 23px; height: 13px; background: var(--mc-green); border-radius: 12px 12px 3px 3px; box-shadow: 15px 3px 0 -3px #7d8a86; filter: drop-shadow(0 0 5px #00efb166); }
 .mode-icon.tell-mark::before { content: ""; position: absolute; left: 14px; top: 17px; width: 32px; height: 22px; background: linear-gradient(150deg, #2b3331 0 45%, #131a18 100%); border: 2px solid var(--mc-green); border-radius: 8px; box-shadow: inset 0 1px #ffffff22, 0 0 10px #00efb133; }
 .mode-icon.tell-mark::after { content: ""; position: absolute; left: 21px; top: 37px; width: 0; height: 0; border-left: 8px solid transparent; border-right: 4px solid transparent; border-top: 10px solid var(--mc-green); filter: drop-shadow(0 0 4px #00efb188); }
+
+/* A Word chapter shown as written. The document brings its own page, so the
+   reader gets out of its way — no dark theme imposed on the author's layout. */
+.reading-card.word-faithful { padding: 0; background: transparent; border: 0; }
+.word-page { overflow-x: auto; }
+.word-page .docx-wrapper { padding: 0; background: transparent; }
+.word-page .docx-wrapper > section.docx { margin: 0 auto 16px; box-shadow: 0 6px 24px #0009; }
+
+/* The full guide library in Directions: every walkthrough, done or not. */
+.guide-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.guide-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%; padding: 11px 15px; color: var(--mc-white); text-align: left; background: #0d1614; border: 1px solid #24352f; border-radius: 12px; }
+.guide-row:hover { border-color: var(--mc-green); background: #101c19; }
+.guide-row small { display: block; margin-top: 3px; color: var(--mc-muted); font-weight: 400; }
+
+/* AI Settings: the behaviour builder. Buttons are a draft, the box is the truth. */
+.behaviour-group { margin: 14px 0; }
+.behaviour-buttons { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 6px; }
+.behaviour-chip { padding: 7px 13px; color: var(--mc-white); background: #0e1715; border: 1px solid var(--mc-border); border-radius: 999px; font-size: .82rem; font-weight: 600; text-align: left; }
+.behaviour-chip:hover { border-color: var(--mc-green); }
+.behaviour-chip.on { color: #00140e; background: var(--mc-green); border-color: var(--mc-green); font-weight: 800; }
+.dash-section textarea { width: 100%; padding: 12px 14px; color: var(--mc-white); background: #09110f; border: 1px solid var(--mc-border); border-radius: 12px; font: .92rem/1.6 inherit; resize: vertical; }
+
+/* Its card icon: a spark, for the thinking half of the partnership. */
+.mode-icon.ai-mark { position: relative; overflow: hidden; background: radial-gradient(circle at 38% 30%, #3b4844 0 8%, #111816 39%, #010403 76%); border: 2px solid var(--mc-green); box-shadow: inset 0 1px #ffffff38, 0 0 0 3px #aebbb72b, 0 0 24px #00efb15c; }
+.mode-icon.ai-mark::before { content: ""; position: absolute; left: 27px; top: 12px; width: 6px; height: 36px; background: var(--mc-green); border-radius: 3px; box-shadow: 0 0 12px #00efb1; }
+.mode-icon.ai-mark::after { content: ""; position: absolute; left: 12px; top: 27px; width: 36px; height: 6px; background: var(--mc-green); border-radius: 3px; transform: rotate(45deg); box-shadow: 0 0 12px #00efb1, 0 0 0 0 transparent; filter: drop-shadow(0 0 6px #00efb1aa); }
+
+/* The profile's own questions, and the ones a promotion just added. */
+.profile-answers { margin-top: 22px; }
+.profile-q { display: grid; gap: 6px; margin-top: 16px; font-weight: 700; }
+.profile-q > small { color: var(--mc-muted); font-weight: 400; }
+.profile-q input, .profile-q select, .profile-q textarea { padding: 10px 13px; color: var(--mc-white); background: #09110f; border: 1px solid var(--mc-border); border-radius: 11px; font: 1rem inherit; }
+.profile-q.new input, .profile-q.new select, .profile-q.new textarea { border-color: var(--mc-green); }
+.new-chip { margin-left: 8px; padding: 1px 8px; color: #00140e; background: var(--mc-green); border-radius: 999px; font-size: .66rem; font-weight: 800; }
+button.who-chip { cursor: pointer; }
+button.who-chip:hover { color: var(--mc-green-soft); }
+
+/* Every part of the app carries its own guide, in the corner of its own box. */
+.directions-grid article { position: relative; padding-bottom: 42px; }
+.guide-link { position: absolute; right: 14px; bottom: 12px; padding: 5px 13px; color: #00140e; background: var(--mc-green); border: 0; border-radius: 999px; font-size: .76rem; font-weight: 800; cursor: pointer; }
+.guide-link:hover { background: var(--mc-green-soft); }
+
+/* Adding a project is a different kind of act from opening one, so it gets
+   clear air rather than sitting up against the last project's box. */
+.dash-section.stands-apart { margin-top: 40px; padding-top: 28px; border-top: 1px solid #1e2c28; }

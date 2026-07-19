@@ -332,6 +332,10 @@ fn conversation_is_foreground_blocking(target: Option<String>) -> Result<bool, S
 fn copy_latest_conversation_response_blocking(target: Option<String>) -> Result<String, String> {
     let automation = automation()?;
     let (target, window) = resolve_target(&automation, target.as_deref())?;
+    let window_left = window
+        .get_bounding_rectangle()
+        .ok()
+        .map(|rect| (rect.get_left(), rect.get_width()));
     let copy_buttons = matching_buttons(
         &automation,
         window,
@@ -339,7 +343,28 @@ fn copy_latest_conversation_response_blocking(target: Option<String>) -> Result<
         false,
         &["code"],
     );
-    let copy = copy_buttons.last().ok_or_else(|| {
+    // The author's own messages sit to the right, the assistant's to the left.
+    // Reading position is the only reliable way to tell them apart: comparing
+    // the copied text against what was just sent fails the moment the window
+    // renders it back with different punctuation or spacing, and then the app
+    // reads his own words to him as though they were the answer.
+    let assistant_side: Vec<&UIElement> = window_left
+        .map(|(left, width)| {
+            let midpoint = left + width / 2;
+            copy_buttons
+                .iter()
+                .filter(|button| {
+                    button
+                        .get_bounding_rectangle()
+                        .map(|rect| rect.get_left() < midpoint)
+                        .unwrap_or(true)
+                })
+                .collect()
+        })
+        // No window bounds means no way to judge sides; better every button
+        // than none, since the old behaviour at least usually worked.
+        .unwrap_or_else(|| copy_buttons.iter().collect());
+    let copy = assistant_side.last().copied().ok_or_else(|| {
         format!(
             "No completed {} response is available yet.",
             target.short_name()

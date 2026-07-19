@@ -22,7 +22,8 @@ describe("walkthroughs", () => {
     const screens = new Set([
       "home", "library", "reader", "settings", "projects", "project-workspace",
       "project-explorer", "workspace-files", "human-maker", "chat", "dashboard",
-      "idea", "comments", "directions", "claude-access", "voice-targets", "people", "feedback"
+      "idea", "comments", "directions", "claude-access", "voice-targets", "people", "feedback",
+      "request-access", "unlock", "things-to-do", "talk", "profile"
     ]);
     for (const guide of WALKTHROUGHS) {
       for (const step of guide.steps) {

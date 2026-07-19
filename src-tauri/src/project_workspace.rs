@@ -840,9 +840,17 @@ pub fn search_project_documents(query: String) -> Result<Vec<SearchHit>, String>
 #[cfg(test)]
 mod tests {
     use super::{safe_relative_path, set_active_project};
+    use std::sync::Mutex;
+
+    // These tests all read and write one global active project, and Rust runs
+    // tests in parallel by default. Without this they pass or fail depending
+    // on the scheduler, which is worse than having no test at all.
+    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
     #[test]
     fn accepts_only_paths_inside_the_project() {
+        let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        restore_default_project();
         assert_eq!(
             safe_relative_path("/MaggotClaw Games/The Long Rot/Stories/Chapter 1.txt")
                 .unwrap()
@@ -855,6 +863,8 @@ mod tests {
 
     #[test]
     fn files_a_shared_codex_under_its_own_folder() {
+        let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        restore_default_project();
         assert_eq!(
             safe_relative_path("/MaggotClaw Games/01 Codex, ID Registry v1.31.txt")
                 .unwrap()
@@ -866,6 +876,8 @@ mod tests {
 
     #[test]
     fn never_accepts_a_sibling_project_as_shared() {
+        let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        restore_default_project();
         // The Long Rot must not be able to file Project Zero Author's pages
         // just because the two sit side by side under the same parent.
         assert!(safe_relative_path("/MaggotClaw Games/Project Zero Author/Chapter 01.txt").is_err());
@@ -874,18 +886,24 @@ mod tests {
 
     #[test]
     fn shared_paths_still_refuse_traversal() {
+        let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        restore_default_project();
         assert!(safe_relative_path("/MaggotClaw Games/../secret.txt").is_err());
         assert!(safe_relative_path("/MaggotClaw Games/.").is_err());
     }
 
     #[test]
     fn the_shared_folder_itself_is_not_a_file() {
+        let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        restore_default_project();
         assert!(safe_relative_path("/MaggotClaw Games").is_err());
         assert!(safe_relative_path("/MaggotClaw Games/").is_err());
     }
 
     #[test]
     fn a_project_without_a_library_is_never_given_one() {
+        let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        restore_default_project();
         // The library must be declared by the app, not inferred from the
         // project's parent folder. Inferring it would mean a project rooted at
         // "/Photos/Wedding" quietly accepting anything sitting in "/Photos".
@@ -902,12 +920,16 @@ mod tests {
 
     #[test]
     fn a_library_must_actually_contain_its_project() {
+        let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        restore_default_project();
         assert!(set_active_project("Odd".into(), "/A/Project".into(), Some("/B".into())).is_err());
         restore_default_project();
     }
 
     #[test]
     fn a_declared_library_is_honoured() {
+        let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        restore_default_project();
         set_active_project(
             "The Long Rot".into(),
             "/MaggotClaw Games/The Long Rot".into(),

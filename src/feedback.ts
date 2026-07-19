@@ -129,3 +129,57 @@ export function diagnosticsReport(version: string, usage: Usage, errors: ErrorNo
     ...recent
   ].join("\n").slice(0, 1200);
 }
+
+// ---- What other people have told him ---------------------------------------
+// Feedback is posted into the owner's Discord channel, alongside access
+// requests. Until now it stayed there: the Tell MaggotClaw page listed only
+// what this computer had sent, so the owner never saw anyone else's.
+
+export interface ArrivedFeedback {
+  kind: FeedbackKind;
+  area: string;
+  rating?: number;
+  text: string;
+  from: string;
+  at: string;
+}
+
+// Pure: pick the feedback out of a channel that also carries request codes and
+// unlock grants. Every feedback message opens with the kind in bold, which is
+// what feedbackMessage writes above.
+export function parseArrivedFeedback(
+  messages: Array<{ content?: string; timestamp?: string; author?: { username?: string } }>
+): ArrivedFeedback[] {
+  const found: ArrivedFeedback[] = [];
+  for (const message of messages) {
+    const content = (message.content ?? "").trim();
+    const head = content.match(/^\*\*(Rating|Idea|Problem)\*\*\s*(★*☆*)?\s*—\s*(.+)$/m);
+    if (!head) continue;
+    const kind = head[1].toLowerCase() as FeedbackKind;
+    const stars = (head[2] ?? "").split("★").length - 1;
+    const from = content.match(/^From:\s*(.+)$/m)?.[1]?.trim();
+    // Everything below the "From:" line is what the person actually wrote.
+    const body = content.split(/^From:.*$/m)[1]?.trim() ?? "";
+    found.push({
+      kind,
+      area: head[3].trim(),
+      ...(kind === "rating" && stars ? { rating: stars } : {}),
+      text: body,
+      from: from || message.author?.username || "someone",
+      at: message.timestamp ?? ""
+    });
+  }
+  // Newest first, and a problem outranks an idea outranks a rating: something
+  // broken matters more than something wished for.
+  const weight = (kind: FeedbackKind) => (kind === "problem" ? 0 : kind === "idea" ? 1 : 2);
+  return found.sort((a, b) => weight(a.kind) - weight(b.kind) || b.at.localeCompare(a.at));
+}
+
+export async function fetchArrivedFeedback(botToken: string, channelId: string): Promise<ArrivedFeedback[]> {
+  if (!("__TAURI_INTERNALS__" in window)) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  const messages = await invoke<Array<{ content?: string; timestamp?: string; author?: { username?: string } }>>(
+    "fetch_discord_messages", { botToken, channelId, limit: 100 }
+  );
+  return parseArrivedFeedback(Array.isArray(messages) ? messages : []);
+}

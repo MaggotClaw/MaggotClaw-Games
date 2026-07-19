@@ -107,6 +107,66 @@ export const WALKTHROUGHS: Walkthrough[] = [
     ]
   },
   {
+    id: "okgo-button",
+    name: "The OK GO Button",
+    forOwner: false,
+    why: "You can approve something with one press, from anywhere on the screen, and call it off if you change your mind.",
+    steps: [
+      { say: "OK GO is how you say yes. Nothing that changes the book happens until you press it — that brake is the whole reason this is safe.", screen: "home" },
+      { say: "Press OK GO Button and a small bar appears. It floats above everything, so it is there whatever else you are looking at.", screen: "home" },
+      { say: "Drag it wherever suits you by the grip along its bottom. It stays where you put it.", heads: "The X sits off to the side on purpose, so reaching for OK GO can never close it by accident." },
+      { say: "Press it and it counts three, two, one before sending. Press again during the countdown and nothing goes.", heads: "That pause is deliberate. It is the moment to change your mind." }
+    ]
+  },
+  {
+    id: "projects-tour",
+    name: "Working On The Project",
+    forOwner: false,
+    why: "You know where the chapters live on your own computer, and what you may do with them.",
+    steps: [
+      { say: "Projects is the working side of the app. Reader Mode is for reading; this is for the files themselves.", screen: "projects" },
+      { say: "Open a project. What you can do here depends on your role — a reader can look, an editor can propose changes.", screen: "projects" },
+      { say: "Download or Update pulls the newest files onto this computer. It only takes what your role needs, so nothing is cluttered with files meant for someone else.", screen: "project-workspace" },
+      { say: "Everything lands in numbered folders. 01 Originals is the real thing, 04 Proposed Changes is where suggestions wait, 07 Backups keeps the old copy of anything replaced.", heads: "Nothing you do locally touches Dropbox until an upload is approved." },
+      { say: "View The File List shows every file with who it is for. That is where the owner decides what each role downloads.", screen: "workspace-files" }
+    ]
+  },
+  {
+    id: "messages-tour",
+    name: "Talking To Everyone",
+    forOwner: false,
+    why: "You can post in the right room and know who else is there.",
+    steps: [
+      { say: "Messages has a room for each group — readers, editors, and the author. Post in the one that fits.", screen: "chat" },
+      { say: "Who's Here shows who else has the app open. It is not a promise they are watching, only that they are connected.", screen: "chat" },
+      { say: "Access requests also arrive here for the owner, so nothing gets lost in a private message.", heads: "If the rooms are empty, the messaging key has not been set up yet — ask MaggotClaw for it." }
+    ]
+  },
+  {
+    id: "ask-for-access",
+    name: "Asking For More Access",
+    forOwner: false,
+    why: "You have asked for the role you need, and you know what happens next.",
+    steps: [
+      { say: "Everyone starts as a Reader. Anything more is given by MaggotClaw — it is never taken.", screen: "home" },
+      { say: "Say which role you want and why. One line is plenty; he only needs to know what you are hoping to do.", screen: "request-access" },
+      { say: "Send it. The request goes straight to him — there is no code to copy and nothing to paste.", screen: "request-access" },
+      { say: "Carry on reading while you wait. When he approves you, your app unlocks itself the next time you open it.", heads: "New questions may appear in your profile afterwards — those are the ones only your new role is asked." }
+    ]
+  },
+  {
+    id: "human-maker-tour",
+    name: "Using The Human Maker",
+    forOwner: true,
+    why: "You can audit a passage against your own codex and hand the findings to the AI.",
+    steps: [
+      { say: "The Human Maker reads a passage the way your codex says to read it, and finds the tells that make prose look machine-written. It runs entirely on this computer.", screen: "human-maker" },
+      { say: "Pick a chapter, or paste a passage in. Then press Run The Audit.", screen: "human-maker" },
+      { say: "The mechanical tells are found for you. Underneath are the ones no machine can judge — voice, flair, subtext — listed to read aloud for.", heads: "It is a detector, not a rewriter. The writing stays yours." },
+      { say: "Send Audit To Claude hands the findings straight over, with the Ward directive and the canon protections attached. Then say Ok Go there.", screen: "human-maker" }
+    ]
+  },
+  {
     id: "claude-connector",
     name: "Putting MaggotClaw In Claude's Menu",
     forOwner: true,

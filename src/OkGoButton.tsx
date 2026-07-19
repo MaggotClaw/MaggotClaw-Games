@@ -93,5 +93,8 @@ export function OkGoButton({ readerName, onClose }: { readerName: string; onClos
       {label}
     </button>
     <button className="okgo-close" onClick={onClose} title="Close">✕</button>
+    {/* Somewhere to take hold of. The whole bar drags, but a grip says so,
+        and it keeps the closing X off the button you are trying to press. */}
+    <span className="okgo-grip" aria-hidden="true" />
   </main>;
 }

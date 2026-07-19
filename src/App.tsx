@@ -37,9 +37,13 @@ import { OkGoButton } from "./OkGoButton";
 import { applySettings, collectSettings, describeBundle } from "./settingsFile";
 import { outstandingTasks, readerLinksPublished, setReaderLinksPublished, setSettingsBackedUp, setSharingWorks, settingsBackedUp, sharingWorks, tasksHeadline, type SetupTask } from "./setupTasks";
 import { WalkthroughWindow } from "./WalkthroughWindow";
+import { BEHAVIOUR_CHOICES, behaviourFile, behaviourPath, composeBehaviour, conflicts, labelOf, loadBehaviour, parseBehaviourFile, saveBehaviour, TOO_MANY, type BehaviourDraft } from "./aiBehaviour";
+import { completeness, loadAnswers, newlyAsked, questionsFor, saveAnswers, unanswered, type ProfileAnswers } from "./profileQuestions";
+import { walkthroughsFor } from "./walkthrough";
+import { WordDocument } from "./WordDocument";
 import { loadPeople, parseProfileMessage, publishPeople, removePerson, savePeople, sortedPeople, upsertPerson, type Person } from "./people";
-import { addFeedback, diagnosticsReport, FEEDBACK_AREAS, feedbackMessage, loadErrors, loadFeedback, loadUsage, markFeedbackSent, noteUsage, setShareDiagnostics, shareDiagnostics, watchForErrors } from "./feedback";
-import { activeProject, addProject, allProjects, applyActiveProject, isSafeDropboxRoot, isSafeProjectName, removeProject, setActiveProjectId, SHARED_FOLDER } from "./projects";
+import { addFeedback, diagnosticsReport, FEEDBACK_AREAS, feedbackMessage, fetchArrivedFeedback, loadErrors, loadFeedback, loadUsage, markFeedbackSent, noteUsage, setShareDiagnostics, shareDiagnostics, watchForErrors, type ArrivedFeedback } from "./feedback";
+import { activeProject, addProject, allProjects, applyActiveProject, isSafeDropboxRoot, isSafeProjectName, projectFolderFor, removeProject, setActiveProjectId, SHARED_FOLDER } from "./projects";
 import {
   actionsPath, actionLog, claudeAccessOn, claudeInstructions, claudePointer, describeAction,
   handledIds, logAction, markHandled, needsOkGo, parseActions, setClaudeAccess,
@@ -123,19 +127,30 @@ const IS_COMPANION_WINDOW =
 const IS_OKGO_WINDOW =
   typeof window !== "undefined" && window.location.hash.replace(/^#/, "") === "okgo";
 
-const IS_WALK_WINDOW =
-  typeof window !== "undefined" && window.location.hash.replace(/^#/, "") === "walkthrough";
+// "#walkthrough" opens the library; "#walkthrough:dropbox-sharing" opens that
+// one guide straight away.
+const WALK_HASH = typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : "";
+const IS_WALK_WINDOW = WALK_HASH === "walkthrough" || WALK_HASH.startsWith("walkthrough:");
+const WALK_GUIDE_ID = WALK_HASH.startsWith("walkthrough:") ? WALK_HASH.slice("walkthrough:".length) : "";
 
-async function openWalkthroughWindow(): Promise<void> {
+// Naming a guide opens that guide. Pressing Show Me on an alert should land on
+// the one thing being asked for, not on a list to hunt through — the alert
+// already knew which one it meant.
+async function openWalkthroughWindow(guideId = ""): Promise<void> {
   const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
   const existing = await WebviewWindow.getByLabel("walkthrough");
   if (existing) {
-    try { await existing.show(); await existing.setFocus(); } catch { /* ignore */ }
-    return;
+    // An open window is showing something else; close it so the named guide
+    // is what appears, rather than silently doing nothing.
+    if (guideId) { try { await existing.close(); } catch { /* ignore */ } }
+    else {
+      try { await existing.show(); await existing.setFocus(); } catch { /* ignore */ }
+      return;
+    }
   }
   // eslint-disable-next-line no-new
   new WebviewWindow("walkthrough", {
-    url: "index.html#walkthrough",
+    url: `index.html#walkthrough${guideId ? `:${guideId}` : ""}`,
     title: "Show Me How",
     width: 560, height: 500, resizable: true, decorations: false,
     transparent: true, shadow: false, alwaysOnTop: true, center: false, focus: true
@@ -153,8 +168,8 @@ async function openOkGoWindow(): Promise<void> {
   new WebviewWindow("okgo", {
     url: "index.html#okgo",
     title: "OK GO",
-    width: 320,
-    height: 140,
+    width: 236,
+    height: 104,
     resizable: true,
     decorations: false,
     transparent: true,
@@ -183,8 +198,8 @@ async function openCompanionWindow(): Promise<void> {
     dragDropEnabled: false,
     // Sized to hug the buttons: mic almost touching the left curve, Close (✕)
     // right at the rounded end. Must match applyCompact in TalkScreen.
-    width: 406,
-    height: 96,
+    width: 430,
+    height: 84,
     resizable: true,
     decorations: false,
     transparent: true,
@@ -270,6 +285,15 @@ export function App() {
   const [sleepMinutes, setSleepMinutes] = useState(0);
   const [claudeLog, setClaudeLog] = useState<ActionRecord[]>(actionLog);
   const [claudeOn, setClaudeOn] = useState(claudeAccessOn);
+  const [behaviour, setBehaviour] = useState<BehaviourDraft>(loadBehaviour);
+  const [behaviourNote, setBehaviourNote] = useState("");
+  const [arrived, setArrived] = useState<ArrivedFeedback[]>([]);
+  const [arrivedBusy, setArrivedBusy] = useState(false);
+  const [arrivedNote, setArrivedNote] = useState("");
+  const [behaviourBusy, setBehaviourBusy] = useState(false);
+  // Which assistant the page is talking about. The behaviour rules are shared
+  // by all of them; only what each one can actually DO differs.
+  const [aiTarget, setAiTarget] = useState<"claude" | "codex" | "chatgpt" | "grok">("claude");
   const [people, setPeople] = useState<Person[]>(() => sortedPeople(loadPeople()));
   const [peopleBusy, setPeopleBusy] = useState(false);
   const [feedbackArea, setFeedbackArea] = useState(FEEDBACK_AREAS[0]);
@@ -402,6 +426,7 @@ export function App() {
           name: DOC_WINDOW_PATH.split("/").pop() ?? DOC_WINDOW_PATH,
           content,
           html,
+          localPath: DOC_WINDOW_PATH,
           contentHash: hash,
           segments: segmentDocument(content),
           retrievedAt: new Date().toISOString()
@@ -737,6 +762,7 @@ export function App() {
         name: copy.fileName,
         content,
         html,
+        localPath: copy.doc.localRelativePath,
         contentHash: hash,
         segments: segmentDocument(content),
         retrievedAt: new Date().toISOString()
@@ -1200,7 +1226,7 @@ export function App() {
     try {
       const result = await initializeWorkspace();
       setWorkspace(result);
-      setStatus("Local project workspace is ready. Dropbox was not contacted.");
+      setStatus("Local project workspace is ready. Nothing stored was touched.");
     } catch (error) {
       setStatus(message(error));
     } finally {
@@ -1257,7 +1283,7 @@ export function App() {
   }
 
   if (IS_WALK_WINDOW) {
-    return <WalkthroughWindow isOwner={canPerform(realProfileRole(readerName), "manage")} onClose={() => { void closeCurrentWindow(); }} />;
+    return <WalkthroughWindow isOwner={canPerform(realProfileRole(readerName), "manage")} startWith={WALK_GUIDE_ID} onClose={() => { void closeCurrentWindow(); }} />;
   }
 
   if (IS_OKGO_WINDOW) {
@@ -1275,7 +1301,7 @@ export function App() {
   }
 
   if (screen === "profile") {
-    return <Profile initial={readerName} onContinue={saveProfile} onCancel={readerName ? () => setScreen("home") : undefined} />;
+    return <Profile initial={readerName} role={role} onContinue={saveProfile} onCancel={readerName ? () => setScreen("home") : undefined} />;
   }
 
   if (screen === "talk") {
@@ -1292,7 +1318,7 @@ export function App() {
         if (ideaListening) { commentDictationActive.current = false; setIdeaListening(false); void stopNativeDictation().catch(() => undefined); }
         setScreen("home");
       }}>← Back</button>
-      <BrandLogo compact /><p className="eyebrow">Note To Self</p><h1>Catch The Idea</h1>
+      <BrandLogo compact /><p className="eyebrow">Catch An Idea</p><h1>Catch The Idea</h1>
       <p>Speak or type it. It lands dated in 02 Working Files → Ideas — never touching the book until you promote it.</p>
       <label>The idea<textarea rows={8} value={ideaText} placeholder="Speak, or type here…" onChange={(event) => setIdeaText(event.target.value)} /></label>
       <div className="form-actions">
@@ -1339,27 +1365,44 @@ export function App() {
 
   if (screen === "directions") {
     return <main className="app-shell directions-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Directions</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
-      <section className="projects-heading"><h1>Finding Your Way Around</h1><p>What each part of MaggotClaw Games does.</p></section>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Directions</span><button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button></header>
+      <section className="projects-heading"><p className="eyebrow">Directions</p><h1>Finding Your Way Around</h1></section>
+      {/* Every guide, always — including the ones already done. The main screen
+          only ever offers what still needs doing, so this is where you come to
+          redo something or see how a part works before you need it. */}
+      {"__TAURI_INTERNALS__" in window && <section className="dash-section">
+        <h2>Show Me How</h2>
+        <p className="board-hint">Each one opens a little window that stays on top and takes you through it a step at a time.</p>
+        <div className="guide-list">
+          {walkthroughsFor(canPerform(realProfileRole(readerName), "manage")).map((guide) => <button
+            key={guide.id}
+            className="guide-row"
+            onClick={() => { void openWalkthroughWindow(guide.id); }}
+          >
+            <span><strong>{guide.name}</strong><small>{guide.why}</small></span>
+            <span>→</span>
+          </button>)}
+        </div>
+      </section>}
       <section className="directions-grid">
-        <article><h2>Reader Mode</h2><p>The book itself. Pick a chapter, then choose Narrated (she reads to you, sentence by sentence) or Read myself (a normal book page). Locked chapters are not released yet. Press Comment while reading to record a note tied to the exact sentence.</p></article>
-        <article><h2>Voice Companion</h2><p>Talk out loud and your words are typed into Claude or Codex for you. The little bar floats above the AI program: microphone to start, + to add time, ➤ to send now, ■ to stop, ✕ to close.</p></article>
-        <article><h2>Projects</h2><p>The working side. Open a project to see its workspace: Explore Files browses every chapter and codex, Chapters shows what is finished, Codex is the story brain, and the search finds every mention of anything. Download or Update refreshes your local copies from Dropbox.</p></article>
-        <article><h2>Messages</h2><p>Rooms for readers, editors, and the author. Post in a room, or open the full Messages window (Discord) for voice calls. Access requests also land there for the owner.</p></article>
-        <article><h2>Requesting more access</h2><p>Everyone starts as a Reader. Request access sends your ask to the owner; when approved you get an unlock code — paste it under Enter unlock code and your new role is live.</p></article>
-        <article><h2>Owner Dashboard</h2><p>Owner only: approvals waiting, requests pulled from Discord, and the paste-a-code fallback. Approving posts the unlock code back automatically.</p></article>
-        {canPerform(role, "manage") && <article className="owner-directions"><h2>For MaggotClaw — One-Time Setup</h2><p>1. Settings → Owner → Project Files → <strong>Import From The Bridge</strong>, then Save. Your computer now talks to Dropbox itself — the bridge no longer needs to run.<br/>2. Projects → your project → View The File List → rate the files → <strong>Publish Reader Links</strong>. This makes the read-only links friends download the book through.<br/>3. Messages → <strong>Copy Messaging Key</strong>. Send that one key privately to each friend — it connects their chat and their book downloads.</p></article>}
-        {canPerform(role, "manage") && <article className="owner-directions"><h2>For MaggotClaw — Everyday</h2><p><strong>Release a chapter:</strong> Owner Dashboard → Released Chapters → tick it → Publish. Every reader's app picks it up when it next opens.<br/><strong>Someone asks for access:</strong> the alert appears when the app opens; approve from the dashboard and the unlock code posts back to Discord by itself.<br/><strong>Push your writing:</strong> Download or Update pulls the latest; files you drop in 05 Approved Uploads go up with Upload Approved. Revised chapters reach readers automatically — links always serve the newest version.<br/><strong>New app version for everyone:</strong> ask your assistant to build and push the update; friends get it from Check For Updates.</p></article>}
-        <article><h2>Settings</h2><p>Voice Companion choices, updates and the share link, and for the owner: Discord keys and View as — see the whole app the way a Reader or Editor sees it, then click your name to come back.</p></article>
-        <article><h2>The OK GO Button</h2><p>A small green button that floats over everything and can be dragged anywhere you like. Press it and it counts down three, two, one before "OK GO" goes through to the AI — press again during the countdown to call it off. Nothing is ever approved by accident.</p></article>
-        {canPerform(role, "manage") && <article className="owner-directions"><h2>For MaggotClaw — Human Maker</h2><p>Your prose bench. Pick a chapter or paste a passage and press Run The Audit: it scans against your own Human Maker codex — all forty-five tells, your numbering, your fixes — entirely on this computer.<br/>The mechanical tells are caught automatically. The ones no machine can judge (voice, flair, subtext, dialogue friction) are listed underneath to read aloud for.<br/><strong>Copy Audit For The Rewrite</strong> puts the findings, the Ward Directive, and the canon protections on your clipboard — paste that to Claude with the passage and say Ok Go.</p></article>}
+        <article><h2>Reader Mode</h2><p>The book itself. Pick a chapter, then choose Narrated (she reads to you, sentence by sentence) or Read myself (a normal book page). Locked chapters are not released yet. Press Comment while reading to record a note tied to the exact sentence.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("reader-start"); }}>Show Me →</button></article>
+        <article><h2>Voice Companion</h2><p>Talk out loud and your words are typed into Claude or Codex for you. The little bar floats above the AI program: microphone to start, + to add time, ➤ to send now, ■ to stop, ✕ to close.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("voice-companion"); }}>Show Me →</button></article>
+        <article><h2>Projects</h2><p>The working side. Open a project to see its workspace: Explore Files browses every chapter and codex, Chapters shows what is finished, Codex is the story brain, and the search finds every mention of anything. Download or Update refreshes your local copies from Dropbox.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("projects-tour"); }}>Show Me →</button></article>
+        <article><h2>Messages</h2><p>Rooms for readers, editors, and the author. Post in a room, or open the full Messages window (Discord) for voice calls. Access requests also land there for the owner.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("messages-tour"); }}>Show Me →</button></article>
+        <article><h2>Requesting more access</h2><p>Everyone starts as a Reader. Request access sends your ask to the owner; when approved you get an unlock code — paste it under Enter unlock code and your new role is live.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("ask-for-access"); }}>Show Me →</button></article>
+        <article><h2>Owner Dashboard</h2><p>Owner only: approvals waiting, requests pulled from Discord, and the paste-a-code fallback. Approving posts the unlock code back automatically.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("release-chapter"); }}>Show Me →</button></article>
+        {canPerform(role, "manage") && <article className="owner-directions"><h2>For MaggotClaw — One-Time Setup</h2><p>1. Settings → Owner → Project Files → <strong>Import From The Bridge</strong>, then Save. Your computer now talks to Dropbox itself — the bridge no longer needs to run.<br/>2. Projects → your project → View The File List → rate the files → <strong>Publish Reader Links</strong>. This makes the read-only links friends download the book through.<br/>3. Messages → <strong>Copy Messaging Key</strong>. Send that one key privately to each friend — it connects their chat and their book downloads.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("owner-setup"); }}>Show Me →</button></article>}
+        {canPerform(role, "manage") && <article className="owner-directions"><h2>For MaggotClaw — Everyday</h2><p><strong>Release a chapter:</strong> Owner Dashboard → Released Chapters → tick it → Publish. Every reader's app picks it up when it next opens.<br/><strong>Someone asks for access:</strong> the alert appears when the app opens; approve from the dashboard and the unlock code posts back to Discord by itself.<br/><strong>Push your writing:</strong> Download or Update pulls the latest; files you drop in 05 Approved Uploads go up with Upload Approved. Revised chapters reach readers automatically — links always serve the newest version.<br/><strong>New app version for everyone:</strong> ask your assistant to build and push the update; friends get it from Check For Updates.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("release-chapter"); }}>Show Me →</button></article>}
+        <article><h2>Settings</h2><p>Voice Companion choices, updates and the share link, and for the owner: Discord keys and View as — see the whole app the way a Reader or Editor sees it, then click your name to come back.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("settings-again"); }}>Show Me →</button></article>
+        <article><h2>The OK GO Button</h2><p>A small green button that floats over everything and can be dragged anywhere you like. Press it and it counts down three, two, one before "OK GO" goes through to the AI — press again during the countdown to call it off. Nothing is ever approved by accident.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("okgo-button"); }}>Show Me →</button></article>
+        {canPerform(role, "manage") && <article className="owner-directions"><h2>For MaggotClaw — Human Maker</h2><p>Your prose bench. Pick a chapter or paste a passage and press Run The Audit: it scans against your own Human Maker codex — all forty-five tells, your numbering, your fixes — entirely on this computer.<br/>The mechanical tells are caught automatically. The ones no machine can judge (voice, flair, subtext, dialogue friction) are listed underneath to read aloud for.<br/><strong>Copy Audit For The Rewrite</strong> puts the findings, the Ward Directive, and the canon protections on your clipboard — paste that to Claude with the passage and say Ok Go.</p><button className="guide-link" onClick={() => { void openWalkthroughWindow("human-maker-tour"); }}>Show Me →</button></article>}
       </section>
     </main>;
   }
 
   if (screen === "home") {
     return <main className="app-shell home-shell">
-      <span className="who-chip home-corner">{readerName || "Guest"} · {roleLabel(role)}</span>
+      <button className="who-chip home-corner" onClick={() => setScreen("profile")} title="Your profile">{readerName || "Guest"} · {roleLabel(role)}{unanswered(role, loadAnswers(readerName)).length > 0 && <span className="pending-badge">{unanswered(role, loadAnswers(readerName)).length}</span>}</button>
       <header className="hero"><BannerWithVersion /></header>
       <section className="home-toolbar">
         <button className="pill-button chip" onClick={() => openSettingsFrom("home")}>Settings</button>
@@ -1367,8 +1410,10 @@ export function App() {
         {/* The switch stays on the real owner's authority, never the borrowed
             one — otherwise looking through a reader's eyes takes away the very
             control needed to stop looking, and only a restart gets you out. */}
-        {canPerform(realProfileRole(readerName), "manage") && getViewAs()
-          ? <label className="pill-button chip viewing-as">Viewing as
+        {/* Your name now lives in the corner of every page, like any other
+            app, so the toolbar only carries the view-as switch. */}
+        {canPerform(realProfileRole(readerName), "manage") && getViewAs() &&
+          <label className="pill-button chip viewing-as">Viewing as
               <select value={getViewAs() ?? "administrator"} onChange={(event) => {
                 const option = event.target.value as ProjectRole;
                 setViewAs(option === "administrator" ? null : option);
@@ -1378,9 +1423,8 @@ export function App() {
                 {(["support", "manager", "editor", "reviewer", "contributor", "reader"] as ProjectRole[])
                   .map((option) => <option key={option} value={option}>{roleLabel(option)}</option>)}
               </select>
-            </label>
-          : <button className="pill-button chip" onClick={() => setScreen("profile")}>{readerName || "Start Here"}</button>}
-        {"__TAURI_INTERNALS__" in window && <button className="pill-button chip" onClick={() => { setIdeaText(""); setScreen("idea"); }}>Note To Self</button>}
+            </label>}
+        {"__TAURI_INTERNALS__" in window && <button className="pill-button chip" onClick={() => { setIdeaText(""); setScreen("idea"); }}>Catch An Idea</button>}
         {/* Anywhere you go and do work is a card below, with the other rooms
             of the app. Only small controls belong up here — the ones you press
             and stay where you are.
@@ -1391,9 +1435,6 @@ export function App() {
             implies there is always something outstanding. */}
         {"__TAURI_INTERNALS__" in window && canPerform(role, "propose") &&
           <button className="pill-button chip" onClick={() => { void openOkGoWindow(); }}>OK GO Button</button>}
-        {canPerform(role, "manage") && <button className="pill-button chip" onClick={() => setScreen("claude-access")}>
-          Claude{claudeLog.some((r) => r.state === "waiting") && <span className="pending-badge">{claudeLog.filter((r) => r.state === "waiting").length}</span>}
-        </button>}
       </section>
       {readerName === "Test Profile" && <div className="test-mode-banner">TEST PROFILE — LOCAL ONLY — NOTHING IS SYNCHRONIZED</div>}
       {setupTasks.length > 0 && <section className={setupTasks.some((t) => t.urgent) ? "todo-strip urgent" : "todo-strip"}>
@@ -1406,8 +1447,11 @@ export function App() {
       {discordWaiting > 0 && canPerform(role, "manage") && <section className="welcome-strip">
         <span className="reader-note"><strong>{discordWaiting} Access Request{discordWaiting === 1 ? " Is" : "s Are"} Waiting On Discord.</strong> <button className="text-button inline" onClick={openDashboard}>Open The Owner Dashboard</button></span>
       </section>}
-      {syncMessage && <section className="welcome-strip">
-        <span className="reader-note">{syncMessage}. {syncMessage.includes("Newer") && <button className="text-button inline" onClick={() => { void openLongRotWorkspace(); }}>Open The Workspace To Update</button>}</span>
+      {/* "Up to date" is housekeeping, not news — it belongs with
+          the files, and it already appears there. Only the case that needs
+          doing something about earns a place on the main screen. */}
+      {syncMessage.includes("Newer") && <section className="welcome-strip">
+        <span className="reader-note">{syncMessage}. <button className="text-button inline" onClick={() => { void openLongRotWorkspace(); }}>Open The Workspace To Update</button></span>
       </section>}
       <section className="mode-grid">
         <button className="mode-card" onClick={() => setScreen("library")}><img className="mode-icon image-icon" src={activeProject().icon} alt="" /><span><strong>Reader Mode</strong><small>Read or listen, save your place, and record comments.</small></span><span>→</span></button>
@@ -1421,6 +1465,8 @@ export function App() {
         {canPerform(role, "manage") && <button className="mode-card owner-mode" onClick={openDashboard}><span className="mode-icon owner-mark" aria-hidden="true" /><span><strong>Owner Dashboard</strong><small>Approvals waiting on you, requests pulled from Discord, and which chapters are released.</small></span>
           {(requests.length + discordWaiting) > 0 ? <span className="pending-badge">{requests.length + discordWaiting}</span> : <span>→</span>}</button>}
         {canPerform(role, "manage") && <button className="mode-card people-mode" onClick={() => setScreen("people")}><span className="mode-icon people-mark" aria-hidden="true" /><span><strong>People</strong><small>Everyone who reads or works on the book, and what each of them is allowed to do.</small></span><span>→</span></button>}
+        {canPerform(role, "manage") && <button className="mode-card ai-mode" onClick={() => setScreen("claude-access")}><span className="mode-icon ai-mark" aria-hidden="true" /><span><strong>AI Settings</strong><small>How every assistant should talk to you, what each is allowed to do, and what Claude has done.</small></span>
+          {claudeLog.some((r) => r.state === "waiting") ? <span className="pending-badge">{claudeLog.filter((r) => r.state === "waiting").length}</span> : <span>→</span>}</button>}
         <button className="mode-card tell-mode" onClick={() => setScreen("feedback")}><span className="mode-icon tell-mark" aria-hidden="true" /><span><strong>Tell MaggotClaw</strong><small>Report anything wrong with the program, or ask for something you wish it did.</small></span><span>→</span></button>
       </section>
     </main>;
@@ -1428,8 +1474,8 @@ export function App() {
 
   if (screen === "projects") {
     return <main className="app-shell projects-list-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Projects</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
-      <section className="projects-heading"><h1>Your Projects</h1><p>Select a project to open its local workspace and available actions.</p></section>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Projects</span><button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button></header>
+      <section className="projects-heading"><p className="eyebrow">Projects</p><h1>Your Projects</h1></section>
       <section className="project-tiles">
         {projectList.map((project) => {
           const isActive = project.id === activeProject().id;
@@ -1440,7 +1486,7 @@ export function App() {
           }}>
             <img className="project-placeholder project-icon-image" src={project.icon} alt="" />
             <span><strong>{project.name}</strong><small>{project.id === "project-zero"
-              ? "Project added · Folder ready on Dropbox, nothing in it yet"
+              ? "Project added · Folder ready, nothing in it yet"
               : isActive && workspace?.initialized
                 ? `${workspace.downloadedFiles} Files On This Computer${syncMessage ? ` · ${syncMessage}` : ""}`
                 : "Open To Set Up"}</small></span>
@@ -1448,21 +1494,24 @@ export function App() {
           </button>;
         })}
       </section>
-      {canPerform(role, "manage") && <section className="dash-section">
+      {canPerform(role, "manage") && <section className="dash-section stands-apart">
         <h2>Add A Project</h2>
-        <p className="board-hint">MaggotClaw Games can work on anything. Give the project a name and the Dropbox folder its files live in.</p>
+        <p className="board-hint">A project is anything you are working on. Name it, and it gets its own folder in your storage alongside the others.</p>
         <div className="pronun-row">
+          {/* One field. Every project sits beside the others and its folder is
+              simply its name, so asking for the path was asking the author to
+              type back something the app already knew. */}
           <input value={newProjectName} placeholder="Project name" onChange={(event) => setNewProjectName(event.target.value)} />
-          <input value={newProjectRoot} placeholder="/Folder On Dropbox" onChange={(event) => setNewProjectRoot(event.target.value)} />
-          <button className="primary tiny" disabled={!isSafeProjectName(newProjectName) || !isSafeDropboxRoot(newProjectRoot)} onClick={() => {
-            addProject(newProjectName, newProjectRoot);
+          <button className="primary tiny" disabled={!isSafeProjectName(newProjectName) || !isSafeDropboxRoot(projectFolderFor(newProjectName))} onClick={() => {
+            addProject(newProjectName, projectFolderFor(newProjectName));
             setProjectList(allProjects());
-            setNewProjectName(""); setNewProjectRoot("");
+            setNewProjectName("");
             setStatus("Project added. Open it to set up its local workspace.");
           }}>Add</button>
         </div>
+        {newProjectName.trim() && <p className="board-hint">Its files will live in <strong>{projectFolderFor(newProjectName)}</strong>.</p>}
         {projectList.filter((p) => !p.builtIn).map((p) => <div key={p.id} className="pronun-row">
-          <input value={`${p.name} — ${p.dropboxRoot}`} readOnly />
+          <input value={p.name} readOnly />
           <button className="text-button" onClick={() => { removeProject(p.id); setProjectList(allProjects()); }}>✕</button>
         </div>)}
       </section>}
@@ -1471,9 +1520,9 @@ export function App() {
 
   if (screen === "project-zero") {
     return <main className="app-shell project-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("projects")}>← Back</button><span className="eyebrow">Project Zero Author</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("projects")}>← Back</button><span className="eyebrow">Project Zero Author</span><button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button></header>
       <section className="project-heading"><div><p className="eyebrow">Project Added</p><h1>Project Zero Author</h1><p>This project is selectable. Its local filing structure and remote source still need to be configured.</p></div></section>
-      <section className="workspace-card"><div><span>Local workspace</span><strong>Not prepared</strong><small>No Project Zero Author files have been created or changed.</small></div><div><span>Remote files</span><strong>Not connected</strong><small>No Dropbox location or other source has been assigned.</small></div><div><span>Project actions</span><strong>Safely locked</strong><small>Download and upload stay unavailable until the project source is explicitly configured.</small></div></section>
+      <section className="workspace-card"><div><span>Local workspace</span><strong>Not prepared</strong><small>No Project Zero Author files have been created or changed.</small></div><div><span>Remote files</span><strong>Not connected</strong><small>No storage location has been assigned yet.</small></div><div><span>Project actions</span><strong>Safely locked</strong><small>Download and upload stay unavailable until the project source is explicitly configured.</small></div></section>
       <section className="workspace-actions"><button disabled>Prepare Workspace</button><button disabled>Download or Update</button>{canPerform(role, "review") && <button disabled>Review Changes</button>}{canPerform(role, "upload") && <button disabled>Upload Approved</button>}</section>
       <footer className="safe-status">Project Zero Author has been added to the app. Nothing was synchronized.</footer>
     </main>;
@@ -1481,9 +1530,9 @@ export function App() {
 
   if (screen === "project-review") {
     return <main className="app-shell project-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("project-workspace")}>← Back</button><span className="eyebrow">Review Queue</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("project-workspace")}>← Back</button><span className="eyebrow">Review Queue</span><button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button></header>
       <section className="projects-heading"><h1>Proposed Changes</h1><p>Nothing is waiting for review yet. Future AI and human drafts will appear here before anything can be approved for upload.</p></section>
-      <section className="empty-state"><strong>No proposed changes</strong><p>Dropbox remains unchanged.</p></section>
+      <section className="empty-state"><strong>No proposed changes</strong><p>Nothing stored was changed.</p></section>
     </main>;
   }
 
@@ -1493,7 +1542,7 @@ export function App() {
 
   if (screen === "things-to-do") {
     return <main className="app-shell project-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Things To Do</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Things To Do</span><button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button></header>
       <section className="projects-heading"><h1>{setupTasks.length ? tasksHeadline(setupTasks) : "Nothing Left To Do"}</h1><p>{setupTasks.length ? "Each one opens the guide that walks you through it." : "Everything is set up. This page will tell you if that ever changes."}</p></section>
       <section className="comments-list">
         {setupTasks.map((task) => <article key={task.id} className={task.urgent ? "tell-card high" : "tell-card low"}>
@@ -1502,7 +1551,7 @@ export function App() {
           <p>{task.why}</p>
           <div className="request-actions">
             <button className="primary" onClick={() => {
-              if (task.guide && "__TAURI_INTERNALS__" in window) { void openWalkthroughWindow(); return; }
+              if (task.guide && "__TAURI_INTERNALS__" in window) { void openWalkthroughWindow(task.guide); return; }
               if (task.screen) { if (task.screen === "settings") settingsReturn.current = "things-to-do"; setScreen(task.screen as Screen); }
             }}>{task.guide ? "Show Me How" : "Take Me There"}</button>
           </div>
@@ -1514,8 +1563,8 @@ export function App() {
 
   if (screen === "people") {
     return <main className="app-shell project-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">People</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
-      <section className="projects-heading"><h1>Your People</h1><p>Everyone in the circle, what they told you when they joined, and how to reach them.</p></section>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">People</span><button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button></header>
+      <section className="projects-heading"><p className="eyebrow">People</p><h1>People</h1></section>
 
       <section className="form-actions">
         <button className="primary" disabled={peopleBusy} onClick={() => {
@@ -1550,7 +1599,7 @@ export function App() {
             .then((written) => setStatus(`${written} people files written to the project's People folder on Dropbox.`))
             .catch(() => setStatus("The people files could not be written. Nothing was changed."))
             .finally(() => setPeopleBusy(false));
-        }}>Save People Files To Dropbox</button>
+        }}>Save People Files</button>
       </section>
 
       <section className="comments-list">
@@ -1586,8 +1635,34 @@ export function App() {
   if (screen === "feedback") {
     const mine = loadFeedback();
     return <main className="app-shell project-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Tell MaggotClaw</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
-      <section className="projects-heading"><h1>What Do You Think?</h1><p>Rate a part of the app, send an idea, or report a problem. Nothing leaves this computer until you press send.</p></section>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Tell MaggotClaw</span><button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button></header>
+      <section className="projects-heading"><p className="eyebrow">Tell MaggotClaw</p><h1>Tell MaggotClaw</h1></section>
+
+      {/* What everyone else has said. It was arriving in Discord all along,
+          mixed in with request codes, so this page only ever showed the
+          owner his own notes. */}
+      {canPerform(role, "manage") && <section className="dash-section">
+        <h2>What People Have Told You{arrived.length > 0 && <span className="pending-badge">{arrived.length}</span>}</h2>
+        <div className="form-actions">
+          <button className="primary" disabled={arrivedBusy} onClick={() => {
+            if (!discordReadingConfigured()) { setArrivedNote("Add the bot key and channel in Settings → Owner to read what people have sent."); return; }
+            setArrivedBusy(true);
+            void fetchArrivedFeedback(getBotToken(), getRequestsChannelId())
+              .then((list) => { setArrived(list); setArrivedNote(list.length ? "" : "Nothing has come in yet."); })
+              .catch(() => setArrivedNote("Could not reach Discord just now."))
+              .finally(() => setArrivedBusy(false));
+          }}>{arrivedBusy ? "Checking…" : "Check For Feedback"}</button>
+        </div>
+        {arrivedNote && <p className="board-hint">{arrivedNote}</p>}
+        {arrived.map((item, index) => <article key={`${item.from}-${item.at}-${index}`} className="tell-card low">
+          <div className="comment-meta">
+            <span>{item.kind === "problem" ? "Problem" : item.kind === "idea" ? "Idea" : `Rating ${"★".repeat(item.rating ?? 0)}${"☆".repeat(5 - (item.rating ?? 0))}`}</span>
+            <span>{item.area}</span>
+          </div>
+          <p>{item.text}</p>
+          <small>{item.from}{item.at ? ` · ${new Date(item.at).toLocaleString()}` : ""}</small>
+        </article>)}
+      </section>}
 
       <section className="dash-section">
         <label>What is this about?<select value={feedbackArea} onChange={(event) => setFeedbackArea(event.target.value)}>
@@ -1632,19 +1707,100 @@ export function App() {
   if (screen === "claude-access") {
     const waiting = claudeLog.filter((r) => r.state === "waiting");
     return <main className="app-shell project-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Claude</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
-      <section className="projects-heading"><h1>Claude's Hands</h1><p>What Claude is allowed to do inside the app, everything it has done, and anything waiting on your OK GO.</p></section>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Claude</span><button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button></header>
+      <section className="projects-heading"><p className="eyebrow">AI Settings</p><h1>AI Settings</h1></section>
+
+      <section className="dash-section">
+        <h2>How It Should Act</h2>
+        <p className="board-hint">Press what you want. Each button adds one plain rule — not a mood, because "be clear" changes nothing and "say what was not changed" changes everything. Edit the words afterwards; your version is what gets saved.</p>
+        {(["Length", "Care", "Working"] as const).map((group) => <div key={group} className="behaviour-group">
+          <span className="eyebrow">{group}</span>
+          <div className="behaviour-buttons">
+            {BEHAVIOUR_CHOICES.filter((choice) => choice.group === group).map((choice) => <button
+              key={choice.id}
+              className={behaviour.picked.includes(choice.id) ? "behaviour-chip on" : "behaviour-chip"}
+              title={choice.line}
+              onClick={() => {
+                const picked = behaviour.picked.includes(choice.id)
+                  ? behaviour.picked.filter((id) => id !== choice.id)
+                  : [...behaviour.picked, choice.id];
+                // Re-composing replaces hand edits, so only do it while the box
+                // still holds exactly what the buttons last produced.
+                const untouched = behaviour.text.trim() === composeBehaviour(behaviour.picked).trim();
+                const next = { picked, text: untouched ? composeBehaviour(picked) : behaviour.text };
+                setBehaviour(next); saveBehaviour(next); setBehaviourNote("");
+              }}
+            >{choice.label}</button>)}
+          </div>
+        </div>)}
+
+        {conflicts(behaviour.picked).map(([a, b]) => <p key={`${a}-${b}`} className="update-status warn">
+          <strong>{labelOf(a)}</strong> and <strong>{labelOf(b)}</strong> pull against each other. Two rules that contradict do not meet in the middle — you get neither. Pick one.
+        </p>)}
+        {behaviour.picked.length > TOO_MANY && <p className="update-status warn">
+          That is {behaviour.picked.length} rules. The more you give an assistant, the less each one counts. The strongest three or four beat all twelve.
+        </p>}
+
+        <label>What gets saved
+          <textarea rows={9} value={behaviour.text} placeholder="Press some buttons above, or write it yourself." onChange={(event) => {
+            const next = { ...behaviour, text: event.target.value };
+            setBehaviour(next); saveBehaviour(next); setBehaviourNote("");
+          }} />
+        </label>
+        <div className="form-actions">
+          <button className="primary" disabled={!behaviour.text.trim() || behaviourBusy} onClick={() => {
+            setBehaviourBusy(true);
+            const body = behaviourFile(behaviour.text, new Date().toLocaleDateString());
+            void client.writeText(behaviourPath(), body)
+              .then(() => setBehaviourNote("Saved. Every assistant reading your instruction files follows it from now on."))
+              .catch(() => setBehaviourNote("Saved on this computer, but your storage could not be reached. Try again and it will go up."))
+              .finally(() => setBehaviourBusy(false));
+          }}>{behaviourBusy ? "Saving…" : "Save For Every Assistant"}</button>
+          <button disabled={!behaviour.text.trim()} onClick={() => { void navigator.clipboard?.writeText(behaviour.text).then(() => setBehaviourNote("Copied. Paste it into the assistant's own settings.")).catch(() => undefined); }}>Copy It Instead</button>
+          <button disabled={behaviourBusy} onClick={() => {
+            setBehaviourBusy(true);
+            // Show what is really in force, including anything edited by hand
+            // on Dropbox — otherwise the app and the file drift apart.
+            void client.readText(behaviourPath())
+              .then((text) => {
+                const next = { picked: behaviour.picked, text: parseBehaviourFile(text) };
+                setBehaviour(next); saveBehaviour(next);
+                setBehaviourNote("Loaded what is saved right now.");
+              })
+              .catch(() => setBehaviourNote("Nothing saved yet."))
+              .finally(() => setBehaviourBusy(false));
+          }}>Load What Is Saved</button>
+        </div>
+        {behaviourNote && <p className="board-hint">{behaviourNote}</p>}
+      </section>
+
+      <section className="dash-section">
+        <h2>Which Assistant</h2>
+        <label>Settings for<select value={aiTarget} onChange={(event) => setAiTarget(event.target.value as typeof aiTarget)}>
+          <option value="claude">Claude</option>
+          <option value="codex">Codex</option>
+          <option value="chatgpt">ChatGPT</option>
+          <option value="grok">Grok</option>
+        </select></label>
+        <p className="board-hint">{aiTarget === "claude"
+          ? "Claude can act inside the app — see Claude's Hands below. It reads your rules from your storage through the project connection."
+          : aiTarget === "codex"
+          ? "Codex can be talked to through the Voice Companion and can be sent Human Maker audits. It cannot act inside the app."
+          : "The rules above are saved where this assistant can read them if it has the project connected. Otherwise use Copy It Instead and paste them into its own settings. It cannot act inside the app."}</p>
+      </section>
+
+      <section className="projects-heading"><h2>Claude's Hands</h2><p>What Claude is allowed to do inside the app, everything it has done, and anything waiting on your OK GO.</p></section>
 
       <section className="dash-section">
         <label className="check-setting"><input type="checkbox" checked={claudeOn} onChange={(event) => { setClaudeOn(event.target.checked); setClaudeAccess(event.target.checked); }} /> Let Claude act inside this app</label>
-        <p className="board-hint">When this is on, the app checks Dropbox every few seconds for Claude's requests. Opening screens, changing settings, teaching the narrator, saving notes and new files happen straight away. Rewrites, file moves, and chapter releases wait for your OK GO below.</p>
+        <p className="board-hint">When this is on, the app checks your storage every few seconds for Claude's requests. Opening screens, changing settings, teaching the narrator, saving notes and new files happen straight away. Rewrites, file moves, and chapter releases wait for your OK GO below.</p>
         {/* The manual itself lives on Dropbox now. Handing over one line that
             points at it means Claude reads the current version rather than
             whatever was pasted into some conversation months ago. */}
-        <p className="board-hint">The full instructions live on Dropbox, at <strong>Operations → 02 AI Behavior Profile Specification → Claude App Actions</strong>. Claude reads them from there, so they are never out of date.</p>
+        <p className="board-hint">The full instructions are kept with your project files, at <strong>Operations → 02 AI Behavior Profile Specification → Claude App Actions</strong>. Claude reads them from there, so they are never out of date.</p>
         <div className="form-actions">
           <button className="primary" onClick={() => { void navigator.clipboard?.writeText(claudePointer()).then(() => setStatus("Copied. Paste it into Claude's Project instructions once — every conversation in that project will have it from then on.")).catch(() => undefined); }}>Copy The One Line For Claude</button>
-          <button onClick={() => { void navigator.clipboard?.writeText(claudeInstructions()).then(() => setStatus("Full instructions copied. Only needed if Claude cannot reach your Dropbox.")).catch(() => undefined); }}>Copy The Whole Manual Instead</button>
+          <button onClick={() => { void navigator.clipboard?.writeText(claudeInstructions()).then(() => setStatus("Full instructions copied. Only needed if Claude cannot reach your project files.")).catch(() => undefined); }}>Copy The Whole Manual Instead</button>
         </div>
       </section>
 
@@ -1694,12 +1850,12 @@ export function App() {
 
   if (screen === "project-workspace") {
     return <main className="app-shell project-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("projects")}>← Back</button><span className="eyebrow">Local Project Workspace</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
-      <section className="project-heading"><div><p className="eyebrow">The Long Rot</p><h1>Project Workspace</h1><p>Dropbox stays the shared source. The AI works from safe copies on this computer.</p></div></section>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("projects")}>← Back</button><span className="eyebrow">Local Project Workspace</span><button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button></header>
+      <section className="project-heading"><div><p className="eyebrow">The Long Rot</p><h1>Project Workspace</h1><p>The shared copy stays the source. The AI works from safe copies on this computer.</p></div></section>
       <section className="workspace-card">
         <div><span>Local workspace</span><strong>{workspace?.initialized ? "Ready" : "Not prepared yet"}</strong><small>{workspace?.workspacePath || "The standard MaggotClaw Games Projects folder will be used."}</small></div>
         <div><span>Files downloaded</span><strong>{workspace?.downloadedFiles || 0}</strong><small>{workspace?.pendingBinaryFiles || 0} Word, PDF, image, or other binary files left on Dropbox: pictures and other kinds the app cannot open.<br/>Last completed file save: {formatWorkspaceTime(workspace?.lastDownloadAt || null)}{syncMessage ? <><br/>{syncMessage}</> : null}<br/><button className="text-button inline" onClick={() => openFilesFrom("project-workspace")} disabled={!workspace?.downloadedFiles}>View The File List →</button></small></div>
-        <div><span>Dropbox Uploads</span><strong>{canPerform(role, "manage") ? "Owner Only" : "Locked"}</strong><small>{canPerform(role, "manage") ? "Upload Approved sends everything in 05 Approved Uploads to Dropbox." : "Uploads run from the owner\u2019s account."}</small></div>
+        <div><span>Uploads</span><strong>{canPerform(role, "manage") ? "Owner Only" : "Locked"}</strong><small>{canPerform(role, "manage") ? "Upload Approved sends everything in 05 Approved Uploads to the shared copy." : "Uploads run from the owner\u2019s account."}</small></div>
       </section>
       {workspaceProgress && <section className="download-progress"><strong>{workspaceProgress.stage}</strong><p>{workspaceProgress.completed} of {workspaceProgress.total || "?"} text files saved · {workspaceProgress.skipped} other files recorded</p></section>}
       <section className="workspace-actions">
@@ -1708,7 +1864,7 @@ export function App() {
         {canPerform(role, "download") && <button className="primary" onClick={downloadWorkspace} disabled={workspaceBusy}>{workspaceBusy ? "Working…" : "Download or Update"}</button>}
         {canPerform(role, "review") && <button onClick={() => setScreen("project-review")} disabled={workspaceBusy}>Review Changes</button>}
         {canPerform(role, "manage")
-          ? <button className="primary" onClick={() => { if (window.confirm("Upload everything in 05 Approved Uploads to Dropbox? This changes the real project files.")) void uploadApproved(); }} disabled={workspaceBusy}>Upload Approved</button>
+          ? <button className="primary" onClick={() => { if (window.confirm("Upload everything in 05 Approved Uploads? This changes the real project files everyone sees.")) void uploadApproved(); }} disabled={workspaceBusy}>Upload Approved</button>
           : canPerform(role, "upload") && <button title="Uploads run from the owner's account for now." disabled>Upload Approved</button>}
         <button onClick={() => void openWorkspace()} disabled={!workspace?.initialized || workspaceBusy}>Open Local Folder</button>
       </section>
@@ -1718,13 +1874,13 @@ export function App() {
   }
 
   if (screen === "voice-targets") {
-    return <main className="app-shell target-screen"><header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Voice Companion</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header><section className="library-heading"><div><h2>Choose the program</h2><p>The companion controls the normal Windows program you already use.</p></div></section><section className="home-toolbar page"><button className="pill-button chip" onClick={() => openSettingsFrom("voice-targets")}>Voice Settings</button></section><section className="target-grid"><button className="target-card available" onClick={() => openVoiceTarget("claude")}><strong>Claude</strong><small>Available now</small></button><button className="target-card available" onClick={() => openVoiceTarget("codex")}><strong>Codex</strong><small>Available now</small></button><button className="target-card" disabled><strong>ChatGPT</strong><small>Coming later</small></button></section></main>;
+    return <main className="app-shell target-screen"><header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Voice Companion</span><button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button></header><section className="library-heading"><div><h2>Choose the program</h2><p>The companion controls the normal Windows program you already use.</p></div></section><section className="home-toolbar page"><button className="pill-button chip" onClick={() => openSettingsFrom("voice-targets")}>Voice Settings</button></section><section className="target-grid"><button className="target-card available" onClick={() => openVoiceTarget("claude")}><strong>Claude</strong><small>Available now</small></button><button className="target-card available" onClick={() => openVoiceTarget("codex")}><strong>Codex</strong><small>Available now</small></button><button className="target-card" disabled><strong>ChatGPT</strong><small>Coming later</small></button></section></main>;
   }
 
   if (screen === "comments") {
     const unsent = savedComments.filter((item) => !item.submittedAt);
     return <main className="app-shell comments-shell">
-      <header className="topbar"><button className="text-button" onClick={() => setScreen("library")}>← Back</button><span className="eyebrow">My Comments</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
+      <header className="topbar"><button className="text-button" onClick={() => setScreen("library")}>← Back</button><span className="eyebrow">My Comments</span><button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button></header>
       <section className="comments-heading"><div><h1>Saved Comments</h1><p>{savedComments.length} saved safely on this device.</p></div><button onClick={exportComments} disabled={!savedComments.length}>Save Comments File</button><button className="primary" disabled={!unsent.length || commentsSending} onClick={async () => {
         setCommentsSending(true);
         setCommentsNote(`Sending ${unsent.length} comment${unsent.length === 1 ? "" : "s"} to the owner…`);
@@ -1795,7 +1951,7 @@ ${item.transcriptionConfirmed}`;
         <header className="topbar">
           <button className="text-button" onClick={closeReader}>← Back</button>
           <span className="eyebrow">{activeProject().name}</span>
-          <span className="who-chip">{readerName} · {roleLabel(role)}</span>
+          <button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button>
         </header>
         <section className="reader-heading">
           <p className="eyebrow">Chapter</p>
@@ -1808,7 +1964,11 @@ ${item.transcriptionConfirmed}`;
           <button className={readMyself ? "active" : ""} onClick={() => { player.current.stop(); setPlaying(false); setReadMyself(true); }}>Read myself</button>
         </div>
         {readMyself
-          ? (document.html
+          ? (document.localPath && /\.docx$/i.test(document.name)
+            // The real document, exactly as written. Narrated mode deliberately
+            // keeps the app's own big text: it is read from across the room.
+            ? <article className="reading-card self-read word-faithful"><WordDocument localRelativePath={document.localPath} /></article>
+            : document.html
             ? <article className="reading-card self-read word-styled" dangerouslySetInnerHTML={{ __html: document.html }} />
             : <article className="reading-card self-read">
                 {Object.values(document.segments.reduce<Record<number, string[]>>((acc, segment) => {
@@ -1873,12 +2033,20 @@ ${item.transcriptionConfirmed}`;
         <button className="pill-button chip" onClick={() => setScreen("home")}>← Back</button>
         <button className="pill-button chip" onClick={openSavedComments}>My Comments</button>
         <button className="pill-button chip" onClick={() => openSettingsFrom("library")}>Settings</button>
-        {"__TAURI_INTERNALS__" in window && <button className="pill-button chip" disabled={workspaceBusy || loading} onClick={() => {
-          // The reader's own download door — Projects is gated, the shelf is not.
-          void (async () => { await downloadWorkspace(); await refreshCopies(); })();
-        }}>{workspaceBusy ? "Updating…" : "Get The Latest Chapters"}</button>}
-        <button className="pill-button chip" onClick={refreshCopies} disabled={loading}>{loading ? "Loading…" : "Refresh"}</button>
-        <span className="who-chip">{readerName} · {roleLabel(role)}</span>
+        {/* One button, because there was never a useful difference. Refresh
+            only re-read the local folder, so unless a file had been dropped in
+            by hand it appeared to do nothing at all — which is exactly how it
+            was reported. Fetching already ends by re-reading, so the separate
+            Refresh was doing the second half of this button's job on its own. */}
+        {"__TAURI_INTERNALS__" in window
+          ? <button className="pill-button chip" disabled={workspaceBusy || loading} onClick={() => {
+              // The reader's own download door — Projects is gated, the shelf is not.
+              void (async () => { await downloadWorkspace(); await refreshCopies(); })();
+            }}>{workspaceBusy || loading ? "Updating…" : "Get The Latest Chapters"}</button>
+          // In a browser there is nothing to download from, so re-reading what
+          // is already here is the only thing this button could honestly do.
+          : <button className="pill-button chip" onClick={refreshCopies} disabled={loading}>{loading ? "Loading…" : "Refresh"}</button>}
+        <button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button>
       </section>
       <header className="hero">
         <div><BrandLogo compact /><h1>Reader Mode</h1><p>{status}</p>
@@ -1911,8 +2079,14 @@ ${item.transcriptionConfirmed}`;
   );
 }
 
-function Profile({ initial, onContinue, onCancel }: { initial: string; onCancel?: () => void; onContinue: (info: { name: string; discordName: string; wantedRole: ProjectRole; nickname: string; pin: string; readingSpeed: number; details: ReaderProfile }) => void }) {
+function Profile({ initial, role, onContinue, onCancel }: { initial: string; role: ProjectRole; onCancel?: () => void; onContinue: (info: { name: string; discordName: string; wantedRole: ProjectRole; nickname: string; pin: string; readingSpeed: number; details: ReaderProfile }) => void }) {
   const [name, setName] = useState(initial);
+  const [answers, setAnswers] = useState<ProfileAnswers>(() => loadAnswers(initial || "local"));
+  const { answered, total } = completeness(role, answers);
+  const gaps = unanswered(role, answers);
+  // What this role was asked that a plain reader never is, so a promotion
+  // shows up as new questions instead of quietly appearing in a long list.
+  const fresh = newlyAsked("reader", role);
   // A returning person's saved details come back with them — revisiting this
   // screen must never silently reset anything.
   const [nickname, setNicknameState] = useState(() => initial ? getNickname(initial) : "");
@@ -2059,6 +2233,37 @@ function Profile({ initial, onContinue, onCancel }: { initial: string; onCancel?
         }}>Get Started</button>
       </div>
     </>}
+
+    {/* Someone coming back to their own profile. The questions they see are
+        the ones their role is actually asked — a promotion adds more, and
+        those arrive genuinely unanswered rather than being quietly assumed. */}
+    {onCancel && <section className="dash-section profile-answers">
+      <h2>Your Profile</h2>
+      <p className="board-hint">{gaps.length
+        ? `${answered} of ${total} filled in. Nothing here is required — answer what you like.`
+        : `All ${total} filled in. Change anything whenever you want.`}</p>
+      {fresh.length > 0 && <p className="update-status ok">Being made {roleLabel(role)} added {fresh.length} new question{fresh.length === 1 ? "" : "s"}, marked below.</p>}
+      {questionsFor(role).map((question) => {
+        const isNew = fresh.some((q) => q.id === question.id);
+        const value = answers[question.id] ?? "";
+        const store = (next: string) => {
+          const updated = { ...answers, [question.id]: next };
+          setAnswers(updated); saveAnswers(name || "local", updated);
+        };
+        return <label key={question.id} className={isNew && !value.trim() ? "profile-q new" : "profile-q"}>
+          {question.label}{isNew && <span className="new-chip">New</span>}
+          {question.hint && <small>{question.hint}</small>}
+          {question.kind === "choice"
+            ? <select value={value} onChange={(event) => store(event.target.value)}>
+                <option value="">—</option>
+                {question.options?.map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+            : question.kind === "long"
+            ? <textarea rows={3} value={value} onChange={(event) => store(event.target.value)} />
+            : <input value={value} onChange={(event) => store(event.target.value)} />}
+        </label>;
+      })}
+    </section>}
   </main>;
 }
 // One project file in its own window: full text (or Word formatting), with
@@ -2139,7 +2344,7 @@ function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: Proj
     } catch (error) {
       setNote(error instanceof Error && error.message.includes("no ratings yet")
         ? error.message
-        : "The ratings are saved on this computer, but Dropbox could not be reached to share them.");
+        : "The ratings are saved on this computer, but your storage could not be reached to share them.");
     } finally {
       setBusy(false);
     }
@@ -2163,11 +2368,9 @@ function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: Proj
   const levelLabel = (path: string) => ACCESS_LEVEL_LABELS.find((l) => l.value === (access[path] ?? "reader"))?.label ?? "Reader And Up";
   return <main className="app-shell project-shell">
     <header className="topbar"><button className="text-button" onClick={onBack}>← Back</button><span className="eyebrow">Downloaded Files</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
-    <section className="projects-heading"><h1>Every File On This Computer</h1><p>{isOwner
-      ? "Rate each file with the lowest role that needs it. People only download what their role calls for, so their AI stays focused. Publish to share the ratings with every machine."
-      : "The files your role downloads. The owner decides which files each role needs."}</p></section>
+    <section className="projects-heading"><p className="eyebrow">Project Files</p><h1>Project Files</h1></section>
     {isOwner && <section className="form-actions">
-      <button className="primary" onClick={() => void publish()} disabled={busy}>{busy ? "Publishing…" : "Publish File Access To Dropbox"}</button>
+      <button className="primary" onClick={() => void publish()} disabled={busy}>{busy ? "Publishing…" : "Publish File Access"}</button>
       <button className="primary" onClick={() => void publishLinks()} disabled={busy} title="Read-only links for friends — no keys leave your machine">{busy ? "Working…" : "Publish Reader Links"}</button>
       {readerLinksConfigured() && <small className="update-status ok">Reader Links are live — friend keys carry read-only downloads.</small>}
     </section>}
@@ -2191,7 +2394,7 @@ function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: Proj
             {/* A codex belongs to every project, so say so before someone
                 rates one as if it were this project's own. */}
             {file.localRelativePath.startsWith(SHARED_FOLDER) && <span className="shared-chip">Shared</span>}
-            {file.status !== "downloaded" && <span className="left-chip">On Dropbox</span>}
+            {file.status !== "downloaded" && <span className="left-chip">Not Downloaded</span>}
             <span className="file-size">{file.byteCount ? `${Math.max(1, Math.round(file.byteCount / 1024))} KB` : ""}</span>
             {isOwner
               ? <>
@@ -2543,7 +2746,7 @@ function OwnerDashboard({ requests, onDecide, onDismiss, onBack, client, onRelea
       await publishReleases(client);
       setReleaseNote("Published. Every reader's app picks the new list up when it next opens.");
     } catch {
-      setReleaseNote("The list is saved on this computer, but Dropbox could not be reached to share it. Try again with the bridge running.");
+      setReleaseNote("The list is saved on this computer, but your storage could not be reached to share it. Try again in a moment.");
     } finally {
       setReleaseBusy(false);
     }
@@ -2594,7 +2797,7 @@ function OwnerDashboard({ requests, onDecide, onDismiss, onBack, client, onRelea
 
   return <main className="app-shell dashboard-shell">
     <header className="topbar"><button className="text-button" onClick={onBack}>← Back</button><span className="eyebrow">Owner Dashboard</span><span className="who-chip">{(localStorage.getItem("long-rot-reader-name") || "Owner")} · Author / Owner</span></header>
-    <section className="projects-heading"><h1>Things That Need You</h1><p>Approvals and communications routed to the owner. Approving a request raises that person's role immediately.</p></section>
+    <section className="projects-heading"><p className="eyebrow">Owner Dashboard</p><h1>Owner Dashboard</h1></section>
 
     <section className="dash-section">
       <h2>Requests From Discord</h2>
@@ -2675,7 +2878,7 @@ function OwnerDashboard({ requests, onDecide, onDismiss, onBack, client, onRelea
 
     <section className="dash-section">
       <h2>Released Chapters</h2>
-      <p className="board-hint">Tick the chapters readers may open. Publish sends the list to Dropbox so every reader's app picks it up the next time it opens.</p>
+      <p className="board-hint">Tick the chapters readers may open. Publish shares the list so every reader's app picks it up the next time it opens.</p>
       <div className="release-grid">
         {Array.from({ length: Math.max(12, ...released.map((n) => n + 2)) }, (_, i) => i + 1).map((chapter) => <label key={chapter} className={released.includes(chapter) ? "release-chip on" : "release-chip"}>
           <input type="checkbox" checked={released.includes(chapter)} onChange={() => toggleRelease(chapter)} />
