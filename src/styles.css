@@ -507,8 +507,8 @@ button.text-button.mode-back:hover { color: #00140e; background: var(--mc-green-
 @media (max-width: 700px) { .app-shell { padding: 25px 18px; } .copy-grid, .mode-grid { grid-template-columns: 1fr; } .hero { min-height: 180px; align-items: flex-start; flex-direction: column; padding-bottom: 25px; } .header-actions { justify-content: flex-start; } .primary-controls { grid-template-columns: 1fr 1fr; } .control.comment { grid-column: 1 / -1; } .secondary-controls { flex-wrap: wrap; } .topbar .eyebrow { display: none; } .comments-heading { align-items: flex-start; flex-direction: column; } .target-banner { flex-direction: column; } .playback-grid { grid-template-columns: 1fr 1fr; } }
 
 /* MaggotClaw Games visual identity */
-.brand-logo { display: block; width: min(560px, 92vw); height: clamp(100px, 16vw, 165px); margin: 0 0 28px; object-fit: cover; object-position: center; }
-.brand-logo.compact { width: min(330px, 68vw); height: 96px; margin-bottom: 14px; }
+.brand-logo { display: block; width: min(560px, 92vw); height: clamp(100px, 16vw, 165px); margin: 0 auto 28px; object-fit: cover; object-position: center; }
+.brand-logo.compact { width: min(330px, 68vw); height: 96px; margin: 0 auto 14px; }
 .hero { border-bottom-color: #1d493e; }
 .hero p, .library-heading p, .settings-panel p, .profile-screen > p:not(.eyebrow), .comments-heading p { color: var(--mc-muted); }
 .eyebrow, .comment-heading > p, .companion-topbar strong { color: var(--mc-green); }
