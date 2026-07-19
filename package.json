@@ -1,7 +1,7 @@
 {
   "name": "maggotclaw-games",
   "private": true,
-  "version": "1.14.0-beta",
+  "version": "1.14.1-beta",
   "type": "module",
   "scripts": {
     "dev": "vite",
