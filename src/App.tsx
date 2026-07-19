@@ -1372,7 +1372,6 @@ export function App() {
   if (screen === "directions") {
     return <main className="app-shell directions-shell">
       <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Directions</span><button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button></header>
-      <section className="projects-heading"><p className="eyebrow">Directions</p><h1>Finding Your Way Around</h1></section>
       {/* Every guide, always — including the ones already done. The main screen
           only ever offers what still needs doing, so this is where you come to
           redo something or see how a part works before you need it. */}
@@ -1482,7 +1481,6 @@ export function App() {
   if (screen === "projects") {
     return <main className="app-shell projects-list-shell">
       <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Projects</span><button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button></header>
-      <section className="projects-heading"><p className="eyebrow">Projects</p><h1>Your Projects</h1></section>
       <section className="project-tiles">
         {projectList.map((project) => {
           const isActive = project.id === activeProject().id;
@@ -1571,7 +1569,6 @@ export function App() {
   if (screen === "people") {
     return <main className="app-shell project-shell">
       <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">People</span><button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button></header>
-      <section className="projects-heading"><p className="eyebrow">People</p><h1>People</h1></section>
 
       <section className="form-actions">
         <button className="primary" disabled={peopleBusy} onClick={() => {
@@ -1643,7 +1640,6 @@ export function App() {
     const mine = loadFeedback();
     return <main className="app-shell project-shell">
       <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Tell MaggotClaw</span><button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button></header>
-      <section className="projects-heading"><p className="eyebrow">Tell MaggotClaw</p><h1>Tell MaggotClaw</h1></section>
 
       {/* What everyone else has said. It was arriving in Discord all along,
           mixed in with request codes, so this page only ever showed the
@@ -1715,7 +1711,6 @@ export function App() {
     const waiting = claudeLog.filter((r) => r.state === "waiting");
     return <main className="app-shell project-shell">
       <header className="topbar"><button className="text-button" onClick={() => setScreen("home")}>← Back</button><span className="eyebrow">Claude</span><button className="who-chip" onClick={() => setScreen("profile")} title="Your profile">{readerName} · {roleLabel(role)}</button></header>
-      <section className="projects-heading"><p className="eyebrow">AI Settings</p><h1>AI Settings</h1></section>
 
       <section className="dash-section">
         <h2>How It Should Act</h2>
@@ -1812,7 +1807,7 @@ export function App() {
           : "The rules above are saved where this assistant can read them if it has the project connected. Otherwise use Copy It Instead and paste them into its own settings. It cannot act inside the app."}</p>
       </section>
 
-      <section className="projects-heading"><h2>Claude's Hands</h2><p>What Claude is allowed to do inside the app, everything it has done, and anything waiting on your OK GO.</p></section>
+      <section className="dash-section"><h2>Claude's Hands</h2><p>What Claude is allowed to do inside the app, everything it has done, and anything waiting on your OK GO.</p></section>
 
       <section className="dash-section">
         <label className="check-setting"><input type="checkbox" checked={claudeOn} onChange={(event) => { setClaudeOn(event.target.checked); setClaudeAccess(event.target.checked); }} /> Let Claude act inside this app</label>
@@ -2397,7 +2392,6 @@ function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: Proj
   const levelLabel = (path: string) => ACCESS_LEVEL_LABELS.find((l) => l.value === (access[path] ?? "reader"))?.label ?? "Reader And Up";
   return <main className="app-shell project-shell">
     <header className="topbar"><button className="text-button" onClick={onBack}>← Back</button><span className="eyebrow">Downloaded Files</span><span className="who-chip">{readerName} · {roleLabel(role)}</span></header>
-    <section className="projects-heading"><p className="eyebrow">Project Files</p><h1>Project Files</h1></section>
     {isOwner && <section className="form-actions">
       <button className="primary" onClick={() => void publish()} disabled={busy}>{busy ? "Publishing…" : "Publish File Access"}</button>
       <button className="primary" onClick={() => void publishLinks()} disabled={busy} title="Read-only links for friends — no keys leave your machine">{busy ? "Working…" : "Publish Reader Links"}</button>
@@ -2866,7 +2860,6 @@ function OwnerDashboard({ requests, onDecide, onDismiss, onBack, client, onRelea
 
   return <main className="app-shell dashboard-shell">
     <header className="topbar"><button className="text-button" onClick={onBack}>← Back</button><span className="eyebrow">Dashboard</span><span className="who-chip">{(localStorage.getItem("long-rot-reader-name") || "Owner")} · Author / Owner</span></header>
-    <section className="projects-heading"><p className="eyebrow">Dashboard</p><h1>Dashboard</h1></section>
 
     <section className="dash-section">
       <h2>Requests From Discord</h2>
@@ -3006,7 +2999,7 @@ function OwnerDashboard({ requests, onDecide, onDismiss, onBack, client, onRelea
       <div className="pronun-row">
         <input value={questionChapter} inputMode="numeric" placeholder="Chapter" style={{ maxWidth: 90 }} onChange={(event) => setQuestionChapter(event.target.value.replace(/\D/g, ""))} />
       </div>
-      <label>Questions (one per line)<textarea rows={3} value={questionText} placeholder={"Did you trust Vina here?\nWhere did you get bored?"} onChange={(event) => setQuestionText(event.target.value)} /></label>
+      <label>Questions (one per line)<textarea className="grows" rows={4} value={questionText} placeholder={"Did you trust Vina here?\nWhere did you get bored?"} onChange={(event) => setQuestionText(event.target.value)} /></label>
       <div className="form-actions"><button className="primary" disabled={!questionChapter} onClick={saveQuestions}>Save Chapter Questions</button></div>
     </section>
 

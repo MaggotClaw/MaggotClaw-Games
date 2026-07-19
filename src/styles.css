@@ -823,3 +823,13 @@ button.who-chip:hover { color: var(--mc-green-soft); }
 .link-dot.off { background: var(--mc-red); box-shadow: 0 0 7px #ff5a4daa; }
 /* The profile keeps its banner, centred like the main one. */
 .profile-screen .brand-logo { margin: 0 auto 14px; }
+
+/* Drag the corner to make it as big as you need. A scrollbar appears only when
+   the writing outgrows the box, and wears the app's colours rather than the
+   system's bright white. */
+textarea.grows { resize: vertical; min-height: 84px; overflow: auto; }
+.app-shell textarea, .app-shell pre, .app-shell .comments-list, .app-shell .change-log { scrollbar-width: thin; scrollbar-color: #2c4b41 transparent; }
+.app-shell textarea::-webkit-scrollbar, .app-shell pre::-webkit-scrollbar { width: 10px; height: 10px; }
+.app-shell textarea::-webkit-scrollbar-track, .app-shell pre::-webkit-scrollbar-track { background: transparent; }
+.app-shell textarea::-webkit-scrollbar-thumb, .app-shell pre::-webkit-scrollbar-thumb { background: #2c4b41; border: 2px solid transparent; background-clip: content-box; border-radius: 999px; }
+.app-shell textarea::-webkit-scrollbar-thumb:hover, .app-shell pre::-webkit-scrollbar-thumb:hover { background: var(--mc-green); background-clip: content-box; }
