@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { LongRotMcpClient, type ProjectEntry } from "./mcp";
 import { fetchSharedAccessMap, roleMayDownload, accessMapPath } from "./fileAccess";
-import { activeProject } from "./projects";
+import { activeProject, isSharedFile } from "./projects";
 import type { ProjectRole } from "./permissions";
 
 export interface WorkspaceStatus {
@@ -74,7 +74,13 @@ export async function downloadProject(
   if (!access.shared && role !== "administrator" && role !== "support" && !Object.keys(access.map).length) {
     throw new Error("The file permissions could not be read, so nothing was downloaded. Try again in a moment.");
   }
-  const everything = await collectFiles(client, activeProject().dropboxRoot, onProgress);
+  const project = activeProject();
+  const everything = await collectFiles(client, project.dropboxRoot, onProgress);
+  // The shared library above the project: the codices every project draws on,
+  // including the ID Registry the story context is built from. Only the files
+  // sitting directly in it — its sub-folders are the other projects.
+  const shared = await collectSharedFiles(client, project.sharedRoot, onProgress);
+  everything.push(...shared.files);
   const files = everything.filter((file) =>
     file.path !== accessMapPath() && roleMayDownload(access.map, file.path, role));
   const withheld = everything.length - files.length;
@@ -160,8 +166,12 @@ export async function downloadProject(
   // Backups locally instead of haunting the shelf and search forever.
   let retired = 0;
   const listed = new Set(everything.map((file) => file.path));
+  // If the library could not be read this time, its files are unaccounted for
+  // rather than gone, and retiring them would empty the codex shelf over a
+  // moment's bad connection.
   for (const path of knownPaths) {
     if (listed.has(path) || path.startsWith("local:")) continue;
+    if (!shared.read && isSharedFile(project.sharedRoot, path)) continue;
     try {
       await invoke("retire_project_file", { dropboxPath: path });
       retired += 1;
@@ -174,6 +184,30 @@ export async function downloadProject(
   if (withheld) parts.push(`${withheld} not needed for your role`);
   if (failures.length) parts.push(`${failures.length} had problems: ${failures[0]}${failures.length > 1 ? "…" : ""}`);
   return { stage: `Update finished — ${parts.join(" · ")}.`, completed, total: files.length, skipped };
+}
+
+// The shared library, one level up. Deliberately NOT recursive: the folders
+// beside the codices are the other projects, and The Long Rot must never start
+// downloading Project Zero Author's book.
+// `read` reports whether the library was actually reachable. The retiring step
+// below needs that: a library that could not be listed is not a library whose
+// files were deleted, and mistaking one for the other would sweep every codex
+// into Backups.
+async function collectSharedFiles(
+  client: LongRotMcpClient,
+  sharedRoot: string | undefined,
+  onProgress: (progress: DownloadProgress) => void
+): Promise<{ files: ProjectEntry[]; read: boolean }> {
+  if (!sharedRoot) return { files: [], read: true };
+  onProgress({ stage: "Checking the shared codex", completed: 0, total: 0, skipped: 0 });
+  try {
+    const entries = await client.listFolder(sharedRoot);
+    return { files: entries.filter((entry) => entry.type === "file"), read: true };
+  } catch {
+    // The project's own files matter more than the codices — a shared library
+    // that cannot be read must never fail the whole download.
+    return { files: [], read: false };
+  }
 }
 
 async function collectFiles(

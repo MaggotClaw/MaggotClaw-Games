@@ -8,13 +8,33 @@ export interface Project {
   id: string;
   name: string;
   dropboxRoot: string;   // "" when the project has no remote source yet
+  // The shared library sitting one level above the project: the codices that
+  // belong to every project rather than to any one of them. Only the files
+  // directly inside it are taken, never its sub-folders — those are the other
+  // projects, and The Long Rot must never start downloading another book.
+  sharedRoot?: string;
   icon: string;
   builtIn: boolean;
 }
 
+// Where shared files are filed locally, so a codex never looks like it came
+// out of the project's own folder.
+export const SHARED_FOLDER = "(Shared Codex)";
+
+// Pure: is this Dropbox path a file of the shared library — that is, sitting
+// directly inside it? A path deeper than that belongs to a sibling project,
+// not to the library, and must never be treated as shared.
+export function isSharedFile(sharedRoot: string | undefined, dropboxPath: string): boolean {
+  if (!sharedRoot) return false;
+  const prefix = `${sharedRoot.replace(/\/+$/, "")}/`;
+  if (!dropboxPath.startsWith(prefix)) return false;
+  const rest = dropboxPath.slice(prefix.length);
+  return rest.length > 0 && !rest.includes("/");
+}
+
 export const BUILT_IN_PROJECTS: Project[] = [
-  { id: "long-rot", name: "The Long Rot", dropboxRoot: "/MaggotClaw Games/The Long Rot", icon: "/long-rot-icon.png", builtIn: true },
-  { id: "project-zero", name: "Project Zero Author", dropboxRoot: "/MaggotClaw Games/Project Zero Author", icon: "/project-zero-icon.svg", builtIn: true }
+  { id: "long-rot", name: "The Long Rot", dropboxRoot: "/MaggotClaw Games/The Long Rot", sharedRoot: "/MaggotClaw Games", icon: "/long-rot-icon.png", builtIn: true },
+  { id: "project-zero", name: "Project Zero Author", dropboxRoot: "/MaggotClaw Games/Project Zero Author", sharedRoot: "/MaggotClaw Games", icon: "/project-zero-icon.svg", builtIn: true }
 ];
 
 const ADDED_KEY = "mcg-projects";
@@ -82,5 +102,11 @@ export function projectFile(name: string, project: Project = activeProject()): s
 export async function applyActiveProject(project: Project = activeProject()): Promise<void> {
   if (!("__TAURI_INTERNALS__" in window)) return;
   const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("set_active_project", { name: project.name, dropboxRoot: project.dropboxRoot || "/" }).catch(() => undefined);
+  // The shared library is declared, never inferred on the Rust side — a
+  // project without one must not be handed its parent folder by accident.
+  await invoke("set_active_project", {
+    name: project.name,
+    dropboxRoot: project.dropboxRoot || "/",
+    sharedRoot: project.sharedRoot ?? null
+  }).catch(() => undefined);
 }

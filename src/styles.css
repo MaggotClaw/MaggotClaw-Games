@@ -706,3 +706,6 @@ button.danger:disabled { opacity: .45; cursor: default; filter: none; }
 .change-line strong { color: var(--mc-white); }
 .change-line time { color: var(--mc-muted); font-size: .78rem; }
 .change-line em { width: 100%; color: #d8e0dd; }
+
+/* Marks a file that belongs to every project, not just this one. */
+.shared-chip { padding: 2px 9px; color: #17100a; background: #d5a85f; border-radius: 999px; font-weight: 800; font-size: .72rem; }

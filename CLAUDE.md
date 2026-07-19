@@ -88,11 +88,25 @@ sleeps when idle — first request after a quiet spell takes ~30s.
 The app's project root is **`/MaggotClaw Games/The Long Rot`**, set in
 `src/projects.ts`. Only files under that root are downloaded.
 
-**The trap:** the codices (`00 Master Codex`, `91 Codex, Human Maker`, and ~28
-others) sit at `/MaggotClaw Games/` — *outside* the root. The app therefore
-never downloads them, including the very codex the Human Maker audits against.
-Anything that needs to reach the codices must either use its own path or the
-root must widen. Unresolved as of 2026-07-18.
+**The shared library.** The codices (`00 Master Codex`, `91 Codex, Human
+Maker`, and ~28 others) sit at `/MaggotClaw Games/` — *outside* any project
+root, because they belong to every project rather than to one. Each project
+therefore carries a `sharedRoot` alongside its own root, and the download takes
+the files sitting **directly** in it.
+
+Directly, and never recursively — the folders beside those codices are the
+other projects, and The Long Rot downloading Project Zero Author's book would
+be a real bug. `isSharedFile()` in `src/projects.ts` and `shared_relative_path`
+in `project_workspace.rs` both enforce that, and both are tested.
+
+Shared files are filed locally under `01 Originals/(Shared Codex)/` so a codex
+never looks like it came out of the project's own folder, and the file list
+marks them with a "Shared Codex" chip.
+
+This was not cosmetic. Before it existed, `TalkScreen`'s story context looked
+for a downloaded file matching "ID Registry", never found one because the
+registry lives in the library, and silently sent every message to the AI with
+no canon attached. Story Brain failed the same way. Neither reported an error.
 
 Per-file behaviour is decided by three shared files under
 `<project root>/.mcg/`, all published from the file list:

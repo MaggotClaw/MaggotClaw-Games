@@ -10,18 +10,20 @@ use std::{
 // Which project this app is working on. MaggotClaw Games is the program; a
 // project is one of the things worked on inside it, so the name and remote
 // folder are set by the app rather than baked in here.
-static ACTIVE_PROJECT: Mutex<Option<(String, String)>> = Mutex::new(None);
+/// (project name, its Dropbox root, its shared library if it has one)
+static ACTIVE_PROJECT: Mutex<Option<(String, String, Option<String>)>> = Mutex::new(None);
 
 // Only a first-run fallback: the app names its project the moment any window
 // opens. Kept so an existing workspace is never orphaned.
 const DEFAULT_PROJECT_NAME: &str = "The Long Rot";
 const DEFAULT_DROPBOX_ROOT: &str = "/MaggotClaw Games/The Long Rot";
+const DEFAULT_SHARED_ROOT: &str = "/MaggotClaw Games";
 
 fn project_name() -> String {
     ACTIVE_PROJECT
         .lock()
         .ok()
-        .and_then(|guard| guard.as_ref().map(|(name, _)| name.clone()))
+        .and_then(|guard| guard.as_ref().map(|(name, _, _)| name.clone()))
         .unwrap_or_else(|| DEFAULT_PROJECT_NAME.to_string())
 }
 
@@ -29,14 +31,37 @@ fn dropbox_root() -> String {
     ACTIVE_PROJECT
         .lock()
         .ok()
-        .and_then(|guard| guard.as_ref().map(|(_, root)| root.clone()))
+        .and_then(|guard| guard.as_ref().map(|(_, root, _)| root.clone()))
         .unwrap_or_else(|| DEFAULT_DROPBOX_ROOT.to_string())
+}
+
+/// None unless the app has declared one. A project without a shared library
+/// must never be handed a folder it did not ask for.
+fn shared_root() -> Option<String> {
+    ACTIVE_PROJECT
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().and_then(|(_, _, shared)| shared.clone()))
+        .or_else(|| {
+            // First run, before any window has named the project: fall back to
+            // the built-in default's own library so a fresh workspace still
+            // files codices correctly.
+            ACTIVE_PROJECT
+                .lock()
+                .ok()
+                .filter(|guard| guard.is_none())
+                .map(|_| DEFAULT_SHARED_ROOT.to_string())
+        })
 }
 
 /// The app names the project it is working on; every local folder and path
 /// check follows it from here.
 #[tauri::command]
-pub fn set_active_project(name: String, dropbox_root: String) -> Result<(), String> {
+pub fn set_active_project(
+    name: String,
+    dropbox_root: String,
+    shared_root: Option<String>,
+) -> Result<(), String> {
     let clean_name = name.trim().to_string();
     if clean_name.is_empty() || clean_name.contains(['\\', '/', ':', '*', '?', '"', '<', '>', '|']) {
         return Err("That project name cannot be used as a folder name.".to_string());
@@ -45,10 +70,28 @@ pub fn set_active_project(name: String, dropbox_root: String) -> Result<(), Stri
     if !clean_root.starts_with('/') || clean_root.contains("..") {
         return Err("That project folder is not a valid location.".to_string());
     }
+    // A shared library is optional, but a bad one is refused outright rather
+    // than silently ignored — quietly dropping it would leave the app thinking
+    // codices were reachable when they were not.
+    let clean_shared = match shared_root.map(|value| value.trim().trim_end_matches('/').to_string()) {
+        Some(value) if value.is_empty() => None,
+        Some(value) => {
+            if !value.starts_with('/') || value.contains("..") {
+                return Err("That shared codex folder is not a valid location.".to_string());
+            }
+            // The project must sit inside its own library, or the two are
+            // unrelated folders and "shared" means nothing.
+            if !clean_root.starts_with(&format!("{value}/")) {
+                return Err("That shared codex folder does not contain this project.".to_string());
+            }
+            Some(value)
+        }
+        None => None,
+    };
     let mut guard = ACTIVE_PROJECT
         .lock()
         .map_err(|_| "The project could not be switched just now.".to_string())?;
-    *guard = Some((clean_name, clean_root));
+    *guard = Some((clean_name, clean_root, clean_shared));
     Ok(())
 }
 
@@ -167,12 +210,52 @@ fn initialize() -> Result<PathBuf, String> {
     Ok(root)
 }
 
+/// Where shared-library files are filed locally. Mirrors SHARED_FOLDER in
+/// src/projects.ts — a codex must never look like it came out of the
+/// project's own folder.
+const SHARED_FOLDER: &str = "(Shared Codex)";
+
+/// The shared library is the folder holding the codices every project draws
+/// on. Only files sitting directly in it qualify — its sub-folders are the
+/// other projects, and pulling those in would mean one book downloading
+/// another.
+///
+/// The library is declared by the app, never inferred from the project root.
+/// Inferring it would quietly grant every project a shared folder it never
+/// asked for: a project rooted at "/Photos/Wedding" would start accepting
+/// anything sitting in "/Photos".
+fn shared_relative_path(normalized: &str) -> Option<PathBuf> {
+    let shared = shared_root()?;
+    let parent = shared.trim_end_matches('/');
+    if parent.is_empty() {
+        return None;
+    }
+    let rest = normalized.strip_prefix(&format!("{parent}/"))?;
+    // A slash left in `rest` means the file is inside a sub-folder, not the
+    // shared library itself. "." and ".." are rejected outright: Path::components
+    // quietly drops a lone ".", so the traversal guard downstream would not see
+    // it and the folder itself would be filed as though it were a codex.
+    if rest.is_empty() || rest.contains('/') || rest == "." || rest == ".." {
+        return None;
+    }
+    Some(PathBuf::from(SHARED_FOLDER).join(rest))
+}
+
 fn safe_relative_path(dropbox_path: &str) -> Result<PathBuf, String> {
     let normalized = dropbox_path.replace('\\', "/");
     let prefix = format!("{}/", dropbox_root());
-    let relative = normalized
-        .strip_prefix(prefix.as_str())
-        .ok_or_else(|| "That file is outside this project.".to_string())?;
+    let owned;
+    let relative = match normalized.strip_prefix(prefix.as_str()) {
+        Some(inside) => inside,
+        None => {
+            let shared = shared_relative_path(&normalized)
+                .ok_or_else(|| "That file is outside this project.".to_string())?;
+            // Already namespaced and checked for separators above; the
+            // traversal guard below still applies to the file name itself.
+            owned = shared.to_string_lossy().replace('\\', "/");
+            owned.as_str()
+        }
+    };
     let path = Path::new(relative);
     if path.as_os_str().is_empty()
         || path
@@ -756,7 +839,7 @@ pub fn search_project_documents(query: String) -> Result<Vec<SearchHit>, String>
 
 #[cfg(test)]
 mod tests {
-    use super::safe_relative_path;
+    use super::{safe_relative_path, set_active_project};
 
     #[test]
     fn accepts_only_paths_inside_the_project() {
@@ -768,5 +851,82 @@ mod tests {
         );
         assert!(safe_relative_path("/Somewhere Else/file.txt").is_err());
         assert!(safe_relative_path("/MaggotClaw Games/The Long Rot/../secret.txt").is_err());
+    }
+
+    #[test]
+    fn files_a_shared_codex_under_its_own_folder() {
+        assert_eq!(
+            safe_relative_path("/MaggotClaw Games/01 Codex, ID Registry v1.31.txt")
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/"),
+            "(Shared Codex)/01 Codex, ID Registry v1.31.txt"
+        );
+    }
+
+    #[test]
+    fn never_accepts_a_sibling_project_as_shared() {
+        // The Long Rot must not be able to file Project Zero Author's pages
+        // just because the two sit side by side under the same parent.
+        assert!(safe_relative_path("/MaggotClaw Games/Project Zero Author/Chapter 01.txt").is_err());
+        assert!(safe_relative_path("/MaggotClaw Games/Operations/06 Templates/Template.txt").is_err());
+    }
+
+    #[test]
+    fn shared_paths_still_refuse_traversal() {
+        assert!(safe_relative_path("/MaggotClaw Games/../secret.txt").is_err());
+        assert!(safe_relative_path("/MaggotClaw Games/.").is_err());
+    }
+
+    #[test]
+    fn the_shared_folder_itself_is_not_a_file() {
+        assert!(safe_relative_path("/MaggotClaw Games").is_err());
+        assert!(safe_relative_path("/MaggotClaw Games/").is_err());
+    }
+
+    #[test]
+    fn a_project_without_a_library_is_never_given_one() {
+        // The library must be declared by the app, not inferred from the
+        // project's parent folder. Inferring it would mean a project rooted at
+        // "/Photos/Wedding" quietly accepting anything sitting in "/Photos".
+        set_active_project("Wedding".into(), "/Photos/Wedding".into(), None).unwrap();
+        assert!(safe_relative_path("/Photos/loose-note.txt").is_err());
+        assert_eq!(
+            safe_relative_path("/Photos/Wedding/vows.txt")
+                .unwrap()
+                .to_string_lossy(),
+            "vows.txt"
+        );
+        restore_default_project();
+    }
+
+    #[test]
+    fn a_library_must_actually_contain_its_project() {
+        assert!(set_active_project("Odd".into(), "/A/Project".into(), Some("/B".into())).is_err());
+        restore_default_project();
+    }
+
+    #[test]
+    fn a_declared_library_is_honoured() {
+        set_active_project(
+            "The Long Rot".into(),
+            "/MaggotClaw Games/The Long Rot".into(),
+            Some("/MaggotClaw Games".into()),
+        )
+        .unwrap();
+        assert!(safe_relative_path("/MaggotClaw Games/00 Master Codex v2.7.txt").is_ok());
+        assert!(safe_relative_path("/MaggotClaw Games/Project Zero Author/Ch1.txt").is_err());
+        restore_default_project();
+    }
+
+    // The tests share one global project, so each one that changes it puts the
+    // built-in default back for whichever runs next.
+    fn restore_default_project() {
+        set_active_project(
+            super::DEFAULT_PROJECT_NAME.into(),
+            super::DEFAULT_DROPBOX_ROOT.into(),
+            Some(super::DEFAULT_SHARED_ROOT.into()),
+        )
+        .unwrap();
     }
 }

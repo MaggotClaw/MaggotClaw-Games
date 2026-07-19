@@ -39,7 +39,7 @@ import { outstandingTasks, readerLinksPublished, setReaderLinksPublished, setSet
 import { WalkthroughWindow } from "./WalkthroughWindow";
 import { loadPeople, parseProfileMessage, publishPeople, removePerson, savePeople, sortedPeople, upsertPerson, type Person } from "./people";
 import { addFeedback, diagnosticsReport, FEEDBACK_AREAS, feedbackMessage, loadErrors, loadFeedback, loadUsage, markFeedbackSent, noteUsage, setShareDiagnostics, shareDiagnostics, watchForErrors } from "./feedback";
-import { activeProject, addProject, allProjects, applyActiveProject, isSafeDropboxRoot, isSafeProjectName, removeProject, setActiveProjectId } from "./projects";
+import { activeProject, addProject, allProjects, applyActiveProject, isSafeDropboxRoot, isSafeProjectName, removeProject, setActiveProjectId, SHARED_FOLDER } from "./projects";
 import {
   actionsPath, actionLog, claudeAccessOn, claudeInstructions, describeAction,
   handledIds, logAction, markHandled, needsOkGo, parseActions, setClaudeAccess,
@@ -2124,7 +2124,13 @@ function WorkspaceFilesScreen({ role, readerName, client, onBack }: { role: Proj
     <section className="comments-list">
       {docs.length === 0 && <div className="empty-state"><strong>Nothing downloaded yet</strong><p>Run Download or Update in the workspace first.</p></div>}
       {docs.map((file) => <article key={file.dropboxPath} className="saved-comment">
-        <div className="comment-meta"><span>{file.status === "downloaded" ? "Downloaded" : "Waiting For Binary Support"}</span><span>{file.byteCount ? `${Math.max(1, Math.round(file.byteCount / 1024))} KB` : ""}</span></div>
+        <div className="comment-meta">
+          <span>{file.status === "downloaded" ? "Downloaded" : "Left On Dropbox"}</span>
+          {/* A codex belongs to every project, so it is worth saying which
+              files are shared before someone rates one as if it were theirs. */}
+          {file.localRelativePath.startsWith(SHARED_FOLDER) && <span className="shared-chip">Shared Codex</span>}
+          <span>{file.byteCount ? `${Math.max(1, Math.round(file.byteCount / 1024))} KB` : ""}</span>
+        </div>
         <h2>{file.localRelativePath}</h2>
         {isOwner
           ? <>

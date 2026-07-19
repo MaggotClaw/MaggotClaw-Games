@@ -11,7 +11,7 @@ const store = new Map<string, string>();
 
 import {
   activeProject, addProject, allProjects, BUILT_IN_PROJECTS, isSafeDropboxRoot,
-  isSafeProjectName, projectFile, removeProject, setActiveProjectId
+  isSafeProjectName, isSharedFile, projectFile, removeProject, setActiveProjectId
 } from "../src/projects";
 
 beforeEach(() => localStorage.clear());
@@ -65,5 +65,52 @@ describe("projects — the program works on many things", () => {
     setActiveProjectId(added.id);
     removeProject(added.id);
     expect(activeProject().id).toBe(BUILT_IN_PROJECTS[0].id);
+  });
+});
+
+describe("the shared codex library", () => {
+  const SHARED = "/MaggotClaw Games";
+
+  it("counts a codex sitting directly in the library", () => {
+    expect(isSharedFile(SHARED, "/MaggotClaw Games/01 Codex, ID Registry v1.31.txt")).toBe(true);
+    expect(isSharedFile(SHARED, "/MaggotClaw Games/00 Master Codex v2.7.txt")).toBe(true);
+  });
+
+  it("never counts another project's files as shared", () => {
+    // The whole point of the rule: The Long Rot must not start downloading
+    // Project Zero Author's book just because they sit side by side.
+    expect(isSharedFile(SHARED, "/MaggotClaw Games/Project Zero Author/Chapter 01.txt")).toBe(false);
+    expect(isSharedFile(SHARED, "/MaggotClaw Games/The Long Rot/C01-R Chapter 01 Reader Copy v9.5.txt")).toBe(false);
+  });
+
+  it("never counts anything nested, however deep", () => {
+    expect(isSharedFile(SHARED, "/MaggotClaw Games/Operations/06 Templates/Template - Verification Report v1.0.txt")).toBe(false);
+    expect(isSharedFile(SHARED, "/MaggotClaw Games/(Images)/MaggotClaw.jpg")).toBe(false);
+  });
+
+  it("ignores a project with no shared library", () => {
+    expect(isSharedFile(undefined, "/MaggotClaw Games/00 Master Codex v2.7.txt")).toBe(false);
+    expect(isSharedFile("", "/MaggotClaw Games/00 Master Codex v2.7.txt")).toBe(false);
+  });
+
+  it("does not mistake a look-alike folder for the library", () => {
+    expect(isSharedFile(SHARED, "/MaggotClaw Games Archive/00 Master Codex v2.7.txt")).toBe(false);
+    expect(isSharedFile(SHARED, "/Somewhere Else/00 Master Codex v2.7.txt")).toBe(false);
+  });
+
+  it("does not treat the library folder itself as a file in it", () => {
+    expect(isSharedFile(SHARED, "/MaggotClaw Games")).toBe(false);
+    expect(isSharedFile(SHARED, "/MaggotClaw Games/")).toBe(false);
+  });
+
+  it("tolerates a trailing slash on the configured library", () => {
+    expect(isSharedFile("/MaggotClaw Games/", "/MaggotClaw Games/00 Master Codex v2.7.txt")).toBe(true);
+  });
+
+  it("gives both built-in projects the same shared library", () => {
+    for (const project of BUILT_IN_PROJECTS) {
+      expect(project.sharedRoot).toBe(SHARED);
+      expect(isSharedFile(project.sharedRoot, "/MaggotClaw Games/91 Codex, Human Maker v1.5.txt")).toBe(true);
+    }
   });
 });
