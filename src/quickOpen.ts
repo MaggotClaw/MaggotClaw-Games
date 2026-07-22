@@ -20,13 +20,14 @@ const NUMBER_WORDS: Record<string, number> = {
   "twenty-eight": 28, "twenty-nine": 29, thirty: 30
 };
 
-type Stage = "A" | "B" | "P" | "R" | "master" | "codex" | null;
+type Stage = "B" | "D" | "P" | "R" | "master" | "codex" | null;
 
 // Reading preference within a chapter when no stage is named: the clean Reader
-// Copy first, then the most advanced draft, then Development, then Blueprint.
-const READ_ORDER: ParsedDoc["typeCode"][] = ["R", "P", "B", "A"];
+// Copy first, then the most advanced draft segment, then the chapter draft,
+// then Blueprint.
+const READ_ORDER: ParsedDoc["typeCode"][] = ["R", "P", "D", "B"];
 // General ranking used for name matches — most authoritative/readable first.
-const PREFER: Record<string, number> = { R: 0, codex: 1, master: 1, P: 2, B: 3, A: 4, other: 5 };
+const PREFER: Record<string, number> = { R: 0, codex: 1, master: 1, P: 2, D: 3, B: 4, other: 5 };
 
 function logicalKey(d: ParsedDoc): string {
   if (d.chapter != null) return `ch${d.chapter}-${d.typeCode}${d.draftPart ?? ""}`;
@@ -56,8 +57,11 @@ function parseChapter(q: string): number | null {
 function parseStage(q: string): { code: Stage; part: number | null } {
   if (/\bmaster\b/.test(q)) return { code: "master", part: null };
   if (/\breader\b/.test(q)) return { code: "R", part: null };
-  if (/\bblueprint\b/.test(q)) return { code: "A", part: null };
-  if (/\bdevelopment\b|\bdev\b/.test(q)) return { code: "B", part: null };
+  if (/\bblueprint\b/.test(q)) return { code: "B", part: null };
+  // "Development" is the old name for the chapter draft; both still find it.
+  // This has to be tried before the plain "draft" test below, or "chapter
+  // draft" would be read as a draft segment.
+  if (/\bchapter draft\b|\bdevelopment\b|\bdev\b/.test(q)) return { code: "D", part: null };
   if (/\bdraft\b|\bpart\b|\bp\d+\b/.test(q)) {
     const m = q.match(/\b(?:draft|part|p)\s*0*(\d+)\b/);
     return { code: "P", part: m ? parseInt(m[1], 10) : null };
@@ -71,7 +75,7 @@ function parseStage(q: string): { code: Stage; part: number | null } {
 function nameQuery(q: string): string {
   return q
     .replace(/\b(?:chapters?|chap|ch|c)\s*0*\d{1,2}\b/g, " ")
-    .replace(/\b(?:reader copy|reader|blueprint|development|dev|draft|part|master codex|master|codex)\b/g, " ")
+    .replace(/\b(?:reader copy|reader|blueprint|chapter draft|draft segment|development|dev|draft|segment|part|master codex|master|codex)\b/g, " ")
     .replace(/\bp\d+\b/g, " ")
     .replace(/\b(?:the|a|an|of|open|show|find|go|to|goto|pull|up|lets|let|s|please|check|read|view)\b/g, " ")
     .replace(/[^a-z0-9\s]/gi, " ")
@@ -136,7 +140,7 @@ export function resolveQuickOpen(query: string, allDocs: ParsedDoc[]): QuickOpen
     const inChapter = docs.filter((d) => d.chapter === chapter);
     if (!inChapter.length) return { ...empty, interpretation: `Chapter ${chapter} — no files here yet` };
     let picked: ParsedDoc[];
-    if (stage.code === "R" || stage.code === "A" || stage.code === "B") {
+    if (stage.code === "R" || stage.code === "B" || stage.code === "D") {
       picked = inChapter.filter((d) => d.typeCode === stage.code);
     } else if (stage.code === "P") {
       let ps = inChapter.filter((d) => d.typeCode === "P");

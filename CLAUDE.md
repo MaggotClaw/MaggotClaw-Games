@@ -139,12 +139,117 @@ Per-file behaviour is decided by three shared files under
 silently breaks its rating, its pick and its history. Never reorganise project
 files without re-pointing these.
 
+## Page-exact chapters
+
+A chapter styled in Word carries filled header blocks, text boxes, WordArt and
+3D lettering. `docx-preview` draws **none** of it — checked in the source, not
+guessed — so no amount of CSS makes a styled chapter look like the file. The
+only thing that renders Word exactly like Word is Word.
+
+So Word makes the picture: `convert_document_to_pdf` drives it over COM and the
+PDF goes up beside the chapter with the same name. Readers download it as a
+normal document (`pdf` is already an allowed type) and `PageExactDocument`
+draws the pages, fitted to whatever width it is given — narrowing the window
+shrinks the page instead of reflowing it. Narrated mode finds the sentence
+being read with `pageHighlight.ts` and lights that line; when it cannot match
+the sentence it shows the page clean, because a wrong highlight is worse than
+none. A chapter with no PDF published falls back to the older view.
+
+**Word must never be told to quit while the author has documents open** — a
+bare `Quit()` closes his whole session, unsaved chapters with it. The script
+only quits when `Documents.Count` is zero.
+
 ## File naming
 
-Chapters follow `C<nn>-<type> Chapter <nn> <Label> - <Title> v<version>.<ext>`,
-parsed in `src/projectDocs.ts`. Types: `A` blueprint, `B` development,
-`P<nn>` draft part, `R` reader copy. Codices are `<nn> Codex, <Name> v<v>.txt`.
-A filename that does not match still works, but loses its chapter and version.
+Chapters follow `C<nn>-<type> <Label> - <Title> v<version>.<ext>`, parsed in
+`src/projectDocs.ts`:
+
+| Type | Label | Example |
+|---|---|---|
+| `B` | Blueprint | `C01-B Blueprint - The Bounty v2.1.txt` |
+| `D` | Chapter Draft | `C01-D Chapter Draft - The Bounty v2.1.txt` |
+| `P<nn>` | Draft Segment | `C01-P03 Draft Segment - The Bounty v3.1.txt` |
+| `R` | Reader Copy | `C01-R Reader Copy - The Bounty v9.5.docx` |
+
+`C<nn>` already says which chapter it is, so the name never says it twice, and
+the letters match the words. Codices are `<nn> Codex, <Name> v<v>.txt`. A
+filename that matches no rule still works, but loses its chapter and version.
+
+**The older names are still read** — `C01-A Chapter 01 Blueprint`, `C01-B
+Chapter 01 Development`, `C01-P01 Chapter 01 Draft`. Keep it that way: one file
+missed in a rename would otherwise drop off the shelf in silence.
+
+**The label decides the type, never the letter.** `B` meant Development under
+the old scheme and means Blueprint under the new one, so the letter alone is
+ambiguous and reading it would turn every old Development file into a
+blueprint. `parseDoc` switches on the label and only reads the letter for a
+draft segment's number. There is no `A` type code any more.
+
+Renaming a chapter file **breaks its rating, its reader pick and its history**,
+because `file-access.json`, `chapter-files.json` and `change-log.json` are all
+keyed by Dropbox path. Re-point all three in the same pass, or the file comes
+back unrated with no history and no chapter pick. The page-exact PDF is named
+after the chapter, so it has to move with it.
+
+## Two programs are called "Claude"
+
+The chat app and Claude Code both put a top-level window on screen titled
+**Claude**. Asking Windows for a window by that name returns whichever it
+likes, and not the same one twice — measured, not guessed: two inspections
+minutes apart returned different windows with different structures.
+
+That was the real cause of the companion reading his own words back. In Claude
+Code every message is left-aligned, so the left-is-the-assistant rule finds his
+own text and believes it. **Never resolve the window by title.**
+`window_executable()` reads the owning process; the chat app is the one under
+`WindowsApps\…\claude.exe`. If only Claude Code is open, the companion says so
+rather than driving the wrong program.
+
+Also measured, and worth knowing before changing the reader:
+
+- The composer is a **Group named "Prompt"**, not a text field — the window has
+  **zero** Edit controls. Searching for an Edit finds nothing.
+- Copy buttons are "Copy message" (the reply) and "Copy code" (code blocks).
+  Excluding "code" is what keeps her from reading code aloud.
+- A reply arrives as **more elements, not a longer one**: the text-element count
+  climbed 46 → 102 during one answer, then collapsed to 64 when it finished,
+  while the longest single element never changed. `streaming_reply` therefore
+  gathers every assistant-side element top-to-bottom rather than watching one
+  box grow.
+- Stop appears while busy and goes on completion; Copy count rises by one. Both
+  are reliable finish signals.
+
+## The bridge reads local files first
+
+`search_file_contents` downloads **every** text file in the project from
+Dropbox on every query — about a hundred files per search, thrown away
+afterwards. The bridge runs on his PC, where the app has already downloaded
+those same files, so `the-long-rot-mcp/src/local-tools.js` reads them off disk
+instead: 6–14ms against the whole book.
+
+Three tools, and Claude should reach for them in this order:
+
+1. `read_story_index` — the newest local `ID Registry`, his own catalog of
+   every character and place. Answers most "who/what is X" in one call.
+2. `search_local_files` — grep the downloaded copies; returns file, line,
+   context, and each file's Dropbox path.
+3. `search_file_contents` — the Dropbox search, as the fallback.
+
+**Local is a subset, never the truth.** It holds only what the app downloaded
+for that person's role, so an excluded or higher-rated file is not there. Every
+reply says which files were searched and names the Dropbox fallback — keep it
+that way, or a missing file will read as a missing fact.
+
+The workspace path in `local-tools.js` mirrors `workspace_root()` in
+`project_workspace.rs`. Change one and you must change the other.
+
+## quickOpen.ts is kept on purpose
+
+Nothing calls it any more. The "say what to open" bar it drove was removed
+because it read typed phrases and he wanted to *speak* to the AI — but the
+module is the part that turns "ch 2 reader" into an actual file, which is
+exactly what an AI-driven version would stand on. It is tested and costs
+nothing unused. **Do not delete it as dead code.**
 
 ## Credentials
 
@@ -170,10 +275,15 @@ administrator. Authority is granted by the owner, never self-assigned. See
 ## Open decisions
 
 - **Repo visibility.** He wants only himself able to change the program; the
-  repo is public. Agreed plan is to go private and distribute through Dropbox,
-  deliberately waiting until Dropbox distribution works end to end.
+  repo is still public. Nothing blocks going private any more: the update check
+  no longer falls back to GitHub. `DEFAULT_UPDATE_REPO` is `""` and the
+  author's Dropbox `latest-version.json` is the built-in default, so a private
+  repo cannot strand anybody. Verified: no secret was ever committed, and the
+  manuscript is not in the repo. Flipping the switch is his to do.
 - **Nothing has been live-tested on a second machine.** The whole reader path —
   key, catalog download, approval, progress — is theory until a friend tries
   it. Treat the first onboarding as the real test.
-- **Word upload.** Word files download but cannot be uploaded; `05 Approved
-  Uploads` refuses binaries. Only matters once someone else edits Word files.
+- **Word upload.** `05 Approved Uploads` still refuses binaries — but that is a
+  *bridge* limit, not a Dropbox one. The direct connection uploads bytes fine
+  (`dropbox_write_binary`), which is how page-exact copies get published. Only
+  the bridge path is still text-only.
