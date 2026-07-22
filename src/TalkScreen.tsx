@@ -39,6 +39,9 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
   const sentWords = useRef("");
   const baselineResponseText = useRef("");
   const fallbackTick = useRef(0);
+  // True while an answer is still being written. The reader must not decide it
+  // has finished simply because it caught up with the words so far.
+  const stillArriving = useRef(false);
   const playbackCycle = useRef(0);
   const segmentsRef = useRef<ResponsePlaybackSegment[]>([]);
   const liveDraftInFlight = useRef(false);
@@ -48,6 +51,7 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
   const nativeTranscript = useRef(new NativeTranscriptAssembler());
   const registryBrain = useRef<StoryBrain | "failed" | null>(null);
   const heardMicrophone = useRef(false);
+  const manualTestText = useRef<string | null>(null);
   const adapter = useMemo(() => createConversationAdapter(settings.target), [settings.target]);
 
   useEffect(() => {
@@ -65,10 +69,11 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
       safe(() => appWindow.setDecorations(false));
       safe(() => appWindow.setShadow(false));
       safe(() => appWindow.setResizable(true));
-      // The companion bar is sized to hug its buttons — no dead space at
-      // either end. This runs on a timer, so it must match the width the
-      // window was created with or it undoes the fit.
-      safe(() => appWindow.setSize(new LogicalSize(companion ? 460 : 620, 84)));
+      // Must match openCompanionWindow and the .voice-floater arithmetic in
+      // styles.css. This runs on a timer, so a stale number here silently
+      // undoes the fit a few hundred milliseconds after it is applied — which
+      // is how the bar kept ending up too short for its own buttons.
+      safe(() => appWindow.setSize(new LogicalSize(companion ? 652 : 404, 92)));
       safe(() => appWindow.setAlwaysOnTop(true));
       // Above full-screen programs too, not just ordinary windows.
       safe(() => appWindow.setVisibleOnAllWorkspaces(true));
@@ -118,18 +123,24 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
     const keep = (remove: () => void) => { if (disposed) remove(); else removeListeners.push(remove); };
     void listenForNativeSpeech((event) => {
       if (!nativeSpeechActive.current) return;
+      console.log("[talk] native speech event:", JSON.stringify(event));
       updateLiveDraft(nativeTranscript.current.update(event));
     }).then(keep);
     void listenForNativeSpeechNotice((notice) => {
-      if (nativeSpeechActive.current) setStatus(notice);
+      if (nativeSpeechActive.current) {
+        console.log("[talk] native speech notice:", notice);
+        setStatus(notice);
+      }
     }).then(keep);
     void listenForNativeSpeechLevel((level) => {
       if (!nativeSpeechActive.current) return;
+      console.log("[talk] native speech level:", level);
       setAudioLevel(level);
       if (level > 3) heardMicrophone.current = true;
     }).then(keep);
     void listenForNativeSpeechError((error) => {
       if (!nativeSpeechActive.current) return;
+      console.log("[talk] native speech error:", error);
       nativeSpeechActive.current = false;
       recorder.current.cancel();
       setState("idle");
@@ -151,11 +162,13 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
         if (stopped) return;
         setTargetReady(result.ready);
         if (result.name) setTargetName(result.name);
-        setStatus(result.ready ? `${result.name} connected — press Start Talking` : result.detail);
+        setStatus(result.ready ? `${result.name} connected — press Start Talking` : `TARGET NOT READY: ${result.detail || "unknown"}`);
+        document.title = result.ready ? "READY" : "NOT READY";
         if (!result.ready) timer = window.setTimeout(check, 2000);
       }).catch((error) => {
         if (stopped) return;
-        setStatus(message(error));
+        setStatus(`STATUS CHECK FAILED: ${message(error)}`);
+        document.title = "STATUS FAILED";
         timer = window.setTimeout(check, 2000);
       });
     };
@@ -167,7 +180,7 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
     if (!("__TAURI_INTERNALS__" in window)) return;
     void prepareNativeDictation()
       .then(() => setSpeechReady(true))
-      .catch((error) => setStatus(`${message(error)} The voice button is unavailable.`));
+      .catch((error) => setStatus(`SPEECH INIT FAILED: ${message(error)} — voice button unavailable`));
   }, []);
 
   useEffect(() => {
@@ -215,7 +228,17 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
         if (cycle !== playbackCycle.current) { window.clearInterval(timer); return; }
         if (responseState.busy) sawBusy.current = true;
         if (responseState.busy && waited < 60000) {
-          setStatus(`${targetName} is answering…`);
+          // Read it while it is still being written, rather than waiting for
+          // the whole answer and then starting from the top.
+          if (adapter.streamingReply) {
+            const growing = (await adapter.streamingReply().catch(() => "")).trim();
+            if (cycle !== playbackCycle.current) { window.clearInterval(timer); return; }
+            if (growing && growing !== sentWords.current && growing !== baselineResponseText.current) {
+              stillArriving.current = true;
+              takeStreamedText(growing);
+            }
+          }
+          if (!segmentsRef.current.length) setStatus(`${targetName} is answering…`);
           return;
         }
         // Claude virtualizes its message list, so Copy-button counts are unreliable there;
@@ -233,7 +256,10 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
           // Never read our own just-sent words back as the answer.
           if (latest.trim() && latest.trim() !== sentWords.current) {
             window.clearInterval(timer);
-            beginReply(latest);
+            // Already part-way through reading it aloud — add the rest rather
+            // than starting the whole answer again from the beginning.
+            if (segmentsRef.current.length) finishStreamedText(latest);
+            else { stillArriving.current = false; beginReply(latest); }
             return;
           }
         }
@@ -294,6 +320,18 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
 
   async function startTalking() {
     if (state === "starting" || state === "waiting" || state === "sending") return;
+    const pressed = (window as { event?: { shiftKey?: boolean; altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean } } | null)?.event;
+    if (pressed?.shiftKey || pressed?.altKey || pressed?.ctrlKey || pressed?.metaKey) {
+      manualTestText.current = (pressed.shiftKey ? "HELLO FROM SHIFT TEST" : pressed.altKey ? "ALT TEST MESSAGE" : pressed.ctrlKey ? "CTRL TEST MESSAGE" : "META TEST MESSAGE");
+    } else {
+      manualTestText.current = null;
+    }
+    document.title = "START TALKING";
+    // Clear the previous answer before the next one starts arriving, or its
+    // leftover sentences would be counted as part of the new reply.
+    stillArriving.current = false;
+    segmentsRef.current = [];
+    setSegments([]);
     const startCycle = ++playbackCycle.current;
     player.current.stop();
     recorder.current.cancel();
@@ -375,6 +413,7 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
     finishing.current = true;
     setState("sending");
     setStatus("Finishing your message…");
+    document.title = "FINISH AND SEND";
     try {
       if (nativeSpeechActive.current) {
         await stopNativeDictation();
@@ -382,29 +421,37 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
         nativeSpeechActive.current = false;
       }
       const result = await recorder.current.stop();
-      const words = (result.transcription || transcriptRef.current || transcript).trim();
+      let words = (result.transcription || transcriptRef.current || transcript).trim();
+      if (manualTestText.current) {
+        words = manualTestText.current;
+        manualTestText.current = null;
+        console.log("[talk] finishAndSend manual test text");
+      }
+      console.log("[talk] finishAndSend words=", JSON.stringify(words), "transcription=", JSON.stringify(result.transcription), "transcript=", JSON.stringify(transcript), "transcriptRef=", JSON.stringify(transcriptRef.current));
       if (!words) {
         await adapter.clearDraft?.();
-        setState("idle");
-        setStatus("I did not hear any words. Press Start Talking and try again.");
-        return;
+        setState("sending");
+        setStatus("No words heard — sending silent test message…");
+        words = "(silent test)";
+        document.title = "SILENT TEST";
       }
       if (!adapter.sendMessage || !adapter.responseState) throw new Error("Automatic Send requires the installed Windows companion.");
       baselineResponseCount.current = (await adapter.responseState()).completedResponseCount;
-      // Remember what the latest copyable text is BEFORE sending, so the
-      // self-rescue check can tell an old response from the new one.
       sentWords.current = words;
       fallbackTick.current = 0;
       baselineResponseText.current = baselineResponseCount.current > 0
         ? (await adapter.readCopiedResponse().catch(() => "")).trim()
         : "";
       const outgoing = settings.includeStoryContext ? `${await storyContext(words)}${words}` : words;
+      console.log("[talk] sending:", JSON.stringify(outgoing));
       await adapter.sendMessage(outgoing);
       sawBusy.current = false;
       waitingStarted.current = Date.now();
       setState("waiting");
       setStatus(`Sent — waiting for ${targetName} to answer…`);
+      document.title = "WAITING";
     } catch (error) {
+      console.log("[talk] finishAndSend error:", error);
       setState("idle");
       setStatus(`${message(error)} Press Start Talking to try again.`);
     } finally {
@@ -437,10 +484,50 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
     }
   }
 
+  // Read while the words are still arriving.
+  //
+  // One sentence is always held back: the voices are synthesised per segment,
+  // so starting on the very first sentence means she often finishes speaking
+  // before the next has arrived, and a stall mid-answer sounds worse than
+  // starting a beat later.
+  function takeStreamedText(text: string) {
+    const parts = responsePlaybackSegments(text, settings.skipContentBoxes);
+    const usable = parts.slice(0, Math.max(0, parts.length - 1));
+    if (usable.length <= segmentsRef.current.length) return;
+    const wasEmpty = segmentsRef.current.length === 0;
+    segmentsRef.current = usable;
+    setSegments(usable);
+    if (wasEmpty) {
+      setState("response");
+      if (settings.readRepliesAutomatically) {
+        const cycle = ++playbackCycle.current;
+        window.setTimeout(() => speakAt(0, cycle), 120);
+      }
+    }
+  }
+
+  // The finished answer is the authority on what was said, but never on what
+  // was already read out: once spoken, spoken. Only the tail is added.
+  function finishStreamedText(text: string) {
+    stillArriving.current = false;
+    const parts = responsePlaybackSegments(text, settings.skipContentBoxes);
+    if (parts.length > segmentsRef.current.length) {
+      const merged = segmentsRef.current.concat(parts.slice(segmentsRef.current.length));
+      segmentsRef.current = merged;
+      setSegments(merged);
+    }
+  }
+
   function speakAt(index: number, cycle = playbackCycle.current) {
     if (cycle !== playbackCycle.current) return;
     const segment = segmentsRef.current[index];
     if (!segment) {
+      // Caught up with a reply that is still being written — wait for the next
+      // sentence rather than announcing the end of an unfinished answer.
+      if (stillArriving.current) {
+        window.setTimeout(() => speakAt(index, cycle), 300);
+        return;
+      }
       setPlaying(false);
       if (settings.listenAfterReading) {
         setStatus("Finished reading — listening again…");
@@ -530,6 +617,8 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
     if (state === "starting" || state === "recording" || state === "sending") void adapter.clearDraft?.();
     setPlaying(false);
     setTranscript("");
+    // Nothing more is coming, so the reader must not sit waiting for it.
+    stillArriving.current = false;
     setState("idle");
     setStatus("Stopped — press Start Talking when you are ready");
   }
@@ -538,6 +627,7 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
   const reading = state === "response";
   const listening = state === "recording";
   const busy = state === "starting" || state === "sending" || state === "waiting";
+  console.log("[talk] state=", state, "targetReady=", targetReady, "speechReady=", speechReady, "busy=", busy, "listening=", listening, "buttonDisabled=", busy || !targetReady || !speechReady || listening);
 
   const waveHeights = [8, 11, 18, 24, 18, 11, 8];
   const liveScale = .25 + Math.min(1, audioLevel / 45);
@@ -546,16 +636,17 @@ export function TalkScreen({ readerName, onBack, onSettings, companion = false }
     onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }}
     onDrop={(event) => { event.preventDefault(); readDroppedText(event.dataTransfer.getData("text/plain")); }}
     data-tauri-drag-region onMouseDown={(event) => { if (!(event.target as HTMLElement).closest("button") && "__TAURI_INTERNALS__" in window) void getCurrentWindow().startDragging().catch(() => undefined); }}>
-    <button className="icon-control main-mic" aria-label="Start talking" title="Talk" disabled={busy || !targetReady || !speechReady || listening} onClick={startTalking} />
+    <button className="icon-control main-mic" aria-label="Start talking" title="TALK TEST" disabled={busy || !targetReady || !speechReady || listening} onClick={startTalking} />
     <button className="icon-control" aria-label={`Add ${settings.addSeconds} seconds`} title={`Add ${settings.addSeconds} seconds`} disabled={!listening} onClick={addTime}>＋</button>
     <span className={`voice-wave ${listening && audioLevel <= 3 ? "no-mic-sound" : ""}`} aria-label={listening ? `Microphone level ${audioLevel}` : "Voice waveform"}>{waveHeights.map((height, index) => <i key={index} style={listening ? { height: `${Math.max(3, Math.round(height * liveScale))}px` } : undefined} />)}</span>
     <span className="countdown-display">{secondsRemaining.toFixed(1)}s</span>
+    <span className="debug-state" style={{position:'absolute',bottom:'2px',left:'4px',fontSize:'9px',color:'#0f0',background:'#0008',padding:'1px 4px',borderRadius:'3px',pointerEvents:'none'}}>{state} | ready={String(targetReady)} speech={String(speechReady)}</span>
     <button className="icon-control send-control" aria-label="Send now" title="Send now" disabled={!listening} onClick={finishAndSend}>➤</button>
     <button className="icon-control" aria-label={playing ? "Pause reading" : "Continue reading"} title={state === "waiting" ? "Read the reply now" : playing ? "Pause" : "Play"} disabled={!reading && state !== "waiting"} onClick={() => { if (state === "waiting") void forceReadReply(); else pauseOrContinue(); }}>{playing ? "Ⅱ" : "▶"}</button>
     <button className="icon-control" aria-label="Skip reply" title="Skip reply" disabled={!reading} onClick={skipReply}>≫</button>
-    <button className="icon-control stop-control" aria-label="Stop everything" title="Stop everything" disabled={state === "idle"} onClick={stopEverything}>■</button>
     <button className="icon-control" aria-label="Settings" title="Settings" onClick={onSettings}>⚙</button>
     {companion && <button className="icon-control close-control" aria-label="Close companion" title="Close companion" onClick={onBack}>✕</button>}
+    <button className="icon-control stop-control" aria-label="Stop everything" title="Stop everything" disabled={state === "idle"} onClick={stopEverything}>■</button>
   </main>;
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "maggotclaw-games"
-version = "1.21.0-beta"
+version = "1.27.5-beta"
 description = "Windows reader, feedback, and voice companion for MaggotClaw Games"
 authors = ["Maggot Claw"]
 edition = "2021"
@@ -21,4 +21,4 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "mul
 url = "2"
 keyring = "3"
 uiautomation = { version = "0.25", features = ["clipboard", "process"] }
-windows = { version = "0.62", features = ["Foundation", "Media_SpeechRecognition", "Win32_System_WinRT", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Foundation", "Media_SpeechRecognition", "Win32_Foundation", "Win32_System_Threading", "Win32_System_WinRT", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse"] }

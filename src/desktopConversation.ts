@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export interface DesktopConversationTarget {
-  id: "codex" | "claude" | "auto";
+  id: "auto" | "claude" | "codex" | "antigravity";
   name: string;
 }
 
@@ -25,6 +25,8 @@ export interface DesktopConversationAdapter {
   readCopiedResponse(): Promise<string>;
   sendMessage?(text: string): Promise<void>;
   responseState?(): Promise<ConversationResponseState>;
+  /** The reply as it stands right now, part-written. */
+  streamingReply?(): Promise<string>;
   clearDraft?(): Promise<void>;
   targetForeground?(): Promise<boolean>;
 }
@@ -46,11 +48,11 @@ export class ClipboardConversationAdapter implements DesktopConversationAdapter 
 }
 
 export class WindowsConversationAdapter implements DesktopConversationAdapter {
-  readonly target = { id: "auto" as const, name: "Claude or Codex" };
+  readonly target = { id: "auto" as const, name: "Claude or Codex or Antigravity IDE" };
   // "auto" is sent to the backend as no preference so it falls back to detection.
   private readonly choice: string | null;
 
-  constructor(choice: "auto" | "claude" | "codex" = "auto") {
+  constructor(choice: "auto" | "claude" | "codex" | "antigravity" = "auto") {
     this.choice = choice === "auto" ? null : choice;
   }
 
@@ -74,6 +76,10 @@ export class WindowsConversationAdapter implements DesktopConversationAdapter {
     return invoke<ConversationResponseState>("conversation_response_state", { target: this.choice });
   }
 
+  streamingReply(): Promise<string> {
+    return invoke<string>("streaming_reply", { target: this.choice });
+  }
+
   async clearDraft(): Promise<void> {
     await invoke("clear_conversation_draft", { target: this.choice });
   }
@@ -83,6 +89,6 @@ export class WindowsConversationAdapter implements DesktopConversationAdapter {
   }
 }
 
-export function createConversationAdapter(choice: "auto" | "claude" | "codex" = "auto"): DesktopConversationAdapter & { status?: () => Promise<ConversationTargetStatus> } {
+export function createConversationAdapter(choice: "auto" | "claude" | "codex" | "antigravity" = "auto"): DesktopConversationAdapter & { status?: () => Promise<ConversationTargetStatus> } {
   return "__TAURI_INTERNALS__" in window ? new WindowsConversationAdapter(choice) : new ClipboardConversationAdapter();
 }

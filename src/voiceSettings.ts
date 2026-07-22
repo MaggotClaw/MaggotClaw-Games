@@ -1,4 +1,4 @@
-export type ConversationTargetChoice = "auto" | "claude" | "codex";
+export type ConversationTargetChoice = "auto" | "claude" | "codex" | "antigravity";
 
 export interface VoiceSettings {
   silenceSeconds: number;
@@ -21,7 +21,7 @@ export const defaultVoiceSettings: VoiceSettings = {
   listenAfterReading: true,
   skipContentBoxes: true,
   includeStoryContext: false,
-  target: "auto"
+  target: "antigravity"
 };
 
 function key(profile: string): string {
@@ -30,7 +30,9 @@ function key(profile: string): string {
 
 export function loadVoiceSettings(profile: string): VoiceSettings {
   try {
-    return { ...defaultVoiceSettings, ...JSON.parse(localStorage.getItem(key(profile)) || "{}") };
+    const raw = JSON.parse(localStorage.getItem(key(profile)) || "{}");
+    if (raw.target === "current") raw.target = "antigravity";
+    return { ...defaultVoiceSettings, ...raw };
   } catch {
     return defaultVoiceSettings;
   }

@@ -2,16 +2,80 @@ use serde::Serialize;
 use uiautomation::{
     clipboards::Clipboard,
     core::{UIAutomation, UIElement},
-    patterns::UIInvokePattern,
+    patterns::{UIInvokePattern, UIValuePattern},
     types::ControlType,
 };
+use std::{fs::OpenOptions, io::Write, path::PathBuf};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+
+fn log_path() -> PathBuf {
+    std::env::temp_dir().join("maggotclaw-companion-debug.log")
+}
+
+fn type_via_powershell(text: &str) -> Result<(), String> {
+    let escaped = text.replace("'", "''");
+    let ps_script = format!(
+        r#"Add-Type -AssemblyName System.Windows.Forms
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32 {{
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}}
+"@
+Add-Type -AssemblyName UIAutomationClient
+$root = [System.Windows.Automation.AutomationElement]::RootElement
+$ide = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, "MaggotClaw Games - Antigravity IDE")))
+$hwndProp = $ide.GetCurrentPropertyValue([System.Windows.Automation.AutomationElement]::NativeWindowHandleProperty)
+$hwnd = [IntPtr]$hwndProp
+if ($hwnd -ne [IntPtr]::Zero) {{
+    [Win32]::ShowWindow($hwnd, 9)
+    [Win32]::BringWindowToTop($hwnd)
+    [Win32]::SetForegroundWindow($hwnd)
+    Start-Sleep -Milliseconds 300
+}}
+$edits = $ide.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)))
+foreach ($e in $edits) {{
+    if ($e.Current.Name -match "Type a message") {{
+        $e.SetFocus()
+        Start-Sleep -Milliseconds 300
+        [System.Windows.Forms.SendKeys]::SendWait("^a")
+        Start-Sleep -Milliseconds 100
+        [System.Windows.Forms.SendKeys]::SendWait("{{DEL}}")
+        Start-Sleep -Milliseconds 200
+        [System.Windows.Forms.SendKeys]::SendWait('{0}')
+        Start-Sleep -Milliseconds 500
+        break
+    }}
+}}
+"#,
+        escaped
+    );
+    let output = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &ps_script])
+        .output()
+        .map_err(|e| format!("Failed to launch PowerShell: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("PowerShell failed: {}", stderr));
+    }
+    Ok(())
+}
+
+fn log(msg: &str) {
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(log_path()) {
+        let _ = writeln!(f, "{}", msg);
+    }
+}
 
 #[derive(Clone, Copy, PartialEq)]
 enum Target {
     Claude,
     Codex,
+    Antigravity,
 }
 
 impl Target {
@@ -19,6 +83,7 @@ impl Target {
         match self {
             Target::Claude => "Claude — desktop app",
             Target::Codex => "Codex — current Windows task",
+            Target::Antigravity => "Antigravity IDE — current Windows task",
         }
     }
 
@@ -26,16 +91,15 @@ impl Target {
         match self {
             Target::Claude => "Claude",
             Target::Codex => "Codex",
+            Target::Antigravity => "Antigravity",
         }
     }
 
-    // Matched as case-insensitive substrings: the apps rename these buttons
-    // between versions ("Copy" → "Copy message" → "Copy response"), and an
-    // exact match going stale left the companion waiting forever.
     fn copy_button_names(self) -> &'static [&'static str] {
         match self {
             Target::Claude => &["copy"],
             Target::Codex => &["copy"],
+            Target::Antigravity => &["copy response", "copy"],
         }
     }
 
@@ -43,6 +107,7 @@ impl Target {
         match self {
             Target::Claude => &["stop"],
             Target::Codex => &["stop"],
+            Target::Antigravity => &["stop"],
         }
     }
 }
@@ -70,6 +135,55 @@ fn automation() -> Result<UIAutomation, String> {
         .map_err(|_| "Windows accessibility could not start.".to_string())
 }
 
+/// The program a window belongs to.
+///
+/// Two entirely different programs put a window on screen called "Claude" —
+/// the chat app and Claude Code — so the title cannot tell them apart. Asking
+/// Windows for a window named "Claude" returns whichever one it happens to
+/// hand back, and it does not always hand back the same one. That is why the
+/// companion sometimes talked to the wrong program and read the author's own
+/// words back to him: in Claude Code every message sits on the left, so the
+/// left-is-the-assistant rule finds his own text and believes it.
+fn window_executable(window: &UIElement) -> Option<String> {
+    use windows::Win32::Foundation::{CloseHandle, MAX_PATH};
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+
+    let handle: HWND = window.get_native_window_handle().ok()?.into();
+    let mut pid: u32 = 0;
+    unsafe { GetWindowThreadProcessId(handle, Some(&mut pid)) };
+    if pid == 0 {
+        return None;
+    }
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut buffer = [0u16; MAX_PATH as usize];
+        let mut length = buffer.len() as u32;
+        let ok = QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_FORMAT(0),
+            windows::core::PWSTR(buffer.as_mut_ptr()),
+            &mut length,
+        );
+        let _ = CloseHandle(process);
+        ok.ok()?;
+        Some(String::from_utf16_lossy(&buffer[..length as usize]))
+    }
+}
+
+/// The Claude chat app installs through the Microsoft Store, so its program
+/// lives under WindowsApps. Claude Code does not.
+fn is_chat_app(window: &UIElement) -> bool {
+    window_executable(window)
+        .map(|path| {
+            let lower = path.to_lowercase();
+            lower.contains("windowsapps") && lower.ends_with("claude.exe")
+        })
+        .unwrap_or(false)
+}
+
 fn claude_window(automation: &UIAutomation) -> Result<UIElement, String> {
     let windows = automation
         .create_matcher()
@@ -80,8 +194,10 @@ fn claude_window(automation: &UIAutomation) -> Result<UIElement, String> {
         .find_all()
         .map_err(|_| "The Claude desktop window is not open.".to_string())?;
 
-    for window in windows {
-        let has_prompt = automation
+    // The message box, which is a Group rather than a text field — asking for
+    // an Edit control finds nothing at all in this app.
+    let ready = |window: &UIElement| {
+        automation
             .create_matcher()
             .from(window.clone())
             .control_type(ControlType::Group)
@@ -89,12 +205,24 @@ fn claude_window(automation: &UIAutomation) -> Result<UIElement, String> {
             .depth(40)
             .timeout(0)
             .find_first()
-            .is_ok();
-        if has_prompt {
-            return Ok(window);
-        }
+            .is_ok()
+    };
+
+    // The chat app wins outright, whatever else is on screen.
+    if let Some(window) = windows.iter().find(|window| is_chat_app(window) && ready(window)) {
+        return Ok(window.clone());
     }
-    Err("A Claude window is open, but its message box is not ready yet.".to_string())
+    if windows.iter().any(is_chat_app) {
+        return Err("The Claude chat app is open, but its message box is not ready yet.".to_string());
+    }
+    // No chat app running. Rather than silently drive Claude Code — which
+    // looks similar and reads back wrong — say which program is missing.
+    if windows.is_empty() {
+        return Err("The Claude chat app is not open.".to_string());
+    }
+    Err("A window called Claude is open, but it is not the Claude chat app — \
+         open the Claude desktop app and try again."
+        .to_string())
 }
 
 fn codex_window(automation: &UIAutomation) -> Result<UIElement, String> {
@@ -124,21 +252,98 @@ fn codex_window(automation: &UIAutomation) -> Result<UIElement, String> {
     Err("A ChatGPT window is open, but it is not the Codex interface.".to_string())
 }
 
+fn antigravity_window(automation: &UIAutomation) -> Result<UIElement, String> {
+    let windows = automation
+        .create_matcher()
+        .control_type(ControlType::Window)
+        .filter_fn(Box::new(|element: &UIElement| {
+            Ok(element
+                .get_name()
+                .map(|name| name.starts_with("MaggotClaw Games - Antigravity IDE"))
+                .unwrap_or(false))
+        }))
+        .depth(3)
+        .timeout(0)
+        .find_all()
+        .map_err(|_| "The Antigravity IDE window is not open.".to_string())?;
+
+    if windows.is_empty() {
+        return Err("The Antigravity IDE window is not open.".to_string());
+    }
+
+    Ok(windows.into_iter().next().unwrap())
+}
+
+fn foreground_executable() -> Option<String> {
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+    use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows::Win32::Foundation::{CloseHandle, MAX_PATH};
+
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_invalid() { return None; }
+
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid == 0 { return None; }
+
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut buffer = [0u16; MAX_PATH as usize];
+        let mut length = buffer.len() as u32;
+        let ok = QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_FORMAT(0),
+            windows::core::PWSTR(buffer.as_mut_ptr()),
+            &mut length,
+        );
+        let _ = CloseHandle(process);
+        ok.ok()?;
+        Some(String::from_utf16_lossy(&buffer[..length as usize]))
+    }
+}
+
+fn current_window(automation: &UIAutomation) -> Result<(Target, UIElement), String> {
+    let exe = foreground_executable()
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default();
+
+    if exe.contains("claude") {
+        let window = claude_window(automation)?;
+        return Ok((Target::Claude, window));
+    }
+    if exe.contains("antigravity") {
+        let window = antigravity_window(automation)?;
+        return Ok((Target::Antigravity, window));
+    }
+    if exe.contains("chatgpt") || exe.contains("openai") {
+        let window = codex_window(automation)?;
+        return Ok((Target::Codex, window));
+    }
+
+    Err("The current window is not Claude, Antigravity IDE, or Codex.".to_string())
+}
+
 fn resolve_target(
     automation: &UIAutomation,
     requested: Option<&str>,
 ) -> Result<(Target, UIElement), String> {
+    log(&format!("resolve_target requested={:?}", requested));
     match requested {
         Some("claude") => claude_window(automation).map(|window| (Target::Claude, window)),
         Some("codex") => codex_window(automation).map(|window| (Target::Codex, window)),
+        Some("antigravity") => antigravity_window(automation).map(|window| (Target::Antigravity, window)),
+        Some("current") => current_window(automation),
         _ => {
             if let Ok(window) = claude_window(automation) {
                 return Ok((Target::Claude, window));
             }
+            if let Ok(window) = antigravity_window(automation) {
+                return Ok((Target::Antigravity, window));
+            }
             codex_window(automation)
                 .map(|window| (Target::Codex, window))
                 .map_err(|_| {
-                    "Neither the Claude desktop app nor the Codex window is open.".to_string()
+                    "Neither the Claude desktop app, Antigravity IDE, nor the Codex window is open.".to_string()
                 })
         }
     }
@@ -149,22 +354,54 @@ fn composer(
     target: Target,
     window: UIElement,
 ) -> Result<UIElement, String> {
-    let matcher = automation
-        .create_matcher()
-        .from(window)
-        .control_type(ControlType::Group)
-        .depth(40)
-        .timeout(0);
+    log(&format!("composer target={:?}", target.short_name()));
     let result = match target {
-        Target::Claude => matcher.match_name("Prompt").find_first(),
-        Target::Codex => matcher
+        Target::Claude => automation
+            .create_matcher()
+            .from(window.clone())
+            .control_type(ControlType::Group)
+            .match_name("Prompt")
+            .depth(40)
+            .timeout(0)
+            .find_first(),
+        Target::Codex => automation
+            .create_matcher()
+            .from(window.clone())
+            .control_type(ControlType::Group)
             .filter_fn(Box::new(|element: &UIElement| {
                 Ok(element
                     .get_classname()
                     .map(|name| name.split_whitespace().any(|part| part == "ProseMirror"))
                     .unwrap_or(false))
             }))
+            .depth(40)
+            .timeout(0)
             .find_first(),
+        Target::Antigravity => {
+            log("antigravity matcher: searching Edit control");
+            let r = automation
+                .create_matcher()
+                .from(window)
+                .control_type(ControlType::Edit)
+                .filter_fn(Box::new(|element: &UIElement| {
+                    Ok(element
+                        .get_classname()
+                        .map(|name| name == "prompt-input")
+                        .unwrap_or(false)
+                        || element
+                            .get_name()
+                            .map(|name| name.contains("Type a message..."))
+                            .unwrap_or(false))
+                }))
+                .depth(40)
+                .timeout(0)
+                .find_first();
+            if let Err(ref err) = r {
+                log(&format!("antigravity matcher failed: {:?}", err));
+            }
+            log(&format!("antigravity matcher result: {:?}", r.is_ok()));
+            r
+        }
     };
     result.map_err(|_| {
         format!(
@@ -185,37 +422,34 @@ fn matching_buttons(
     prefix_only: bool,
     exclude: &[&str],
 ) -> Vec<UIElement> {
-    automation
+    let found = automation
         .create_matcher()
         .from(window)
         .control_type(ControlType::Button)
         .depth(40)
         .timeout(0)
         .find_all()
-        .map(|buttons| {
-            buttons
-                .into_iter()
-                .filter(|button| {
-                    button
-                        .get_name()
-                        .map(|name| {
-                            let lower = name.to_ascii_lowercase();
-                            if exclude.iter().any(|word| lower.contains(word)) {
-                                return false;
-                            }
-                            names.iter().any(|candidate| {
-                                if prefix_only {
-                                    lower.starts_with(candidate)
-                                } else {
-                                    lower.contains(candidate)
-                                }
-                            })
-                        })
-                        .unwrap_or(false)
-                })
-                .collect()
+        .unwrap_or_default();
+    log(&format!("matching_buttons names={:?} prefix_only={} exclude={:?} found={}", names, prefix_only, exclude, found.len()));
+    found
+        .into_iter()
+        .filter(|button| {
+            let name = button.get_name().unwrap_or_default();
+            let lower = name.to_ascii_lowercase();
+            let excluded = exclude.iter().any(|word| lower.contains(word));
+            let matched = !excluded && names.iter().any(|candidate| {
+                if prefix_only {
+                    lower.starts_with(candidate)
+                } else {
+                    lower.contains(candidate)
+                }
+            });
+            if matched {
+                log(&format!("button matched name='{}'", name));
+            }
+            matched
         })
-        .unwrap_or_default()
+        .collect()
 }
 
 fn conversation_target_status_blocking(target: Option<String>) -> ConversationTargetStatus {
@@ -238,32 +472,49 @@ fn conversation_target_status_blocking(target: Option<String>) -> ConversationTa
             found: detail.contains(" is open"),
             ready: false,
             name: String::new(),
-            label: "Claude or Codex".to_string(),
+            label: "Claude, Codex, or Antigravity IDE".to_string(),
             detail,
         },
     }
 }
 
 fn insert_conversation_draft_blocking(draft: String, target: Option<String>) -> Result<(), String> {
+    log(&format!("insert_draft start len={}", draft.len()));
     let draft = draft.trim();
     if draft.is_empty() {
         return Err("Say or type something first.".to_string());
     }
     let automation = automation()?;
     let (target, window) = resolve_target(&automation, target.as_deref())?;
-    let composer = composer(&automation, target, window)?;
-    composer.send_keys("{ctrl}a", 0).map_err(|_| {
+    let composer = composer(&automation, target.clone(), window.clone())?;
+
+    composer.set_focus().map_err(|_| {
         format!(
-            "{}'s message box could not be selected.",
+            "The draft could not be focused in {}.",
             target.short_name()
         )
     })?;
-    composer.send_text_by_clipboard(draft).map_err(|_| {
-        format!(
-            "The draft could not be inserted into {}.",
-            target.short_name()
-        )
-    })
+    std::thread::sleep(std::time::Duration::from_millis(150));
+
+    let selected = composer.send_keys("{ctrl}a", 0).is_ok();
+    log(&format!("insert_draft select_all ok={}", selected));
+    std::thread::sleep(std::time::Duration::from_millis(80));
+
+    type_via_powershell(draft).map_err(|e| {
+        format!("The draft could not be typed into {}: {}", target.short_name(), e)
+    })?;
+
+    std::thread::sleep(std::time::Duration::from_millis(150));
+
+    if let Ok(value_pattern) = composer.get_pattern::<UIValuePattern>() {
+        let current = value_pattern.get_value().unwrap_or_default();
+        log(&format!("insert_draft value after powershell type='{}'", current));
+        if current.is_empty() {
+            log("insert_draft powershell type verification failed");
+        }
+    }
+
+    Ok(())
 }
 
 fn clear_conversation_draft_blocking(target: Option<String>) -> Result<(), String> {
@@ -279,21 +530,53 @@ fn clear_conversation_draft_blocking(target: Option<String>) -> Result<(), Strin
 }
 
 fn send_conversation_message_blocking(draft: String, target: Option<String>) -> Result<(), String> {
+    log("send_message start");
     insert_conversation_draft_blocking(draft, target.clone())?;
+    std::thread::sleep(std::time::Duration::from_millis(400));
     let automation = automation()?;
     let (target, window) = resolve_target(&automation, target.as_deref())?;
-    let composer = composer(&automation, target, window)?;
-    composer.send_keys("{enter}", 0).map_err(|_| {
+    let composer = composer(&automation, target.clone(), window.clone())?;
+    composer.set_focus().map_err(|_| {
         format!(
-            "The draft is in {}, but Windows could not press Send.",
+            "The draft is in {}, but Windows could not focus the input.",
             target.short_name()
         )
-    })
+    })?;
+    std::thread::sleep(std::time::Duration::from_millis(120));
+    match target {
+        Target::Antigravity => {
+            let send_buttons = matching_buttons(
+                &automation,
+                window,
+                &["send"],
+                false,
+                &[],
+            );
+            if let Some(button) = send_buttons.into_iter().next() {
+                log("antigravity send: clicking Send button");
+                button.get_pattern::<UIInvokePattern>()
+                    .and_then(|pattern| pattern.invoke())
+                    .map_err(|_| "The Send button could not be clicked.".to_string())
+            } else {
+                log("antigravity send: Send button not found, falling back to Enter");
+                composer.send_keys("{enter}", 0).map_err(|_| {
+                    "The draft is in Antigravity, but Windows could not press Send.".to_string()
+                })
+            }
+        }
+        _ => composer.send_keys("{enter}", 0).map_err(|_| {
+            format!(
+                "The draft is in {}, but Windows could not press Send.",
+                target.short_name()
+            )
+        }),
+    }
 }
 
 fn conversation_response_state_blocking(
     target: Option<String>,
 ) -> Result<ConversationResponseState, String> {
+    log(&format!("response_state target={:?}", target));
     let automation = automation()?;
     let (target, window) = resolve_target(&automation, target.as_deref())?;
     let busy = !matching_buttons(
@@ -330,6 +613,7 @@ fn conversation_is_foreground_blocking(target: Option<String>) -> Result<bool, S
 }
 
 fn copy_latest_conversation_response_blocking(target: Option<String>) -> Result<String, String> {
+    log(&format!("copy_response target={:?}", target));
     let automation = automation()?;
     let (target, window) = resolve_target(&automation, target.as_deref())?;
     let window_left = window
@@ -394,8 +678,109 @@ fn copy_latest_conversation_response_blocking(target: Option<String>) -> Result<
     }
 }
 
+/// The reply as it stands right now, mid-flight.
+///
+/// Measured against the real app rather than guessed at: while an answer
+/// arrives, the number of text elements climbs (46 to 102 across one reply)
+/// and then collapses once it finishes. Claude adds many small elements one
+/// after another — it does not grow a single one — so the reply is read by
+/// gathering every assistant-side element in order, not by watching one box
+/// get longer.
+///
+/// Only the newest run is returned. Everything above it is the rest of the
+/// conversation, which was read long ago.
+fn streaming_reply_blocking(target: Option<String>) -> Result<String, String> {
+    let automation = automation()?;
+    let (_, window) = resolve_target(&automation, target.as_deref())?;
+    let bounds = window
+        .get_bounding_rectangle()
+        .map_err(|_| "The window's position could not be read.".to_string())?;
+    let midpoint = bounds.get_left() + bounds.get_width() / 2;
+
+    let found = automation
+        .create_matcher()
+        .from(window)
+        .control_type(ControlType::Text)
+        .depth(40)
+        .timeout(0)
+        .find_all()
+        .unwrap_or_default();
+
+    // Reading order is top to bottom, then left to right — the order the eye
+    // takes them in, which is the order they were written in.
+    let mut pieces: Vec<(i32, i32, String)> = found
+        .iter()
+        .filter_map(|element| {
+            let name = element.get_name().ok()?;
+            let text = name.trim();
+            if text.is_empty() {
+                return None;
+            }
+            let rect = element.get_bounding_rectangle().ok()?;
+            // The author's own messages sit to the right. Reading those aloud
+            // as though they were the answer is the exact failure this guards.
+            if rect.get_left() >= midpoint {
+                return None;
+            }
+            Some((rect.get_top(), rect.get_left(), text.to_string()))
+        })
+        .collect();
+    pieces.sort_by_key(|(top, left, _)| (*top, *left));
+
+    Ok(pieces
+        .into_iter()
+        .map(|(_, _, text)| text)
+        .collect::<Vec<_>>()
+        .join(" "))
+}
+
+#[tauri::command]
+pub async fn streaming_reply(target: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || streaming_reply_blocking(target))
+        .await
+        .map_err(|_| background_error())?
+}
+
 fn background_error() -> String {
     "Windows accessibility stopped unexpectedly. Please try again.".to_string()
+}
+
+// Where the two reading checks are handed over. Deliberately beside the
+// project folders rather than inside one: this is a note about the program,
+// not about the book, and filing it under a project would put it in the
+// sync queue.
+fn reading_check_path() -> Result<std::path::PathBuf, String> {
+    let profile = std::env::var_os("USERPROFILE")
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| "Windows could not locate your user folder.".to_string())?;
+    Ok(profile
+        .join("Documents")
+        .join("MaggotClaw Games")
+        .join("Reading Check.txt"))
+}
+
+#[tauri::command]
+pub fn save_reading_check(first: String, second: String) -> Result<String, String> {
+    let path = reading_check_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|_| "That folder could not be created.".to_string())?;
+    }
+    let section = |label: &str, body: &str| {
+        if body.trim().is_empty() {
+            format!("== {label} ==\n(not taken)\n\n")
+        } else {
+            format!("== {label} ==\n{}\n\n", body.trim())
+        }
+    };
+    let text = format!(
+        "MaggotClaw Games — Reading Check\n\n{}{}",
+        section("First Look", &first),
+        section("Second Look", &second)
+    );
+    std::fs::write(&path, text)
+        .map_err(|_| "That file could not be written. Nothing was changed.".to_string())?;
+    Ok(path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -533,4 +918,198 @@ fn inspect_conversation_text_blocking(target: Option<String>) -> Result<String, 
         report.push('\n');
     }
     Ok(report)
+}
+
+fn debug_list_windows_blocking() -> Result<Vec<String>, String> {
+    let automation = automation()?;
+    let windows = automation
+        .create_matcher()
+        .control_type(ControlType::Window)
+        .depth(3)
+        .timeout(0)
+        .find_all()
+        .map_err(|_| "Could not enumerate windows.".to_string())?;
+
+    let mut lines = vec!["=== TOP-LEVEL WINDOWS ===".to_string()];
+    for window in windows.iter().take(80) {
+        let name = window.get_name().unwrap_or_default();
+        let class = window.get_classname().unwrap_or_default();
+        let exe = window_executable(window)
+            .map(|p| {
+                let lower = p.to_lowercase();
+                if let Some(idx) = lower.rfind('\\') {
+                    p[(idx + 1)..].to_string()
+                } else {
+                    p
+                }
+            })
+            .unwrap_or_default();
+        lines.push(format!("{name}\tclass={class}\texe={exe}"));
+    }
+    lines.push(format!("{} windows found", windows.len()));
+    Ok(lines)
+}
+
+fn debug_window_tree_blocking(partial_title: String) -> Result<Vec<String>, String> {
+    let automation = automation()?;
+    let lower_title = partial_title.to_lowercase();
+
+    let windows = automation
+        .create_matcher()
+        .control_type(ControlType::Window)
+        .depth(3)
+        .timeout(0)
+        .find_all()
+        .map_err(|_| "Could not enumerate windows.".to_string())?;
+
+    let target = windows.iter().find(|w| {
+        w.get_name()
+            .map(|n| n.to_lowercase().contains(&lower_title))
+            .unwrap_or(false)
+    }).ok_or_else(|| format!("No window found matching: {partial_title}"))?;
+
+    let mut lines = vec![
+        format!("=== WINDOW: {} ===", target.get_name().unwrap_or_default()),
+        format!("class: {}", target.get_classname().unwrap_or_default()),
+        format!("exe: {}", window_executable(target).unwrap_or_default()),
+        "".to_string(),
+    ];
+
+    fn walk(prefix: &str, element: &UIElement, lines: &mut Vec<String>, depth: usize) {
+        if depth > 5 { return; }
+        let name = element.get_name().unwrap_or_default();
+        let class = element.get_classname().unwrap_or_default();
+        let ctype = format!("{:?}", element.get_control_type().unwrap_or(ControlType::Text));
+        lines.push(format!("{prefix}{ctype} | {class} | {name}"));
+    }
+
+    walk("", target, &mut lines, 0);
+    Ok(lines)
+}
+
+fn debug_find_input_blocking(partial_title: String) -> Result<Vec<String>, String> {
+    let automation = automation()?;
+    let lower_title = partial_title.to_lowercase();
+
+    let windows = automation
+        .create_matcher()
+        .control_type(ControlType::Window)
+        .depth(3)
+        .timeout(0)
+        .find_all()
+        .map_err(|_| "Could not enumerate windows.".to_string())?;
+
+    let target = windows.iter().find(|w| {
+        w.get_name()
+            .map(|n| n.to_lowercase().contains(&lower_title))
+            .unwrap_or(false)
+    }).ok_or_else(|| format!("No window found matching: {partial_title}"))?;
+
+    let mut lines = vec![
+        format!("=== INPUT SEARCH: {} ===", target.get_name().unwrap_or_default()),
+        "".to_string(),
+    ];
+
+    for (label, control) in [
+        ("Edit", ControlType::Edit),
+        ("Document", ControlType::Document),
+        ("Group", ControlType::Group),
+        ("Custom", ControlType::Custom),
+    ] {
+        let found = automation
+            .create_matcher()
+            .from(target.clone())
+            .control_type(control)
+            .depth(40)
+            .timeout(0)
+            .find_all()
+            .unwrap_or_default();
+        lines.push(format!("{label}: {} found", found.len()));
+        for el in found.iter().take(10) {
+            let name = el.get_name().unwrap_or_default();
+            let class = el.get_classname().unwrap_or_default();
+            lines.push(format!("   name=\"{name}\" class={class}"));
+        }
+    }
+    Ok(lines)
+}
+
+fn debug_find_buttons_blocking(
+    partial_title: String,
+    name_contains: String,
+) -> Result<Vec<String>, String> {
+    let automation = automation()?;
+    let lower_title = partial_title.to_lowercase();
+    let lower_name = name_contains.to_lowercase();
+
+    let windows = automation
+        .create_matcher()
+        .control_type(ControlType::Window)
+        .depth(3)
+        .timeout(0)
+        .find_all()
+        .map_err(|_| "Could not enumerate windows.".to_string())?;
+
+    let target = windows.iter().find(|w| {
+        w.get_name()
+            .map(|n| n.to_lowercase().contains(&lower_title))
+            .unwrap_or(false)
+    }).ok_or_else(|| format!("No window found matching: {partial_title}"))?;
+
+    let mut lines = vec![
+        format!("=== BUTTON SEARCH: {} (containing \"{}\") ===", target.get_name().unwrap_or_default(), name_contains),
+        "".to_string(),
+    ];
+
+    let found = automation
+        .create_matcher()
+        .from(target.clone())
+        .control_type(ControlType::Button)
+        .depth(40)
+        .timeout(0)
+        .find_all()
+        .unwrap_or_default();
+
+    lines.push(format!("{} buttons found", found.len()));
+    for el in found.iter() {
+        let name = el.get_name().unwrap_or_default();
+        if name.to_lowercase().contains(&lower_name) {
+            let class = el.get_classname().unwrap_or_default();
+            let rect = el.get_bounding_rectangle().ok();
+            let pos = rect.map(|r| format!("x={} y={}", r.get_left(), r.get_top())).unwrap_or_default();
+            lines.push(format!("   MATCH name=\"{name}\" class={class} {pos}"));
+        }
+    }
+    Ok(lines)
+}
+
+#[tauri::command]
+pub async fn debug_list_windows() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(debug_list_windows_blocking)
+        .await
+        .map_err(|_| "Background task failed.".to_string())?
+}
+
+#[tauri::command]
+pub async fn debug_window_tree(partial_title: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || debug_window_tree_blocking(partial_title))
+        .await
+        .map_err(|_| "Background task failed.".to_string())?
+}
+
+#[tauri::command]
+pub async fn debug_find_input(partial_title: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || debug_find_input_blocking(partial_title))
+        .await
+        .map_err(|_| "Background task failed.".to_string())?
+}
+
+#[tauri::command]
+pub async fn debug_find_buttons(
+    partial_title: String,
+    name_contains: String,
+) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || debug_find_buttons_blocking(partial_title, name_contains))
+        .await
+        .map_err(|_| "Background task failed.".to_string())?
 }

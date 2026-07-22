@@ -39,7 +39,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .reader-note { color: var(--mc-muted, #9aa7a2); font-size: .9rem; }
 .text-button.inline { padding: 4px 10px; }
 .owner-dash-button { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; color: #00140e; background: var(--mc-green, #00efb1); border: 0; border-radius: 12px; font-weight: 800; cursor: pointer; }
-.pending-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 6px; color: #fff; background: #d7443f; border-radius: 999px; font-size: .78rem; font-weight: 800; }
+/* The count is a separate thing from the name, so it stands off it rather
+   than butting straight up against the last letter. */
+.pending-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; margin-left: 9px; padding: 0 6px; color: #fff; background: #d7443f; border-radius: 999px; font-size: .78rem; font-weight: 800; }
 .dashboard-shell { display: flex; flex-direction: column; gap: 18px; }
 /* ---- Messages ---- */
 .banner-block { position: relative; display: inline-block; }
@@ -171,9 +173,11 @@ html:has(.okgo-shell), body:has(.okgo-shell), body:has(.okgo-shell) #root { widt
 .read-mode-toggle { display: flex; gap: 6px; justify-content: center; margin: 8px 0 14px; }
 .read-mode-toggle button { padding: 8px 18px; color: var(--mc-white, #f2f6f4); background: #111a18; border: 1px solid #2c8d75; border-radius: 999px; cursor: pointer; font-weight: 600; }
 .read-mode-toggle button.active { color: #00140e; background: var(--mc-green, #00efb1); border-color: var(--mc-green, #00efb1); }
-.reading-card.self-read { display: block; max-height: 62vh; overflow-y: auto; gap: 0; }
-.reading-card.self-read p { margin: 0 0 .85em; text-indent: 1.4em; }
-.reading-card.self-read p:first-child { text-indent: 0; }
+/* The app's own reading layout — deliberately kept off any view that shows a
+   real document, where the author's spacing and indents are the point. */
+.reading-card.self-read:not(.word-faithful):not(.page-exact-card) { display: block; max-height: 62vh; overflow-y: auto; gap: 0; }
+.reading-card.self-read:not(.word-faithful):not(.page-exact-card) p { margin: 0 0 .85em; text-indent: 1.4em; }
+.reading-card.self-read:not(.word-faithful):not(.page-exact-card) p:first-child { text-indent: 0; }
 .reading-card.self-read.word-styled { text-align: left; }
 .reading-card.self-read.word-styled h1, .reading-card.self-read.word-styled h2 { font-family: Georgia, serif; }
 .reading-card.self-read.word-styled img { max-width: 100%; }
@@ -203,6 +207,10 @@ html:has(.okgo-shell), body:has(.okgo-shell), body:has(.okgo-shell) #root { widt
 .request-card .request-actions { padding-right: 22px; }
 .profile-chip { padding: 10px 15px; color: #17100a; background: #d5a85f; border: 0; border-radius: 999px; font-weight: 800; }
 .hero { min-height: 220px; border-bottom: 1px solid #4a3d30; }
+/* On the hub the banner is the only thing in the hero, so centre it rather
+   than leaving it pushed against the left edge by space-between. */
+.home-shell .hero { justify-content: center; }
+.home-shell .banner-block { display: flex; align-items: center; justify-content: center; }
 .hero h1, .reader-heading h1, .settings-panel h1 { margin: 3px 0 10px; font: 800 clamp(2.7rem, 8vw, 5.5rem)/.95 Bahnschrift, "Arial Black", sans-serif; letter-spacing: -.045em; }
 .hero p, .library-heading p, .settings-panel p { color: #bdb2a4; }
 .eyebrow { color: #d5a85f; font-weight: 800; letter-spacing: .14em; font-size: .8rem; text-transform: capitalize; }
@@ -238,7 +246,7 @@ html:has(.okgo-shell), body:has(.okgo-shell), body:has(.okgo-shell) #root { widt
 .progress-track span { display: block; height: 100%; background: #cf9a4c; transition: width .2s; }
 .progress-label { color: #a79b8e; font-size: .85rem; }
 .reading-card { min-height: 300px; display: flex; flex-direction: column; justify-content: center; gap: 22px; padding: 36px clamp(25px, 7vw, 80px); background: #f0e4cf; color: #29221b; border-radius: 22px; box-shadow: 0 20px 60px #0007; }
-.reading-card p { margin: 0; font: 1rem/1.7 Georgia, "Times New Roman", serif; text-align: justify; hyphens: auto; }
+.reading-card:not(.word-faithful):not(.page-exact-card) p { margin: 0; font: 1rem/1.7 Georgia, "Times New Roman", serif; text-align: justify; hyphens: auto; }
 .reading-card .context { color: #8d8173; }
 .reading-card .current-sentence { padding: 3px 8px; margin: 0 -8px; background: #e6cd97; border-left: 3px solid #7c501d; border-radius: 4px; font-size: 1rem; }
 .primary-controls { display: grid; grid-template-columns: 1fr 1.25fr 1.25fr; gap: 14px; margin-top: 24px; }
@@ -343,19 +351,54 @@ kbd { padding: 2px 7px; color: #2b241d; background: #fffaf0; border: 1px solid #
 .stable-controls .add-time-button { color: #24160b; background: #e1b45e; border-color: #9d6c2c; }
 .stable-controls .cancel-control { color: #fff5ef; background: #71362e; border-color: #9b5147; }
 .stable-controls button:disabled { cursor: not-allowed; filter: grayscale(.75); opacity: .35; }
-.voice-floater { width: calc(100vw - 12px); height: calc(100vh - 12px); display: grid; grid-template-columns: 34px 26px 38px 46px repeat(5, 26px) 34px; align-items: center; justify-content: space-between; gap: 6px; margin: 6px; padding: 18px; overflow: hidden; color: #f5eee2; background: linear-gradient(180deg, #211f1fee, #111214f5); border: 1px solid #52565d; border-radius: 44px; box-shadow: inset 0 1px #ffffff18, 0 3px 8px #0008; cursor: move; user-select: none; -webkit-user-select: none; }
+/* The bar's size is arithmetic, not taste, and it is written down here so the
+   three places that must agree cannot drift apart again.
+
+     controls        34 + 26 + 40 + 50 + 26 + 26 + 26 + 26 + 34 = 288
+     eight gaps      8 x 10                                     =  80
+     padding         12 on every side                           =  24
+                                                          bar  = 392 x 58
+     margin          6 all round                        window = 404 x 70
+
+   In its own window the bar also carries a Close, which is the only way to
+   shut a frameless window, so that mode is one 26px control and one 10px gap
+   wider: bar 428 x 58, window 440 x 70.
+
+   One padding value on all four sides is the whole point: the mic sits the
+   same distance from the left curve as from the top and bottom. Previous
+   attempts grew the height and left the width alone, which pushed everything
+   down instead of making room, and the last controls fell off the end —
+   there were ten columns declared for nine buttons. */
+.voice-floater { width: calc(100% - 12px); height: calc(100% - 12px); display: grid; grid-template-columns: 34px 26px 40px 50px 26px 26px 26px 26px 34px; align-items: center; justify-content: center; gap: 10px; margin: 6px; padding: 12px; overflow: hidden; color: #f5eee2; background: linear-gradient(180deg, #211f1fee, #111214f5); border: 1px solid #52565d; border-radius: 44px; box-shadow: inset 0 1px #ffffff18, 0 3px 8px #0008; cursor: move; user-select: none; -webkit-user-select: none; }
 .voice-floater button { width: 22px; height: 22px; align-self: center; justify-self: center; padding: 0; color: #f7f8fb; background: linear-gradient(180deg, #292b2f, #17181b); border: 1px solid #4c4f55; border-radius: 50%; box-shadow: inset 0 1px #ffffff18, 0 2px 4px #0008; font: 700 10px/1 Arial, sans-serif; cursor: pointer; }
 .voice-floater button:disabled { opacity: .22; }
 .voice-floater .main-mic, .voice-floater .close-control { position: relative; width: 34px; height: 34px; color: #fff; background: radial-gradient(circle, #25272c 45%, #14151a 70%); border: 2px solid #318cff; box-shadow: 0 0 0 2px #763bff66, 0 0 9px #287cff99; font-size: 0; }
 .voice-floater .main-mic::before { content: ""; position: absolute; left: 11px; top: 7px; width: 8px; height: 12px; background: #fff; border-radius: 6px; }
 .voice-floater .main-mic::after { content: ""; position: absolute; left: 8px; top: 12px; width: 14px; height: 11px; border: 2px solid #fff; border-top: 0; border-radius: 0 0 9px 9px; box-shadow: 0 5px 0 -2px #fff; }
 .voice-floater.is-listening .main-mic { animation: mic-pulse .72s ease-in-out infinite alternate; }
-.voice-floater .stop-control { color: #fff; }
-/* Companion adds a Close (✕) column; widen end padding so it clears the oval. */
-/* Tight fit: the mic hugs the left curve and the Close (✕) sits right at the
-   rounded right end. The window is sized to exactly this content (see
-   openCompanionWindow and applyCompact — all three must agree). */
-.voice-floater.companion { grid-template-columns: 38px 26px 40px 52px repeat(6, 26px); justify-content: flex-start; gap: 6px; padding-left: 8px; padding-right: 12px; }
+/* Stop closes the row and matches the mic that opens it — same size, same
+   weight, red where the mic is blue, so the two ends of the bar read as a
+   pair. The lining is inside the button, not a glow around it. */
+.voice-floater .stop-control { position: relative; width: 34px; height: 34px; color: #fff; background: radial-gradient(circle, #2c2124 45%, #1a1416 70%); border: 2px solid #ff4d4d; box-shadow: inset 0 0 0 2px #ff4d4d66, 0 0 9px #ff4d4d66; font-size: 13px; }
+.voice-floater .stop-control:not(:disabled):hover { box-shadow: inset 0 0 0 2px #ff6b6b99, 0 0 13px #ff4d4daa; }
+
+/* Its own window adds the Close control before Stop, so ten columns rather
+   than nine. openCompanionWindow and applyCompact carry the matching
+   652 x 92 — change one and you must change all three. */
+.voice-floater.companion { grid-template-columns: 34px 26px 40px 50px 26px 26px 26px 26px 26px 34px; padding-top: 6px; padding-bottom: 18px; }
+
+/* "Role" was jammed against its own selector. A label and its control are two
+   things, not one word. */
+.request-actions label { display: flex; align-items: center; gap: 10px; }
+
+/* A chapter and the file readers open for it, decided in one place. */
+.release-rows { display: flex; flex-direction: column; gap: 7px; }
+.release-row { display: grid; grid-template-columns: 74px 1fr; gap: 10px; align-items: center; }
+.release-pick { padding: 7px 10px; color: var(--mc-white, #f5eee2); background: #0b1210; border: 1px solid var(--mc-border, #24352f); border-radius: 9px; font-size: .82rem; }
+.release-pick:focus { outline: none; border-color: var(--mc-green, #00efb1); }
+
+/* Screen tools sit under the header line, never in it. */
+.chat-tools { display: flex; justify-content: flex-end; gap: 8px; margin: -4px 0 2px; }
 
 /* ---- Project Explorer ---- */
 .explorer-shell { display: flex; flex-direction: column; height: 100vh; gap: 14px; padding: 18px 22px; }
@@ -369,7 +412,9 @@ kbd { padding: 2px 7px; color: #2b241d; background: #fffaf0; border: 1px solid #
 .group-toggle button.active { color: #00140e; background: var(--mc-green); border-color: var(--mc-green); font-weight: 700; }
 .explorer-error { color: #ffb4b4; }
 .explorer-body { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 16px; flex: 1; min-height: 0; }
-.explorer-list { overflow-y: auto; padding-right: 6px; display: flex; flex-direction: column; gap: 14px; }
+/* The scrollbar sits against the edge, not an inch inside it — the old
+   padding bought nothing and cost a strip of width down the whole list. */
+.explorer-list { overflow-y: auto; padding-right: 2px; display: flex; flex-direction: column; gap: 14px; }
 .list-filter { padding: 8px 12px; color: var(--mc-white); background: #0b1210; border: 1px solid #24352f; border-radius: 10px; }
 .explorer-group h3 { display: flex; align-items: center; gap: 8px; margin: 6px 0; color: var(--mc-green-soft); font: 700 .95rem Georgia, serif; text-transform: uppercase; letter-spacing: .05em; }
 .explorer-group h3 span { color: var(--mc-muted); font: 400 .8rem system-ui; }
@@ -416,11 +461,24 @@ kbd { padding: 2px 7px; color: #2b241d; background: #fffaf0; border: 1px solid #
 .explorer-tabs > button { padding: 8px 18px; color: var(--mc-white); background: #111a18; border: 1px solid #2c8d75; border-radius: 10px 10px 0 0; cursor: pointer; font-weight: 600; }
 .explorer-tabs > button.active { color: #00140e; background: var(--mc-green); border-color: var(--mc-green); }
 .explorer-tabs .ask-anything { margin-left: auto; flex: 0 1 460px; }
+/* The count reads better beside the tabs than up in the page title, where it
+   was competing with the screen name for the same glance. */
+.file-count { padding-left: 14px; color: var(--mc-green-soft, #7fd9c4); font-size: .86rem; white-space: nowrap; }
 .board-hint { color: var(--mc-muted); font-size: .85rem; margin: 4px 0 12px; }
 .status-board { display: flex; flex-direction: column; gap: 8px; }
 .status-row { display: grid; grid-template-columns: 120px 1fr; gap: 10px; align-items: center; padding: 8px; background: #0d1614; border: 1px solid #1e2c28; border-radius: 10px; }
 .status-name strong { display: block; color: var(--mc-white); } .status-name small { color: var(--mc-muted); font-size: .78rem; }
-.status-cells { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+/* Segments carries real content — one box per part — so it gets the room the
+   other three do not need. */
+.status-cells { display: grid; grid-template-columns: 1fr 1fr 2.2fr 1fr; gap: 6px; }
+.status-cell.segments { display: flex; flex-direction: column; gap: 4px; padding: 5px 6px; background: #0a100e; border: 1px solid #22302b; }
+.segments-label { color: var(--mc-green-soft, #7fd9c4); font-size: .64rem; font-weight: 700; }
+.segment-chips { display: flex; flex-wrap: wrap; gap: 3px; justify-content: center; }
+/* The chips carry the shrinking, not the row: a chapter with twenty segments
+   is the same height as one with two. */
+.segment-chip { min-width: 20px; padding: 2px 5px; color: #00140e; background: var(--mc-green, #00efb1); border: 0; border-radius: 4px; font: 700 .66rem system-ui; cursor: pointer; }
+.status-cell.segments.many .segment-chip { min-width: 16px; padding: 1px 3px; font-size: .58rem; }
+.segment-chip:hover { box-shadow: 0 0 8px #00efb1aa; }
 .status-cell { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 6px 4px; border-radius: 8px; font: 700 .72rem system-ui; text-align: center; border: 1px solid transparent; }
 .status-cell em { font-style: normal; font-weight: 400; font-size: .68rem; opacity: .85; }
 .status-cell span { font-weight: 400; font-size: .66rem; opacity: .7; }
@@ -466,7 +524,18 @@ kbd { padding: 2px 7px; color: #2b241d; background: #fffaf0; border: 1px solid #
 @keyframes mic-pulse { from { transform: scale(.94); box-shadow: 0 0 0 1px #763bff55, 0 0 8px #287cff66; } to { transform: scale(1.04); box-shadow: 0 0 0 3px #763bff77, 0 0 18px #287cffbb; } }
 @keyframes wave-talk { from { transform: scaleY(.45); } to { transform: scaleY(1.18); } }
 .test-mode-banner { margin: 20px 0; padding: 13px; color: #2d1d0d; background: #e4b35f; border: 2px solid #7e5425; border-radius: 10px; text-align: center; font-weight: 900; }
-.mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 48px 0; }
+.mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 20px 0 48px; }
+
+/* Projects, promoted out of the grid: the working side of the program, and the
+   thing reached for most, so it is the first thing under the toolbar. */
+/* Shape of a bar, colour of a card: it earns its place by being first and
+   full width, not by shouting in a different colour. */
+.projects-bar { display: grid; grid-template-columns: 56px 1fr auto; align-items: center; gap: 18px; width: 100%; margin-top: 28px; padding: 18px 24px; color: var(--mc-white, #f5eee2); background: linear-gradient(145deg, #111a18, #070b0a); border: 1px solid #2c8d75; border-radius: 20px; box-shadow: 0 14px 34px #0008, inset 0 1px #ffffff08; text-align: left; cursor: pointer; }
+.projects-bar:hover { border-color: var(--mc-green); box-shadow: 0 16px 42px #000a, 0 0 24px #00efb119; transform: translateY(-2px); }
+.projects-bar .mode-icon { width: 56px; height: 56px; }
+.projects-bar strong { display: block; font: 700 1.35rem Georgia, serif; }
+.projects-bar small { display: block; margin-top: 4px; color: var(--mc-muted, #9aa7a2); font-size: .9rem; line-height: 1.5; }
+.projects-bar > span:last-child { color: var(--mc-green, #00efb1); font-size: 1.4rem; font-weight: 800; }
 .mode-card { min-height: 190px; display: grid; grid-template-columns: 68px 1fr auto; align-items: center; gap: 18px; padding: 25px; color: #f7f1e7; background: linear-gradient(135deg, #2a231c, #1c1814); border: 1px solid #5b4938; border-radius: 20px; text-align: left; }
 .mode-card.voice-mode { background: linear-gradient(135deg, #70372f, #3d201c); border-color: #a65b50; }
 .mode-card strong, .mode-card small { display: block; }
@@ -680,7 +749,9 @@ select option { background: #0b1210; color: var(--mc-white); }
 .file-window .file-text { white-space: pre-wrap; word-break: break-word; color: #e7ece9; font: .95rem/1.6 Georgia, serif; margin: 10px 0 0; }
 .file-window .doc-word { margin-top: 10px; }
 .explorer-body { grid-template-columns: 1fr; }
-.explorer-list { max-width: 900px; }
+/* Was capped at 900px inside a 1040px shell, which left a dead margin down
+   the right of every list and pushed the scrollbar in off the edge. */
+.explorer-list { max-width: 100%; }
 
 
 /* ---- final trim ---- */
@@ -742,6 +813,22 @@ button.danger:disabled { opacity: .45; cursor: default; filter: none; }
 .file-size { flex: 0 0 auto; width: 62px; text-align: right; color: var(--mc-muted); font-size: .74rem; }
 .file-access { flex: 0 0 auto; max-width: 190px; padding: 3px 8px; color: var(--mc-white); background: #0e1715; border: 1px solid var(--mc-border); border-radius: 8px; font-size: .78rem; }
 .file-access-flat { flex: 0 0 auto; color: var(--mc-muted); font-size: .78rem; }
+
+/* Who downloads each file, as blocks rather than a dropdown. One block per
+   role, lit for everyone who gets the file: a chapter everybody reads is a
+   full row, an owner-only note is a single block. Scannable down a list of
+   two hundred, which a row of closed menus never was. */
+.access-ladder { flex: 0 0 auto; display: flex; gap: 3px; }
+.access-block { width: 17px; height: 17px; padding: 0; background: #0a100e; border: 1px solid #22302b; border-radius: 4px; cursor: pointer; }
+.access-block.on { background: var(--mc-green, #00efb1); border-color: var(--mc-green, #00efb1); }
+.access-block:hover { border-color: var(--mc-green, #00efb1); }
+/* Excluded is its own answer, not the bottom of the scale — nobody downloads
+   it at all, so it is warned about in a different colour entirely. */
+.access-block.none { color: #6b7a75; font: 700 .6rem system-ui; line-height: 1; }
+.access-block.none.on { color: #17100a; background: #c3893e; border-color: #dfa651; }
+.access-ladder.excluded .access-block:not(.none) { background: #1a1410; border-color: #3a2f22; }
+.access-said { flex: 0 0 auto; min-width: 118px; color: var(--mc-green-soft, #7fd9c4); font-size: .74rem; }
+@media (max-width: 860px) { .access-said { display: none; } }
 .file-pick { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; color: var(--mc-green-soft); font-size: .76rem; font-weight: 700; white-space: nowrap; cursor: pointer; }
 .log-toggle { flex: 0 0 auto; padding: 2px 8px; color: var(--mc-muted); background: transparent; border: 1px solid #24352f; border-radius: 999px; font-size: .72rem; }
 .log-toggle:hover { color: var(--mc-green-soft); border-color: var(--mc-green); }
@@ -773,6 +860,18 @@ button.danger:disabled { opacity: .45; cursor: default; filter: none; }
 .word-page { overflow-x: auto; }
 .word-page .docx-wrapper { padding: 0; background: transparent; }
 .word-page .docx-wrapper > section.docx { margin: 0 auto 16px; box-shadow: 0 6px 24px #0009; }
+
+/* Pages made by Word itself. The card contributes nothing but space: no
+   letterbox, no imposed font, no forced indent — every one of those was
+   overriding the author's own layout and making a styled chapter arrive
+   looking like plain app text. */
+.reading-card.page-exact-card { display: block; max-height: none; min-height: 0; padding: 0; background: transparent; box-shadow: none; }
+.page-exact { display: flex; flex-direction: column; align-items: center; gap: 18px; width: 100%; }
+.page-sheet { position: relative; flex: none; background: #fff; box-shadow: 0 6px 24px #0009; }
+.page-sheet canvas { display: block; }
+/* The line the voice is on. Translucent so the words stay readable through
+   it, and never on top of them. */
+.page-mark { position: absolute; background: #f2c94c66; border-radius: 2px; pointer-events: none; }
 
 /* The full guide library in Directions: every walkthrough, done or not. */
 .guide-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
@@ -830,11 +929,14 @@ button.who-chip:hover { color: var(--mc-green-soft); }
    the writing outgrows the box, and wears the app's colours rather than the
    system's bright white. */
 textarea.grows { resize: vertical; min-height: 84px; overflow: auto; }
-.app-shell textarea, .app-shell pre, .app-shell .comments-list, .app-shell .change-log { scrollbar-width: thin; scrollbar-color: #2c4b41 transparent; }
-.app-shell textarea::-webkit-scrollbar, .app-shell pre::-webkit-scrollbar { width: 10px; height: 10px; }
-.app-shell textarea::-webkit-scrollbar-track, .app-shell pre::-webkit-scrollbar-track { background: transparent; }
-.app-shell textarea::-webkit-scrollbar-thumb, .app-shell pre::-webkit-scrollbar-thumb { background: #2c4b41; border: 2px solid transparent; background-clip: content-box; border-radius: 999px; }
-.app-shell textarea::-webkit-scrollbar-thumb:hover, .app-shell pre::-webkit-scrollbar-thumb:hover { background: var(--mc-green); background-clip: content-box; }
+/* Every scrolling area, not just the boxes that had it. A bright white
+   default scrollbar down the side of a dark green screen is the loudest thing
+   on the page, and it was appearing on the file lists. */
+.app-shell, .app-shell * { scrollbar-width: thin; scrollbar-color: #2c4b41 transparent; }
+.app-shell ::-webkit-scrollbar, .app-shell::-webkit-scrollbar { width: 10px; height: 10px; }
+.app-shell ::-webkit-scrollbar-track, .app-shell::-webkit-scrollbar-track { background: transparent; }
+.app-shell ::-webkit-scrollbar-thumb, .app-shell::-webkit-scrollbar-thumb { background: #2c4b41; border: 2px solid transparent; background-clip: content-box; border-radius: 999px; }
+.app-shell ::-webkit-scrollbar-thumb:hover, .app-shell::-webkit-scrollbar-thumb:hover { background: var(--mc-green); background-clip: content-box; }
 
 /* A small mark on each action, drawn rather than lettered so it reads at a
    glance and never changes with the language. */

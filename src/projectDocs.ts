@@ -14,7 +14,7 @@ export interface ParsedDoc {
   fileName: string;
   folder: string;
   chapter: number | null;
-  typeCode: "A" | "B" | "P" | "R" | "codex" | "master" | "other";
+  typeCode: "B" | "D" | "P" | "R" | "codex" | "master" | "other";
   typeLabel: string;
   title: string;
   version: string | null;
@@ -26,16 +26,38 @@ export function parseDoc(doc: ProjectDocument): ParsedDoc {
   const parts = doc.localRelativePath.split(/[\\/]/);
   const fileName = parts[parts.length - 1];
   const folder = parts.length > 1 ? parts[0] : "Main folder";
-  const versionMatch = fileName.match(/v(\d+(?:\.\d+)*)\.(?:txt|docx)$/i);
+  const versionMatch = fileName.match(/v(\d+(?:\.\d+)*)\.(?:txt|docx|pdf)$/i);
   const version = versionMatch ? versionMatch[1] : null;
 
+  // Two naming conventions live here at once, and both must parse.
+  //
+  // The older one repeated the chapter number in words — "C01-A Chapter 01
+  // Blueprint" — which said the same thing twice, so the newer one drops it.
+  // Development also became Chapter Draft, Draft became Draft Segment, and the
+  // letters were rearranged to match the words: Blueprint moved from A to B,
+  // and B — which used to mean Development — now means Blueprint.
+  //
+  // That last swap is why the letter cannot be trusted to say what a file is:
+  // "C01-B" means Development on an old name and Blueprint on a new one. The
+  // label always says plainly which it is, so the label decides and the letter
+  // is only read for a draft segment's number. Old names are still parsed,
+  // because one file missed in a rename must not fall out of its chapter and
+  // off the shelf in silence.
+  //
+  // Order matters in the labels: "Chapter Draft" and "Draft Segment" both
+  // contain "Draft", so the longer names have to be tried first.
   const chap = fileName.match(
-    /^C(\d+)-(A|B|R|P\d+)\s+Chapter\s+\d+\s+(Blueprint|Development|Draft|Reader Copy)(?:\s*-\s*(.+?))?\s*v[\d.]+\.(?:txt|docx)$/i
+    /^C(\d+)-(A|B|D|R|P\d+)\s+(?:Chapter\s+\d+\s+)?(Blueprint|Development|Chapter Draft|Draft Segment|Reader Copy|Draft)(?:\s*-\s*(.+?))?\s*v[\d.]+\.(?:txt|docx|pdf)$/i
   );
   if (chap) {
-    const raw = chap[2].toUpperCase();
-    const typeCode = (raw.startsWith("P") ? "P" : raw) as ParsedDoc["typeCode"];
-    const draftPart = raw.startsWith("P") ? parseInt(raw.slice(1), 10) : null;
+    const letter = chap[2].toUpperCase();
+    const label = chap[3].toLowerCase();
+    const typeCode: ParsedDoc["typeCode"] =
+      label === "blueprint" ? "B"
+      : label === "reader copy" ? "R"
+      : label === "development" || label === "chapter draft" ? "D"
+      : "P";
+    const draftPart = typeCode === "P" && letter.startsWith("P") ? parseInt(letter.slice(1), 10) : null;
     const chapterNum = parseInt(chap[1], 10);
     return {
       doc, fileName, folder, chapter: chapterNum, typeCode,

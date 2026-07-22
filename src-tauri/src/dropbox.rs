@@ -221,6 +221,40 @@ pub async fn dropbox_write_text(
     Ok(())
 }
 
+/// Uploads a file from the local workspace as-is: the same endpoint as
+/// `dropbox_write_text`, with bytes off disk instead of a string. This is what
+/// puts a page-exact PDF beside its chapter. The bridge has no binary tool, so
+/// this needs the direct Dropbox connection.
+#[tauri::command]
+pub async fn dropbox_write_binary(
+    creds: DropboxCreds,
+    path: String,
+    local_path: String,
+) -> Result<(), String> {
+    let bytes = std::fs::read(&local_path)
+        .map_err(|_| "That file could not be read from this computer.".to_string())?;
+    let token = access_token(&creds).await?;
+    let arg = serde_json::json!({ "path": path, "mode": "overwrite", "autorename": false, "mute": true })
+        .to_string();
+    let response = reqwest::Client::new()
+        .post("https://content.dropboxapi.com/2/files/upload")
+        .bearer_auth(token)
+        .header("Dropbox-API-Arg", arg)
+        .header("content-type", "application/octet-stream")
+        .body(bytes)
+        // Page-exact copies are far larger than a codex, so this waits longer
+        // than the text upload does.
+        .timeout(Duration::from_secs(300))
+        .send()
+        .await
+        .map_err(|_| "Dropbox could not be reached. Nothing was uploaded.".to_string())?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(friendly(status.as_u16()));
+    }
+    Ok(())
+}
+
 /// Moves or renames a file or folder on Dropbox. Used to tidy the project
 /// layout; Dropbox keeps its own history, so this is reversible.
 #[tauri::command]

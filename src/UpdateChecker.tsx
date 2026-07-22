@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { checkForUpdates, downloadShareLink, getUpdateRepo, openDownload, type UpdateResult } from "./updates";
 
 // Small, self-contained "Check for updates" control. Shows the current version,
-// checks the configured GitHub release feed, and offers the download when a
-// newer build exists. Used in the hub header and in Settings.
+// checks the author's published update file (Dropbox by default, GitHub only if
+// a repository is set), and offers the download when a newer build exists.
+// Used in the hub header and in Settings.
 export function UpdateChecker({ configurable = false }: { configurable?: boolean }) {
   const [version, setVersion] = useState("");
   const [busy, setBusy] = useState(false);
@@ -11,6 +12,16 @@ export function UpdateChecker({ configurable = false }: { configurable?: boolean
   const repo = getUpdateRepo();
   const [copied, setCopied] = useState(false);
   const [installing, setInstalling] = useState(false);
+
+  // The address to hand to another person. A GitHub repository, when one is
+  // set, still gives a stable /releases/latest page; otherwise it is the
+  // installer named in the author's own update file, which is why a check runs
+  // by itself on the Settings screen — the share buttons need an answer before
+  // anyone presses anything.
+  const shared = downloadShareLink(repo)
+    ?? (result?.state === "available" ? result.info.url
+      : result?.state === "current" ? result.downloadUrl ?? null
+      : null);
 
   useEffect(() => {
     let alive = true;
@@ -27,6 +38,12 @@ export function UpdateChecker({ configurable = false }: { configurable?: boolean
     })();
     return () => { alive = false; };
   }, []);
+
+  useEffect(() => {
+    if (configurable && version && !result && !busy) void check();
+    // Once, as soon as the version is known.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configurable, version]);
 
   async function check() {
     setBusy(true);
@@ -77,20 +94,20 @@ export function UpdateChecker({ configurable = false }: { configurable?: boolean
       {result.info.notes && <p className="update-notes">{result.info.notes.slice(0, 400)}</p>}
     </div>}
 
-    {configurable && downloadShareLink(repo) && <div className="share-link">
+    {configurable && shared && <div className="share-link">
       <span className="share-label">Shareable download link — send this to anyone:</span>
-      <code className="share-url">{downloadShareLink(repo)}</code>
+      <code className="share-url">{shared}</code>
       <div className="share-actions">
-        <button className="primary tiny" onClick={() => void copyShareLink(downloadShareLink(repo)!)}>{copied ? "Copied ✓" : "Copy link"}</button>
-        <button className="text-button" onClick={() => void openDownload(downloadShareLink(repo)!)}>Open</button>
+        <button className="primary tiny" onClick={() => void copyShareLink(shared)}>{copied ? "Copied ✓" : "Copy link"}</button>
+        <button className="text-button" onClick={() => void openDownload(shared)}>Open</button>
         <button className="primary tiny" onClick={() => {
-          const link = downloadShareLink(repo)!;
+          const link = shared;
           void import("@tauri-apps/api/core").then(({ invoke }) =>
             invoke("open_url", { url: "mailto:?subject=" + encodeURIComponent("MaggotClaw Games") + "&body=" + encodeURIComponent("Download MaggotClaw Games here: " + link) })
           );
         }}>Email</button>
         <button className="primary tiny" onClick={() => {
-          const link = downloadShareLink(repo)!;
+          const link = shared;
           const number = window.prompt("Their phone number (leave blank to just open your messaging app):") ?? "";
           const clean = number.replace(/[^\d+]/g, "");
           void import("@tauri-apps/api/core").then(({ invoke }) =>
@@ -98,7 +115,7 @@ export function UpdateChecker({ configurable = false }: { configurable?: boolean
           ).catch(() => void copyShareLink(link));
         }}>Text</button>
         <button className="primary tiny" onClick={() => {
-          void copyShareLink(downloadShareLink(repo)!);
+          void copyShareLink(shared);
           void import("@tauri-apps/api/webviewWindow").then(async ({ WebviewWindow }) => {
             const existing = await WebviewWindow.getByLabel("discord");
             if (existing) { await existing.show(); await existing.setFocus(); return; }

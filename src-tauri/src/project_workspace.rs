@@ -708,6 +708,102 @@ pub fn read_project_document_bytes(local_relative_path: String) -> Result<Vec<u8
         .map_err(|_| "That project file could not be read from the local workspace.".to_string())
 }
 
+// ----- Page-exact copies ----------------------------------------------------
+//
+// A chapter written in Word carries things no HTML renderer will reproduce:
+// filled header blocks, text boxes, WordArt, 3D lettering. docx-preview draws
+// none of them, so a styled chapter arrived stripped however the CSS was
+// tuned. The only thing that renders a Word file exactly like Word is Word,
+// so it makes the picture: the chapter goes out as a PDF beside the original
+// and readers see the page the author actually built.
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// The page-exact companion to a chapter: same folder, same name, .pdf.
+fn pdf_beside(path: &Path) -> PathBuf {
+    path.with_extension("pdf")
+}
+
+/// Hands a Word document to Word itself and asks for a PDF back.
+///
+/// Word is driven invisibly and never told to quit while the author still has
+/// documents of his own open — a bare Quit() closes the whole session, unsaved
+/// chapters with it. We close only the document we opened.
+#[tauri::command]
+pub fn convert_document_to_pdf(local_relative_path: String) -> Result<String, String> {
+    let root = workspace_root()?;
+    let relative = checked_relative(&local_relative_path)?;
+    let source = root.join("01 Originals").join(&relative);
+    if !source.is_file() {
+        return Err("That chapter is not in the local workspace yet.".to_string());
+    }
+    let target = pdf_beside(&source);
+
+    let script = r#"
+$ErrorActionPreference = 'Stop'
+$src = $env:MCG_PDF_SOURCE
+$out = $env:MCG_PDF_TARGET
+try { $word = New-Object -ComObject Word.Application } catch {
+  Write-Output 'NOWORD'; exit 0
+}
+$word.Visible = $false
+$word.DisplayAlerts = 0
+$doc = $null
+try {
+  $doc = $word.Documents.Open($src, [ref]$false, [ref]$true)
+  $doc.SaveAs2($out, 17)
+  Write-Output 'OK'
+} catch {
+  Write-Output ('FAIL:' + $_.Exception.Message)
+} finally {
+  if ($doc -ne $null) { try { $doc.Close([ref]$false) } catch {} }
+  # Only shut Word down if it has nothing of the author's left open.
+  try { if ($word.Documents.Count -eq 0) { $word.Quit() } } catch {}
+}
+"#;
+
+    let mut command = Command::new("powershell");
+    command
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env("MCG_PDF_SOURCE", &source)
+        .env("MCG_PDF_TARGET", &target)
+        .stdin(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = command
+        .output()
+        .map_err(|_| "Windows could not start Word to make the page-exact copy.".to_string())?;
+    let said = String::from_utf8_lossy(&output.stdout);
+    if said.contains("NOWORD") {
+        return Err(
+            "Microsoft Word is not installed on this computer, so the page-exact copy could not \
+             be made. Nothing was changed."
+                .to_string(),
+        );
+    }
+    if !said.contains("OK") {
+        let detail = said
+            .lines()
+            .find_map(|line| line.strip_prefix("FAIL:"))
+            .unwrap_or("Word could not save it.")
+            .trim()
+            .to_string();
+        return Err(format!(
+            "Word could not make the page-exact copy: {detail} Nothing was changed."
+        ));
+    }
+    if !target.is_file() {
+        return Err("Word reported success but no page-exact copy appeared.".to_string());
+    }
+    // The full path, because the next step hands this straight to the
+    // uploader. The reader works out its own relative path from the chapter.
+    Ok(target.to_string_lossy().to_string())
+}
+
 /// Word documents sitting in 01 Originals (dropped in by hand or synced later).
 /// They never appear in the text manifest, so the shelf asks for them here.
 #[tauri::command]

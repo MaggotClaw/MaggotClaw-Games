@@ -7,10 +7,16 @@
 
 import { compareVersions } from "./projectDocs";
 
-// The app's GitHub home. Releases published here (tag = version, with the
-// …-setup.exe attached) are what "Check for updates" finds. It can still be
-// overridden at runtime from Settings (stored per-machine) without a rebuild.
-export const DEFAULT_UPDATE_REPO = "MaggotClaw/MaggotClaw-Games";
+// GitHub is off by default.
+//
+// It used to be the fallback, with the repository named here, which quietly
+// made every install — the author's and every reader's — depend on that
+// repository staying public. Making it private would have turned Check For
+// Updates into a 404 for everybody with nothing on screen to explain why.
+// Dropbox is the author's real distribution channel, so it is the only one
+// configured out of the box. A repository can still be set in Settings, and
+// then it works exactly as before.
+export const DEFAULT_UPDATE_REPO = "";
 
 export function getUpdateRepo(): string {
   try {
@@ -38,6 +44,17 @@ export function isValidRepo(repo: string): boolean {
 
 const MANIFEST_KEY = "mcg-update-manifest-url";
 
+// The author's published update file. This address never changes — Dropbox
+// keeps the same share link while the file behind it is replaced — so it is
+// the built-in default rather than something typed into every machine. A
+// reader's Messaging Key can still carry a different one, and Settings still
+// overrides both.
+//
+// This is a read-only share link to a file naming the current version and its
+// installer. It carries nothing private.
+export const DEFAULT_UPDATE_MANIFEST_URL =
+  "https://www.dropbox.com/scl/fi/yu7oh90wpbksmzpiwcy1l/latest-version.json?rlkey=gfm3j5q50mxajq9ceyhx45v84&dl=1";
+
 export interface UpdateManifest {
   version: string;
   installerUrl: string;
@@ -45,9 +62,16 @@ export interface UpdateManifest {
 }
 
 export function getUpdateManifestUrl(): string {
-  try { return (localStorage.getItem(MANIFEST_KEY) || "").trim(); } catch { return ""; }
+  try {
+    return (localStorage.getItem(MANIFEST_KEY) || DEFAULT_UPDATE_MANIFEST_URL).trim();
+  } catch {
+    return DEFAULT_UPDATE_MANIFEST_URL;
+  }
 }
 
+// Clearing the box puts the built-in address back rather than switching update
+// checks off — an app that silently stops looking for updates is worse than
+// one that looks in the standard place.
 export function setUpdateManifestUrl(url: string): void {
   try {
     if (url.trim()) localStorage.setItem(MANIFEST_KEY, url.trim());
@@ -84,7 +108,11 @@ export interface UpdateInfo {
 }
 
 export type UpdateResult =
-  | { state: "current"; current: string }
+  // `downloadUrl` is carried even when nothing is new: it is the address the
+  // author sends people so they can install the app in the first place, and it
+  // used to come from the GitHub release page, which no longer exists for a
+  // private repository.
+  | { state: "current"; current: string; downloadUrl?: string }
   | { state: "available"; info: UpdateInfo }
   | { state: "unconfigured" }
   | { state: "error"; message: string };
@@ -135,7 +163,9 @@ export async function checkForUpdates(current: string): Promise<UpdateResult> {
           page: manifest.installerUrl,
           notes: manifest.notes ?? ""
         };
-        return isNewer(info.version, current) ? { state: "available", info } : { state: "current", current };
+        return isNewer(info.version, current)
+          ? { state: "available", info }
+          : { state: "current", current, downloadUrl: manifest.installerUrl };
       }
       firstProblem = "The update file could not be read.";
     } catch (error) {

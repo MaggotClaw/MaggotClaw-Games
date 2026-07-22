@@ -121,7 +121,7 @@ export function latestProgressReports(): Array<{ author: string; text: string; a
     .sort((a, b) => b.at.localeCompare(a.at));
 }
 
-export function ChatScreen({ role, name, onBack, onOpenDiscord }: { role: ProjectRole; name: string; onBack: () => void; onOpenDiscord?: () => void }) {
+export function ChatScreen({ role, name, onBack, onProfile, onOpenDiscord }: { role: ProjectRole; name: string; onBack: () => void; onProfile: () => void; onOpenDiscord?: () => void }) {
   const rooms = useMemo(() => visibleRooms(role), [role]);
   const isOwner = canPerform(role, "manage");
   const [activeKey, setActiveKey] = useState(rooms[0] ? `room:${rooms[0].id}` : "");
@@ -257,12 +257,16 @@ export function ChatScreen({ role, name, onBack, onOpenDiscord }: { role: Projec
   const activeTitle = activeRoom ? `#${activeRoom.name}` : activeDm === "maggotclaw" ? "MaggotClaw" : (dmTargets.find((c) => c.name.toLowerCase() === activeDm)?.name ?? activeDm ?? "");
 
   return <main className="app-shell chat-shell">
+    {/* The top row is Back, the screen name, and who you are — the same three
+        things on every page. Read Highlights is a tool for this screen, so it
+        belongs under the line with the rest of the work, not wedged into the
+        header where it pushed the name chip out of its corner. */}
     <header className="topbar">
       <button className="text-button" onClick={onBack}>← Back</button>
       <span className="eyebrow">Messages</span>
-      <ReadSelectionButton />
-      <span className="who-chip">{name} · {roleLabel(role)}</span>
+      <button className="who-chip" onClick={onProfile} title="Your profile">{name} · {roleLabel(role)}</button>
     </header>
+    <div className="chat-tools"><ReadSelectionButton /></div>
 
     <section className="chat-body">
       <aside className="chat-rooms">

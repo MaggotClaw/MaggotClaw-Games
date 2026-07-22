@@ -3,7 +3,6 @@ import { BrowserSpeechPlayer } from "./speech";
 import { openContentWindow } from "./App";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { compareVersions, parseDoc, type ParsedDoc, type ProjectDocument } from "./projectDocs";
-import { describeDoc, resolveQuickOpen } from "./quickOpen";
 import { brainHeadline, parseRegistry, type RegistryEntity, type StoryBrain } from "./storyBrain";
 
 interface SearchHit {
@@ -15,7 +14,9 @@ interface SearchHit {
 type GroupMode = "chapter" | "type" | "folder";
 type View = "files" | "chapters" | "codex";
 
-const TYPE_ORDER = ["Master Codex", "Codex", "Blueprint", "Development", "Draft", "Reader Copy", "Other"];
+// Working order through a chapter. The old labels are kept alongside the new
+// ones so a file not yet renamed still sorts into its right place.
+const TYPE_ORDER = ["Master Codex", "Codex", "Blueprint", "Chapter Draft", "Development", "Draft Segment", "Draft", "Reader Copy", "Other"];
 
 function groupKey(parsed: ParsedDoc, mode: GroupMode): string {
   if (mode === "type") return parsed.typeLabel;
@@ -43,16 +44,7 @@ function wordCount(text: string): number {
   return trimmed ? trimmed.split(/\s+/).length : 0;
 }
 
-// Short label for a quick-open alternative chip.
-function chipLabel(d: ParsedDoc): string {
-  if (d.chapter != null) {
-    if (d.typeCode === "P") return `Draft ${d.draftPart ?? ""}`.trim();
-    return d.typeLabel;
-  }
-  return d.title.length > 28 ? `${d.title.slice(0, 27)}…` : d.title;
-}
-
-interface ChapterRow { chapter: number; title: string; A?: ParsedDoc; B?: ParsedDoc; R?: ParsedDoc; P: ParsedDoc[]; }
+interface ChapterRow { chapter: number; title: string; B?: ParsedDoc; D?: ParsedDoc; R?: ParsedDoc; P: ParsedDoc[]; }
 
 export function ProjectExplorer({ onBack }: { onBack: () => void }) {
   const [docs, setDocs] = useState<ParsedDoc[]>([]);
@@ -67,9 +59,6 @@ export function ProjectExplorer({ onBack }: { onBack: () => void }) {
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [searchBusy, setSearchBusy] = useState(false);
   const [error, setError] = useState("");
-  const [command, setCommand] = useState("");
-  const [quick, setQuick] = useState<{ interpretation: string; candidates: ParsedDoc[]; miss: boolean } | null>(null);
-  const commandRef = useRef<HTMLInputElement>(null);
   const [brain, setBrain] = useState<StoryBrain | null>(null);
   const [brainNote, setBrainNote] = useState("");
   const [brainFilter, setBrainFilter] = useState("");
@@ -117,8 +106,8 @@ export function ProjectExplorer({ onBack }: { onBack: () => void }) {
       if (parsed.chapter == null) continue;
       if (!map.has(parsed.chapter)) map.set(parsed.chapter, { chapter: parsed.chapter, title: `Chapter ${parsed.chapter}`, P: [] });
       const row = map.get(parsed.chapter)!;
-      if (parsed.typeCode === "A") { row.A = parsed; row.title = parsed.title; }
-      else if (parsed.typeCode === "B") row.B = parsed;
+      if (parsed.typeCode === "B") { row.B = parsed; row.title = parsed.title; }
+      else if (parsed.typeCode === "D") row.D = parsed;
       else if (parsed.typeCode === "R") { row.R = parsed; if (row.title.startsWith("Chapter")) row.title = parsed.title; }
       else if (parsed.typeCode === "P") row.P.push(parsed);
     }
@@ -218,32 +207,10 @@ export function ProjectExplorer({ onBack }: { onBack: () => void }) {
     }
   }
 
-  // "Just say it" — resolve a natural phrase to one file and open it instantly.
-  function runCommand(phrase?: string) {
-    const value = (phrase ?? command).trim();
-    if (phrase !== undefined) setCommand(phrase);
-    if (!value) { setQuick(null); return; }
-    const result = resolveQuickOpen(value, downloaded);
-    if (result.best) {
-      void openDoc(result.best);
-      setQuick({ interpretation: result.interpretation, candidates: result.candidates, miss: false });
-    } else {
-      setQuick({ interpretation: "", candidates: [], miss: true });
-    }
-  }
-
-  // Ctrl/Cmd+K jumps straight to the command bar, wherever you are.
-  useEffect(() => {
-    function onKey(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        commandRef.current?.focus();
-        commandRef.current?.select();
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  // The "say what to open" bar is gone: it read typed phrases, not speech, and
+  // that was never what was wanted. `quickOpen.ts` is deliberately kept — it is
+  // the part that turns a phrase into a file, which is what an AI version would
+  // stand on.
 
   const docFor = (relative: string) => docs.find((parsed) => parsed.doc.localRelativePath === relative);
 
@@ -254,44 +221,16 @@ export function ProjectExplorer({ onBack }: { onBack: () => void }) {
   return <main className="app-shell explorer-shell">
     <header className="topbar">
       <button className="text-button" onClick={onBack}>← Back</button>
-      <span className="eyebrow">PROJECT FILES</span>
-      <span>{downloaded.length} files{pending.length ? ` · ${pending.length} pending` : ""}</span>
+      <span className="eyebrow">Project Files</span>
+      <span />
     </header>
-
-    <div className="quick-open">
-      <span className="quick-open-mark" aria-hidden="true">▸</span>
-      <input
-        ref={commandRef}
-        value={command}
-        placeholder="Say what to open — “Silas”, “chapter 2”, “ch 2 reader”, “master codex”  (Ctrl+K)"
-        onChange={(event) => setCommand(event.target.value)}
-        onKeyDown={(event) => { if (event.key === "Enter") runCommand(); }}
-      />
-      <button className="primary" onClick={() => runCommand()}>Open</button>
-      {quick && (
-        <div className="quick-open-result">
-          {quick.miss
-            ? <span className="quick-miss">Couldn't place that. Try a chapter number, a stage, or a name.</span>
-            : <>
-                <span className="quick-open-label">Opened <strong>{quick.interpretation}</strong></span>
-                {quick.candidates.length > 1 && <span className="quick-open-also">also:</span>}
-                {quick.candidates.slice(0, 6).map((c) => (
-                  <button
-                    key={c.doc.localRelativePath}
-                    className={`quick-chip type-${c.typeCode}` + (selected?.doc.localRelativePath === c.doc.localRelativePath ? " current" : "")}
-                    title={c.fileName}
-                    onClick={() => { void openDoc(c); setQuick((q) => q ? { ...q, interpretation: describeDoc(c) } : q); }}
-                  >{chipLabel(c)}</button>
-                ))}
-              </>}
-        </div>
-      )}
-    </div>
 
     <nav className="explorer-tabs">
       <button className={view === "files" ? "active" : ""} onClick={() => setView("files")}>Files</button>
       <button className={view === "chapters" ? "active" : ""} onClick={() => setView("chapters")}>Chapters</button>
       <button className={view === "codex" ? "active" : ""} onClick={() => setView("codex")}>Codex</button>
+      {/* The count belongs beside the thing it counts, not up in the title. */}
+      <span className="file-count">{downloaded.length} files{pending.length ? ` · ${pending.length} pending` : ""}</span>
       <div className="ask-anything">
         <input
           value={searchQuery}
@@ -346,13 +285,28 @@ export function ProjectExplorer({ onBack }: { onBack: () => void }) {
         </>}
 
         {hits === null && view === "chapters" && <div className="status-board">
-          <p className="board-hint">Every chapter needs Blueprint · Development · Draft · Reader Copy. Click a filled box to open it.</p>
+          <p className="board-hint">Every chapter needs Blueprint · Chapter Draft · Segments · Reader Copy. Click a filled box to open it.</p>
           {chapters.map((row) => <div key={row.chapter} className="status-row">
             <div className="status-name"><strong>Ch {String(row.chapter).padStart(2, "0")}</strong><small>{row.title.startsWith("Chapter") ? "Untitled" : row.title}</small></div>
             <div className="status-cells">
-              {statusCell("Blueprint", row.A)}
-              {statusCell("Development", row.B)}
-              {row.P.length ? <button className="status-cell has" onClick={() => void openDoc(row.P[0])} title="Open first draft part">Draft<em>{row.P.length} part{row.P.length === 1 ? "" : "s"}</em></button> : <span className="status-cell missing">Draft<em>—</em></span>}
+              {statusCell("Blueprint", row.B)}
+              {statusCell("Chapter Draft", row.D)}
+              {/* One chip per segment rather than one button for all of them:
+                  a chapter with fourteen had thirteen of them unreachable. The
+                  chips shrink as the count grows so the row never does. */}
+              {row.P.length
+                ? <div className={`status-cell segments ${row.P.length > 8 ? "many" : ""}`}>
+                    <span className="segments-label">Segments</span>
+                    <span className="segment-chips">
+                      {row.P.map((part) => <button
+                        key={part.doc.localRelativePath}
+                        className="segment-chip"
+                        title={`Open ${part.fileName}`}
+                        onClick={() => void openDoc(part)}
+                      >{part.draftPart ?? "?"}</button>)}
+                    </span>
+                  </div>
+                : <span className="status-cell missing">Segments<em>—</em></span>}
               {statusCell("Reader Copy", row.R)}
             </div>
           </div>)}
